@@ -2,7 +2,7 @@
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Grand Strategy - Engine V4 (Detailed Map)</title>
     <style>
         :root {
@@ -341,6 +341,41 @@
         .region.dimmed {
             fill-opacity: 0.2 !important; pointer-events: none;
         }
+
+    /* --- АДАПТАЦИЯ ДЛЯ МОБИЛЬНЫХ ТЕЛЕФОНОВ --- */
+    @media (max-width: 768px) {
+        /* Верхняя панель: элементы переносятся на новую строку, если не влезают */
+        #top-bar {
+            flex-wrap: wrap;
+            padding: 5px 10px;
+            font-size: 12px; /* Уменьшаем шрифт на телефоне */
+            gap: 8px;
+            justify-content: center;
+        }
+        
+        /* Блоки с казной, датой и влиянием */
+        .stat-group {
+            flex: 1 1 30%;
+            justify-content: center;
+            text-align: center;
+        }
+
+        /* Уменьшаем кнопки, чтобы они не занимали пол-экрана */
+        button {
+            font-size: 12px;
+            padding: 6px 12px;
+        }
+
+        /* Если есть боковая панель, делаем ее на весь экран телефона */
+        #side-panel {
+            width: 100% !important;
+            max-width: none;
+            height: 50vh; /* Занимает половину экрана снизу */
+            bottom: 0;
+            top: auto;
+            border-radius: 15px 15px 0 0; /* Закругляем только верхние углы */
+        }
+    }
     </style>
 </head>
 <body>
