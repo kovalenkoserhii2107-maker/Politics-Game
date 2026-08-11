@@ -260,6 +260,7 @@ class MapEngine {
     }
 
     initEvents() {
+        // --- СОБЫТИЯ МЫШИ (ПК) ---
         this.container.addEventListener('wheel', (e) => {
             e.preventDefault();
             const oldZoomLevel = this.isRegionalZoom;
@@ -269,7 +270,6 @@ class MapEngine {
             const oldScale = this.scale;
             
             this.scale += delta * zoomSpeed * this.scale;
-            // Увеличили пределы скролла для новых координат (от 2x до 80x)
             this.scale = Math.min(Math.max(2, this.scale), 80); 
             
             const mouseX = e.clientX, mouseY = e.clientY;
@@ -301,6 +301,64 @@ class MapEngine {
 
         this.container.addEventListener('mouseup', () => this.isDragging = false);
         this.container.addEventListener('mouseleave', () => this.isDragging = false);
+
+        // --- СОБЫТИЯ КАСАНИЙ (МОБИЛЬНЫЕ ТЕЛЕФОНЫ / ТАЧСКРИНЫ) ---
+        let touchStartDist = 0;
+        let initialScale = this.scale;
+
+        this.container.addEventListener('touchstart', (e) => {
+            this.wasDragging = false;
+            if (e.touches.length === 1) {
+                // Перемещение одним пальцем
+                this.isDragging = true;
+                this.startX = e.touches[0].clientX - this.translateX;
+                this.startY = e.touches[0].clientY - this.translateY;
+            } else if (e.touches.length === 2) {
+                // Зум двумя пальцами (щипок)
+                this.isDragging = false;
+                touchStartDist = Math.hypot(
+                    e.touches[0].clientX - e.touches[1].clientX,
+                    e.touches[0].clientY - e.touches[1].clientY
+                );
+                initialScale = this.scale;
+            }
+        }, { passive: false });
+
+        this.container.addEventListener('touchmove', (e) => {
+            if (e.touches.length === 1 && this.isDragging) {
+                // Двигаем карту одним пальцем
+                this.wasDragging = true;
+                e.preventDefault(); // Запрещаем стандартный скролл страницы телефона
+                this.translateX = e.touches[0].clientX - this.startX;
+                this.translateY = e.touches[0].clientY - this.startY;
+                this.updateTransform();
+            } else if (e.touches.length === 2) {
+                // Меняем масштаб при щипке двумя пальцами
+                e.preventDefault();
+                const oldZoomLevel = this.isRegionalZoom;
+                const currentDist = Math.hypot(
+                    e.touches[0].clientX - e.touches[1].clientX,
+                    e.touches[0].clientY - e.touches[1].clientY
+                );
+                
+                if (touchStartDist > 10) {
+                    const factor = currentDist / touchStartDist;
+                    this.scale = Math.min(Math.max(2, initialScale * factor), 80);
+                    this.updateTransform();
+
+                    if (oldZoomLevel !== this.isRegionalZoom) {
+                        this.updateLOD();
+                        document.dispatchEvent(new CustomEvent('zoomLevelChanged', { detail: { isRegional: this.isRegionalZoom }}));
+                    }
+                }
+            }
+        }, { passive: false });
+
+        this.container.addEventListener('touchend', (e) => {
+            if (e.touches.length < 1) {
+                this.isDragging = false;
+            }
+        });
     }
 
     drawCities() {

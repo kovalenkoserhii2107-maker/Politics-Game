@@ -366,14 +366,21 @@
             padding: 6px 12px;
         }
 
-        /* Если есть боковая панель, делаем ее на весь экран телефона */
+        /* Если есть боковая панель, делаем ее на весь экран телефона и заставляем выезжать СНИЗУ */
         #side-panel {
             width: 100% !important;
             max-width: none;
-            height: 50vh; /* Занимает половину экрана снизу */
-            bottom: 0;
-            top: auto;
-            border-radius: 15px 15px 0 0; /* Закругляем только верхние углы */
+            height: 50vh !important; /* Высота - половина экрана */
+            left: 0 !important;      /* Фиксируем по горизонтали */
+            top: auto !important;    /* Отменяем привязку к верху */
+            bottom: -60vh !important;/* Прячем панель ВНИЗ за пределы экрана */
+            border-radius: 15px 15px 0 0;
+            transition: bottom 0.3s cubic-bezier(0.4, 0, 0.2, 1) !important; /* Анимируем выезд снизу */
+        }
+
+        #side-panel.active {
+            bottom: 0 !important;    /* При клике панель поднимается наверх */
+            left: 0 !important;
         }
     }
     </style>
