@@ -303,8 +303,7 @@ class MapEngine {
         this.container.addEventListener('mouseleave', () => this.isDragging = false);
 
         // --- СОБЫТИЯ КАСАНИЙ (МОБИЛЬНЫЕ ТЕЛЕФОНЫ / ТАЧСКРИНЫ) ---
-        let touchStartDist = 0;
-        let initialScale = this.scale;
+        let initialPinchDist = null;
 
         this.container.addEventListener('touchstart', (e) => {
             this.wasDragging = false;
@@ -314,36 +313,50 @@ class MapEngine {
                 this.startX = e.touches[0].clientX - this.translateX;
                 this.startY = e.touches[0].clientY - this.translateY;
             } else if (e.touches.length === 2) {
-                // Зум двумя пальцами (щипок)
+                // Начало зума (щипок)
                 this.isDragging = false;
-                touchStartDist = Math.hypot(
+                initialPinchDist = Math.hypot(
                     e.touches[0].clientX - e.touches[1].clientX,
                     e.touches[0].clientY - e.touches[1].clientY
                 );
-                initialScale = this.scale;
             }
         }, { passive: false });
 
         this.container.addEventListener('touchmove', (e) => {
+            e.preventDefault(); // Блокируем скролл телефона
+
             if (e.touches.length === 1 && this.isDragging) {
-                // Двигаем карту одним пальцем
+                // Двигаем карту
                 this.wasDragging = true;
-                e.preventDefault(); // Запрещаем стандартный скролл страницы телефона
                 this.translateX = e.touches[0].clientX - this.startX;
                 this.translateY = e.touches[0].clientY - this.startY;
                 this.updateTransform();
             } else if (e.touches.length === 2) {
-                // Меняем масштаб при щипке двумя пальцами
-                e.preventDefault();
-                const oldZoomLevel = this.isRegionalZoom;
+                // Зум
                 const currentDist = Math.hypot(
                     e.touches[0].clientX - e.touches[1].clientX,
                     e.touches[0].clientY - e.touches[1].clientY
                 );
-                
-                if (touchStartDist > 10) {
-                    const factor = currentDist / touchStartDist;
-                    this.scale = Math.min(Math.max(2, initialScale * factor), 80);
+
+                if (initialPinchDist) {
+                    const oldZoomLevel = this.isRegionalZoom;
+                    const oldScale = this.scale;
+                    
+                    // Вычисляем разницу между пальцами
+                    const delta = currentDist - initialPinchDist;
+                    
+                    // Скорость зума на телефоне (0.015 - мягкий зум)
+                    this.scale += delta * 0.015 * this.scale;
+                    this.scale = Math.min(Math.max(2, this.scale), 80);
+
+                    // Находим центр между двумя пальцами
+                    const pinchX = (e.touches[0].clientX + e.touches[1].clientX) / 2;
+                    const pinchY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
+
+                    // Зуммируем ровно в ту точку, где находятся пальцы
+                    this.translateX = pinchX - (pinchX - this.translateX) * (this.scale / oldScale);
+                    this.translateY = pinchY - (pinchY - this.translateY) * (this.scale / oldScale);
+
                     this.updateTransform();
 
                     if (oldZoomLevel !== this.isRegionalZoom) {
@@ -351,12 +364,20 @@ class MapEngine {
                         document.dispatchEvent(new CustomEvent('zoomLevelChanged', { detail: { isRegional: this.isRegionalZoom }}));
                     }
                 }
+                initialPinchDist = currentDist; // Обновляем для следующего кадра
             }
         }, { passive: false });
 
         this.container.addEventListener('touchend', (e) => {
-            if (e.touches.length < 1) {
+            // Если убрали один палец из двух - перехватываем управление
+            if (e.touches.length === 1) {
+                this.isDragging = true;
+                this.startX = e.touches[0].clientX - this.translateX;
+                this.startY = e.touches[0].clientY - this.translateY;
+                initialPinchDist = null;
+            } else if (e.touches.length === 0) {
                 this.isDragging = false;
+                initialPinchDist = null;
             }
         });
     }
