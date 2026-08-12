@@ -432,6 +432,16 @@
 	            left: 0 !important;
 	        }
 	    }
+		
+		/* --- МАРКЕРЫ АРМИЙ НА КАРТЕ --- */
+        .army-marker {
+            font-family: 'Segoe UI', sans-serif;
+            pointer-events: none;
+            transition: opacity 0.3s;
+        }
+        /* Прячем значки войск при глобальном виде (отдалении) */
+        #world-map.global-view .army-marker { opacity: 0; }
+        #world-map.regional-view .army-marker { opacity: 1; }
     </style>
 </head>
 <body>
