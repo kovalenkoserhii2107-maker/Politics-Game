@@ -285,35 +285,15 @@
         
         .gov-summary { margin-top: 20px; font-size: 1.2em; font-weight: bold; text-align: center; padding: 15px; background: rgba(0,0,0,0.5); border-radius: 8px; }
         
-	/* --- РЕЖИМ 1: ГЛОБАЛЬНЫЙ ВИД (Отдаление) --- */
+		/* --- РЕЖИМ 1: ГЛОБАЛЬНЫЙ ВИД (Отдаление) --- */
         #world-map.global-view .region {
             stroke: transparent; 
-        }
-
-        #world-map.global-view .region.country-hover {
-            fill-opacity: 0.7; /* ЗАМЕНИЛИ filter на fill-opacity */
-            stroke: rgba(0, 0, 0, 0.3);
-            stroke-width: 0.02;
-            cursor: pointer;
-        }
-        
-        #world-map.global-view .region:hover {
-            fill-opacity: 0.7; /* ЗАМЕНИЛИ filter на fill-opacity */
-            stroke: rgba(0, 0, 0, 0.3);
-            stroke-width: 0.02;
         }
 
         /* --- РЕЖИМ 2: РЕГИОНАЛЬНЫЙ ВИД (Приближение) --- */
         #world-map.regional-view .region {
             stroke: #000;          
             stroke-width: 0.03;
-        }
-
-        #world-map.regional-view .region:hover {
-            fill-opacity: 0.7; /* ЗАМЕНИЛИ filter на fill-opacity */
-            stroke: #ffffff; 
-            stroke-width: 0.08;
-            cursor: pointer;
         }
 
         /* --- Текстовые метки стран --- */
@@ -349,7 +329,7 @@
         #world-map.regional-view .city-label, 
         #world-map.regional-view .capital-label { opacity: 1; }
 	
-	/* --- РЕЖИМ ВЫБОРА ЦЕЛИ --- */
+		/* --- РЕЖИМ ВЫБОРА ЦЕЛИ --- */
         .region.move-target {
             stroke: #4ade80 !important; stroke-width: 0.1 !important; fill-opacity: 0.8 !important; cursor: crosshair !important;
         }
@@ -363,20 +343,35 @@
             fill-opacity: 0.2 !important; pointer-events: none;
         }
 
-		/* --- ИСПРАВЛЕННОЕ ВЫДЕЛЕНИЕ (Тонкие линии, защита от сброса при наведении) --- */
-        #world-map .region.selected-region,
-        #world-map .region.selected-region:hover {
+		/* --- УМНЫЙ ХОВЕР (ТОЛЬКО ДЛЯ ПК, защита от фантомных нажатий на смартфонах) --- */
+        @media (hover: hover) {
+            #world-map.global-view .region:not(.selected-country):hover,
+            #world-map.global-view .region.country-hover:not(.selected-country) {
+                fill-opacity: 0.8 !important;
+                stroke: rgba(0, 0, 0, 0.3) !important;
+                stroke-width: 0.02 !important;
+                cursor: pointer;
+            }
+            #world-map.regional-view .region:not(.selected-region):hover {
+                fill-opacity: 0.8 !important;
+                stroke: #ffffff !important;
+                stroke-width: 0.08 !important;
+                cursor: pointer;
+            }
+        }
+
+        /* --- ЖЕЛЕЗОБЕТОННОЕ ВЫДЕЛЕНИЕ (Никогда не сбрасывается и не просвечивается) --- */
+        #world-map .region.selected-region {
             stroke: #ffffff !important;
-            stroke-width: 0.15 !important;
-            fill-opacity: 0.8 !important;
-            filter: brightness(1.4) drop-shadow(0 0 2px rgba(255,255,255,0.3)) !important;
+            stroke-width: 0.3 !important;       /* Белая граница */
+            fill-opacity: 1 !important;         /* НИКАКОЙ ПРОЗРАЧНОСТИ */
+            filter: brightness(1.4) !important; /* Яркая подсветка */
         }
         
-        #world-map .region.selected-country,
-        #world-map .region.selected-country:hover {
+        #world-map .region.selected-country {
             stroke: #ffffff !important;
-            stroke-width: 0.08 !important;
-            fill-opacity: 0.8 !important;
+            stroke-width: 0.1 !important;       /* Тонкая граница внутри страны */
+            fill-opacity: 1 !important;         /* НИКАКОЙ ПРОЗРАЧНОСТИ */
             filter: brightness(1.2) !important;
         }
 
@@ -389,46 +384,46 @@
             z-index: 1000;
         }
 
-    /* --- АДАПТАЦИЯ ДЛЯ МОБИЛЬНЫХ ТЕЛЕФОНОВ --- */
-    @media (max-width: 768px) {
-        /* Верхняя панель: элементы переносятся на новую строку, если не влезают */
-        #top-bar {
-            flex-wrap: wrap;
-            padding: 5px 10px;
-            font-size: 12px; /* Уменьшаем шрифт на телефоне */
-            gap: 8px;
-            justify-content: center;
-        }
-        
-        /* Блоки с казной, датой и влиянием */
-        .stat-group {
-            flex: 1 1 30%;
-            justify-content: center;
-            text-align: center;
-        }
-
-        /* Уменьшаем кнопки, чтобы они не занимали пол-экрана */
-        button {
-            font-size: 12px;
-            padding: 6px 12px;
-        }
-
-        /* Исправленная панель - жестко фиксируем внизу */
-        #side-panel {
-            width: 100% !important;
-            max-width: none !important;
-            height: 50vh !important;
-            left: 0 !important;
-            top: auto !important;
-            bottom: -60vh !important; /* Прячем вниз за экран */
-            border-radius: 15px 15px 0 0;
-            transition: bottom 0.3s ease !important;
-        }
-        #side-panel.active {
-            bottom: 0 !important; /* Выезжает снизу вверх */
-            left: 0 !important;
-        }
-    }
+	    /* --- АДАПТАЦИЯ ДЛЯ МОБИЛЬНЫХ ТЕЛЕФОНОВ --- */
+	    @media (max-width: 768px) {
+	        /* Верхняя панель: элементы переносятся на новую строку, если не влезают */
+	        #top-bar {
+	            flex-wrap: wrap;
+	            padding: 5px 10px;
+	            font-size: 12px; /* Уменьшаем шрифт на телефоне */
+	            gap: 8px;
+	            justify-content: center;
+	        }
+	        
+	        /* Блоки с казной, датой и влиянием */
+	        .stat-group {
+	            flex: 1 1 30%;
+	            justify-content: center;
+	            text-align: center;
+	        }
+	
+	        /* Уменьшаем кнопки, чтобы они не занимали пол-экрана */
+	        button {
+	            font-size: 12px;
+	            padding: 6px 12px;
+	        }
+	
+	        /* Исправленная панель - жестко фиксируем внизу */
+	        #side-panel {
+	            width: 100% !important;
+	            max-width: none !important;
+	            height: 50vh !important;
+	            left: 0 !important;
+	            top: auto !important;
+	            bottom: -60vh !important; /* Прячем вниз за экран */
+	            border-radius: 15px 15px 0 0;
+	            transition: bottom 0.3s ease !important;
+	        }
+	        #side-panel.active {
+	            bottom: 0 !important; /* Выезжает снизу вверх */
+	            left: 0 !important;
+	        }
+	    }
     </style>
 </head>
 <body>
