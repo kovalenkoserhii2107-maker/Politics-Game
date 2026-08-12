@@ -99,22 +99,31 @@ class GameCore {
 
     // === НОВЫЙ МЕТОД: ВЫЧИСЛЯЕТ СВОБОДНЫЕ ВОЙСКА ===
     getAvailableArmy(regionId) {
-        const region = this.data.getRegion(regionId);
-        if (!region) return {};
-        let available = { ...region.army };
-        
-        ['movements', 'attacks'].forEach(type => {
-            this.data.orders[type].forEach(order => {
-                if (order.from === regionId) {
-                    Object.keys(order.forces).forEach(unitId => {
-                        if (available[unitId] !== undefined) {
-                            available[unitId] -= order.forces[unitId];
-                        }
-                    });
-                }
-            });
-        });
-        return available;
+        try {
+            const region = this.data.getRegion(regionId);
+            if (!region) return {};
+            let available = { ...(region.army || {}) };
+            
+            if (this.data.orders) {
+                ['movements', 'attacks'].forEach(type => {
+                    if (this.data.orders[type]) {
+                        this.data.orders[type].forEach(order => {
+                            if (order.from === regionId && order.forces) {
+                                Object.keys(order.forces).forEach(unitId => {
+                                    if (available[unitId] !== undefined) {
+                                        available[unitId] -= order.forces[unitId];
+                                    }
+                                });
+                            }
+                        });
+                    }
+                });
+            }
+            return available;
+        } catch(e) {
+            console.error("Ошибка расчета доступных войск:", e);
+            return {};
+        }
     }
     
     initMoveLogic() {
@@ -239,35 +248,38 @@ class GameCore {
     }
 
     updateActionButtonsVisibility(regionId) {
-        const region = this.data.getRegion(regionId);
-        if (!region) {
-            document.getElementById('recruit-btn').style.display = 'none';
-            document.getElementById('init-move-btn').style.display = 'none';
-            document.getElementById('init-attack-btn').style.display = 'none';
-            return;
-        }
+        try {
+            const region = this.data.getRegion(regionId);
+            if (!region) return;
 
-        document.getElementById('recruit-btn').style.display = (region.owner === this.data.playerCountry) ? 'block' : 'none';
+            // Безопасно ищем кнопки
+            const recruitBtn = document.getElementById('recruit-btn');
+            const moveBtn = document.getElementById('init-move-btn');
+            const attackBtn = document.getElementById('init-attack-btn');
 
-        if (region.owner !== this.data.playerCountry) {
-            document.getElementById('init-move-btn').style.display = 'none';
-            document.getElementById('init-attack-btn').style.display = 'none';
-            return;
-        }
+            if (recruitBtn) recruitBtn.style.display = (region.owner === this.data.playerCountry) ? 'block' : 'none';
 
-        const availableArmy = this.getAvailableArmy(regionId);
-        let hasTroops = Object.values(availableArmy).some(count => count > 0);
+            if (region.owner !== this.data.playerCountry) {
+                if (moveBtn) moveBtn.style.display = 'none';
+                if (attackBtn) attackBtn.style.display = 'none';
+                return;
+            }
 
-        // Прячем кнопки, если все войска уже отправлены в приказы
-        if (hasTroops) {
-            const moveTargets = this.data.getValidMoveTargets(regionId);
-            document.getElementById('init-move-btn').style.display = moveTargets.length > 0 ? 'block' : 'none';
-            
-            const attackTargets = this.data.getValidAttackTargets(regionId);
-            document.getElementById('init-attack-btn').style.display = attackTargets.length > 0 ? 'block' : 'none';
-        } else {
-            document.getElementById('init-move-btn').style.display = 'none';
-            document.getElementById('init-attack-btn').style.display = 'none';
+            const availableArmy = this.getAvailableArmy(regionId) || {};
+            let hasTroops = Object.values(availableArmy).some(count => count > 0);
+
+            if (hasTroops) {
+                const moveTargets = typeof this.data.getValidMoveTargets === 'function' ? this.data.getValidMoveTargets(regionId) : [];
+                if (moveBtn) moveBtn.style.display = (moveTargets && moveTargets.length > 0) ? 'block' : 'none';
+                
+                const attackTargets = typeof this.data.getValidAttackTargets === 'function' ? this.data.getValidAttackTargets(regionId) : [];
+                if (attackBtn) attackBtn.style.display = (attackTargets && attackTargets.length > 0) ? 'block' : 'none';
+            } else {
+                if (moveBtn) moveBtn.style.display = 'none';
+                if (attackBtn) attackBtn.style.display = 'none';
+            }
+        } catch(e) {
+            console.error("Ошибка при обновлении кнопок:", e);
         }
     }
 
@@ -340,7 +352,6 @@ class GameCore {
     handleMapClick(regionId) {
         if (this.armyActionState && this.armyActionState.active) {
             const state = this.armyActionState;
-            
             if (state.type === 'move') {
                 const validTargets = this.data.getValidMoveTargets(state.fromId);
                 if (validTargets.includes(regionId)) {
@@ -354,7 +365,6 @@ class GameCore {
                     this.ui.updateOrdersPanel(this.data.orders);
                 }
             }
-            
             this.armyActionState.active = false;
             this.map.disableTargetSelection();
             return; 
@@ -363,12 +373,14 @@ class GameCore {
         const region = this.data.getRegion(regionId);
         if (!region) return; 
         
+        // === КРИТИЧЕСКИЙ ФИКС: Защита от краша панели для своих территорий ===
+        if (!region.army) region.army = {};
+
         const country = this.data.getCountry(region.owner);
         if (!country) return;
 
         if (this.map.isRegionalZoom) {
-            this.map.selectRegion(regionId); // <--- ДОБАВЛЕНО ВЫДЕЛЕНИЕ
-
+            this.map.selectRegion(regionId);
             this.ui.showRegionInfo(region, country, this.data, this.data.playerCountry);
             
             const armyActionPanel = document.getElementById('army-action-panel');
@@ -380,8 +392,7 @@ class GameCore {
             this.updateActionButtonsVisibility(region.id);
 
         } else {
-            this.map.selectCountry(country.id); // <--- ДОБАВЛЕНО ВЫДЕЛЕНИЕ
-
+            this.map.selectCountry(country.id);
             const countryStats = this.data.getCountryStats(country.id);
             this.ui.showCountryInfo(country, countryStats, this.data);
         }
