@@ -21,17 +21,44 @@ class GameCore {
         document.addEventListener('click', (e) => {
             const btn = e.target.closest('.cancel-order-btn');
             if (btn) {
+                // ВАЖНО: Останавливаем клик, чтобы он 100% не улетел на карту под панелью
+                e.stopPropagation(); 
+                
                 const index = parseInt(btn.dataset.orderIndex);
-                const type = btn.dataset.type; // 'recruitment', 'movements' или 'attacks'
+                const type = btn.dataset.type; 
                 
                 if (!isNaN(index) && type && this.data.orders[type]) {
-                    this.data.orders[type].splice(index, 1); // Удаляем приказ из плана
-                    this.ui.updateOrdersPanel(this.data.orders); // Перерисовываем журнал
+                    // 1. Удаляем приказ из плана
+                    this.data.orders[type].splice(index, 1); 
                     
-                    // Обновляем доступные кнопки в открытой панели
+                    // 2. Обновляем окошко (если список станет пустым - оно автоматически закроется)
+                    this.ui.updateOrdersPanel(this.data.orders); 
+                    
+                    // 3. Моментально возвращаем войска в доступный резерв
                     const actionPanel = document.getElementById('army-action-panel');
-                    if (actionPanel && actionPanel.dataset.regionId && actionPanel.style.display !== 'block') {
-                        this.updateActionButtonsVisibility(actionPanel.dataset.regionId);
+                    if (actionPanel && actionPanel.dataset.regionId) {
+                        const regionId = actionPanel.dataset.regionId;
+                        this.updateActionButtonsVisibility(regionId);
+                        
+                        // МАГИЯ UX: Если меню ползунков войск открыто прямо сейчас, 
+                        // обновляем значения доступных войск на лету, не закрывая меню!
+                        if (actionPanel.style.display === 'block') {
+                            const availableArmy = this.getAvailableArmy(regionId);
+                            Object.keys(UnitsDB).forEach(unitId => {
+                                const count = availableArmy[unitId] || 0;
+                                const input = document.getElementById(`action-${unitId}-input`);
+                                const slider = document.getElementById(`action-${unitId}-slider`);
+                                if (input && slider) {
+                                    input.max = count;
+                                    slider.max = count;
+                                    const row = input.closest('.army-row');
+                                    if (row) {
+                                        const span = row.querySelector('span span');
+                                        if (span) span.innerText = `(Дост: ${count})`;
+                                    }
+                                }
+                            });
+                        }
                     }
                 }
             }
