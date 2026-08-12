@@ -2802,6 +2802,35 @@ class GameData {
     processOrders() {
         let resultsLogs = [];
 
+        // === 1. РАЗВЕДКА (Выполняется первой в начале хода) ===
+        if (this.orders.recon && this.orders.recon.length > 0) {
+            this.orders.recon.forEach(order => {
+                const region = this.getRegion(order.target);
+                if (region) {
+                    const roll = Math.random() * 100;
+                    if (roll <= order.prob) {
+                        // УСПЕХ
+                        let activeDate = new Date(this.currentDate);
+                        activeDate.setMonth(activeDate.getMonth() + 1); 
+                        region.reconActiveUntil = activeDate;
+                        
+                        resultsLogs.push({ 
+                            success: true, 
+                            message: `🕵️ Разведка: Шпионы успешно внедрились в ${region.name}. Данные о гарнизоне получены.` 
+                        });
+                    } else {
+                        // ПРОВАЛ
+                        resultsLogs.push({ 
+                            success: false, 
+                            message: `💥 Провал операции в ${region.name}. Шпионы были перехвачены контрразведкой.` 
+                        });
+                    }
+                }
+            });
+            this.orders.recon = []; // Очищаем очередь разведки
+        }
+
+        // === 2. РЕКРУТИНГ ===
         this.orders.recruitment.forEach(order => {
             const region = this.getRegion(order.regionId);
             if (region) {
@@ -2810,6 +2839,7 @@ class GameData {
             }
         });
 
+        // === 3. ПЕРЕМЕЩЕНИЕ ВОЙСК ===
         this.orders.movements.forEach(order => {
             const fromRegion = this.getRegion(order.from);
             const toRegion = this.getRegion(order.to);
@@ -2825,6 +2855,7 @@ class GameData {
             }
         });
 
+        // === 4. АТАКИ ===
         this.orders.attacks.forEach(order => {
             const fromRegion = this.getRegion(order.from);
             const targetRegion = this.getRegion(order.to);
@@ -2849,20 +2880,17 @@ class GameData {
                 powerDef += (targetRegion.army[unitId] || 0) * UnitsDB[unitId].baseDefense;
             });
 
-            // 1. Инициализируем переменные ДО того, как чит-код начнет их менять
             const requiredAdvantage = 1.2; 
             let success = powerAtt >= powerDef * requiredAdvantage;
             let defLossPct = powerAtt > 0 ? Math.min(1, (powerAtt * 0.2) / powerDef) : 0;
             let attLossPct = powerDef > 1 ? Math.min(1, (powerDef * 0.1) / powerAtt) : 0;
 
-            // 2. ВМЕШАТЕЛЬСТВО ЧИТ-КОДА
             if (this.cheatMode && fromRegion.owner === this.playerCountry) {
-                success = true;      // Гарантированная победа
-                attLossPct = 0;      // 0% потерь у нас
-                defLossPct = 1;      // Враг уничтожается на 100%
+                success = true;      
+                attLossPct = 0;      
+                defLossPct = 1;      
             }
 
-            // 3. Применяем потери
             let attLosses = {};
             let defLosses = {};
             let survivingAtt = {};
@@ -2902,31 +2930,6 @@ class GameData {
         this.orders.attacks = [];
 
         return resultsLogs;
-    }
-
-    processRecon() {
-        if (!this.orders.recon || this.orders.recon.length === 0) return;
-        
-        this.orders.recon.forEach(order => {
-            const region = this.getRegion(order.target);
-            if (!region) return;
-            
-            const roll = Math.random() * 100;
-            if (roll <= order.prob) {
-                // УСПЕХ: Открываем туман войны на 1 месяц вперед (или на 1 ход)
-                let activeDate = new Date(this.currentDate);
-                activeDate.setMonth(activeDate.getMonth() + 1); 
-                region.reconActiveUntil = activeDate;
-                
-                this.logJournal(`🕵️ Разведка: Шпионы успешно внедрились в ${region.name}. Данные о гарнизоне получены.`, 'success');
-            } else {
-                // ПРОВАЛ
-                this.logJournal(`💥 Провал операции в ${region.name}. Шпионы были перехвачены контрразведкой.`, 'danger');
-            }
-        });
-        
-        // Очищаем план разведки после выполнения
-        this.orders.recon = [];
     }
 
     distributeArmiesToBorders() {
