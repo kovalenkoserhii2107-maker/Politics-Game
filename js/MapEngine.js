@@ -291,18 +291,15 @@ class MapEngine {
         this.lastTouchTime = 0; 
 
         // === ГЛОБАЛЬНЫЙ ПЕРЕХВАТЧИК КЛИКОВ ===
-        // Если мы скроллили карту - жестко блокируем фантомный клик!
         this.svg.addEventListener('click', (e) => {
             if (this.wasDragging) {
                 e.stopPropagation();
                 e.preventDefault();
                 return;
-            } // <--- ВОТ ЭТУ СКОБКУ НУЖНО ВЕРНУТЬ
+            } 
 
-            // Если клик был прямо по SVG (а не по <path> региона) - сбрасываем выделение
             if (e.target.tagName.toLowerCase() === 'svg') {
                 this.clearSelection();
-                // Отправляем событие, чтобы UI закрыл панель
                 document.dispatchEvent(new Event('panelClosed'));
             }
         }, false);
@@ -315,7 +312,9 @@ class MapEngine {
             
             const delta = e.deltaY < 0 ? 1 : -1; 
             this.scale += delta * 0.15 * this.scale;
-            this.scale = Math.min(Math.max(2, this.scale), 80); 
+            
+            // УВЕЛИЧИЛИ ЛИМИТ ЗУМА С 80 ДО 200
+            this.scale = Math.min(Math.max(2, this.scale), 200); 
             
             const mouseX = e.clientX, mouseY = e.clientY;
             this.translateX = mouseX - (mouseX - this.translateX) * (this.scale / oldScale);
@@ -341,23 +340,17 @@ class MapEngine {
 
         this.container.addEventListener('mousemove', (e) => {
             if (!this.isDragging) return;
-            
-            // Считаем это перетаскиванием, только если мышь сдвинулась больше чем на 3 пикселя
             const dx = e.clientX - this.mouseStartX;
             const dy = e.clientY - this.mouseStartY;
             if (Math.abs(dx) > 3 || Math.abs(dy) > 3) {
                 this.wasDragging = true;
             }
-
             this.translateX = e.clientX - this.startX;
             this.translateY = e.clientY - this.startY;
             this.updateTransform();
         });
 
-        this.container.addEventListener('mouseup', () => {
-            this.isDragging = false;
-        });
-        
+        this.container.addEventListener('mouseup', () => this.isDragging = false);
         this.container.addEventListener('mouseleave', () => this.isDragging = false);
 
         // --- ANDROID & iOS (ТАЧСКРИН) ---
@@ -373,7 +366,7 @@ class MapEngine {
                 this.startY = e.touches[0].clientY - this.translateY;
             } else if (e.touches.length === 2) {
                 this.isDragging = false;
-                this.wasDragging = true; // Зум - это тоже манипуляция, клик не нужен
+                this.wasDragging = true; 
                 initialPinchDist = Math.hypot(
                     e.touches[0].clientX - e.touches[1].clientX,
                     e.touches[0].clientY - e.touches[1].clientY
@@ -384,37 +377,31 @@ class MapEngine {
         this.container.addEventListener('touchmove', (e) => {
             e.preventDefault(); 
             if (e.touches.length === 1 && this.isDragging) {
-                
-                // Защита от микро-дрожания пальца. Движение < 4px не считается скроллом
                 const dx = e.touches[0].clientX - this.touchStartX;
                 const dy = e.touches[0].clientY - this.touchStartY;
                 if (Math.abs(dx) > 4 || Math.abs(dy) > 4) {
                     this.wasDragging = true; 
                 }
-
                 this.translateX = e.touches[0].clientX - this.startX;
                 this.translateY = e.touches[0].clientY - this.startY;
                 this.updateTransform();
             } else if (e.touches.length === 2 && initialPinchDist) {
                 this.wasDragging = true;
-                
                 const currentDist = Math.hypot(
                     e.touches[0].clientX - e.touches[1].clientX,
                     e.touches[0].clientY - e.touches[1].clientY
                 );
-                
                 const oldZoomLevel = this.isRegionalZoom;
                 const oldScale = this.scale;
-                
                 const factor = currentDist / initialPinchDist;
-                this.scale = Math.min(Math.max(2, this.scale * factor), 80);
+                
+                // УВЕЛИЧИЛИ ЛИМИТ ЗУМА С 80 ДО 200
+                this.scale = Math.min(Math.max(2, this.scale * factor), 200);
 
                 const pinchX = (e.touches[0].clientX + e.touches[1].clientX) / 2;
                 const pinchY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
-
                 this.translateX = pinchX - (pinchX - this.translateX) * (this.scale / oldScale);
                 this.translateY = pinchY - (pinchY - this.translateY) * (this.scale / oldScale);
-
                 this.updateTransform();
 
                 if (oldZoomLevel !== this.isRegionalZoom) {
@@ -427,7 +414,6 @@ class MapEngine {
 
         this.container.addEventListener('touchend', (e) => {
             this.lastTouchTime = Date.now(); 
-            
             if (e.touches.length === 1) {
                 this.isDragging = true;
                 this.touchStartX = e.touches[0].clientX;
@@ -457,14 +443,13 @@ class MapEngine {
             const oldZoomLevel = this.isRegionalZoom;
             const oldScale = this.scale;
             
-            this.scale = Math.min(Math.max(2, iosInitialScale * e.scale), 80);
+            // УВЕЛИЧИЛИ ЛИМИТ ЗУМА С 80 ДО 200
+            this.scale = Math.min(Math.max(2, iosInitialScale * e.scale), 200);
             
             const pinchX = window.innerWidth / 2;
             const pinchY = window.innerHeight / 2;
-
             this.translateX = pinchX - (pinchX - this.translateX) * (this.scale / oldScale);
             this.translateY = pinchY - (pinchY - this.translateY) * (this.scale / oldScale);
-
             this.updateTransform();
 
             if (oldZoomLevel !== this.isRegionalZoom) {
