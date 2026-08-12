@@ -2786,8 +2786,11 @@ class GameData {
         // Блокируем двойную отправку шпионов в один и тот же регион за ход
         if (this.orders.recon.some(o => o.target === targetId)) return false;
         
-        if (this.treasury >= cost) {
-            this.treasury -= cost;
+        // ПРАВИЛЬНОЕ ОБРАЩЕНИЕ К КАЗНЕ ИГРОКА
+        const player = this.getCountry(this.playerCountry);
+        
+        if (player.money >= cost) {
+            player.money -= cost;
             this.orders.recon.push({ 
                 target: targetId, 
                 cost: cost, 
