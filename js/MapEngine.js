@@ -566,26 +566,32 @@ class MapEngine {
             let textVal = '';
             let color = '';
 
+            // === ПРАВИЛА ОТОБРАЖЕНИЯ ===
             if (isOwner) {
+                // Своя территория
                 if (power > 0) {
                     shouldDraw = true;
                     icon = '🛡️';
-                    textVal = this.formatPower(power);
-                    color = '#4ade80'; // Зеленый для своих
+                    textVal = ` ${this.formatPower(power)}`;
+                    color = '#4ade80'; // Зеленый
                 }
             } else {
-                if (isReconActive && power > 0) {
-                    // Если разведка активна, показываем точную мощь врага
-                    shouldDraw = true;
-                    icon = '⚔️';
-                    textVal = this.formatPower(power);
-                    color = '#f87171'; // Ярко-красный
-                } else if (isNeighbor) {
-                    // На границе без разведки показываем только знак вопроса
-                    shouldDraw = true;
-                    icon = '⚔️';
-                    textVal = '?';
-                    color = '#fca5a5'; // Бледно-красный
+                // Чужая территория (только если есть хоть 1 солдат)
+                if (power > 0) {
+                    if (isReconActive) {
+                        // Была разведка (неважно, сосед или нет)
+                        shouldDraw = true;
+                        icon = '⚔️';
+                        textVal = ` ${this.formatPower(power)}`;
+                        color = '#f87171'; // Ярко-красный
+                    } else if (isNeighbor) {
+                        // Сосед, но разведки не было
+                        shouldDraw = true;
+                        icon = '⚔️';
+                        textVal = ''; // Пусто! Без цифр и знаков вопроса
+                        color = '#f87171';
+                    }
+                    // Если НЕ сосед и НЕТ разведки -> shouldDraw остается false
                 }
             }
 
@@ -593,26 +599,27 @@ class MapEngine {
                 const bbox = path.getBBox();
                 if (bbox.width > 0 && bbox.height > 0) {
                     const centerX = bbox.x + bbox.width / 2;
-                    const centerY = bbox.y + bbox.height / 2 + 0.6; // Опускаем значок чуть ниже названия города
+                    const centerY = bbox.y + bbox.height / 2;
+
+                    const group = document.createElementNS("http://www.w3.org/2000/svg", "g");
+                    group.setAttribute("class", "army-marker");
+                    // Сдвигаем маркер в центр и чуть ниже названия города (на 0.2px)
+                    group.setAttribute("transform", `translate(${centerX}, ${centerY + 0.2})`);
 
                     const text = document.createElementNS("http://www.w3.org/2000/svg", "text");
-                    text.setAttribute("x", centerX);
-                    text.setAttribute("y", centerY);
-                    text.setAttribute("class", "army-marker");
                     text.setAttribute("text-anchor", "middle");
                     text.setAttribute("dominant-baseline", "central");
-                    text.setAttribute("font-size", "0.6px");
+                    // Уменьшили шрифт, чтобы значки аккуратно ложились в границы региона
+                    text.setAttribute("font-size", "0.25px"); 
                     text.setAttribute("font-weight", "bold");
-                    text.setAttribute("pointer-events", "none");
                     text.setAttribute("fill", color);
-                    
-                    // Делаем красивую черную обводку текста, чтобы он читался на любом фоне
                     text.setAttribute("stroke", "rgba(0,0,0,0.8)");
-                    text.setAttribute("stroke-width", "0.15px");
+                    text.setAttribute("stroke-width", "0.05px");
                     text.setAttribute("paint-order", "stroke");
 
-                    text.textContent = `${icon} ${textVal}`;
-                    this.svg.appendChild(text);
+                    text.textContent = icon + textVal;
+                    group.appendChild(text);
+                    this.svg.appendChild(group);
                 }
             }
         });
