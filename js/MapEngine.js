@@ -43,29 +43,28 @@ class MapEngine {
         if (el && el.parentNode) {
             el.classList.add('selected-region');
             
-            // Вытягиваем регион на передний план, чтобы соседи не перекрывали белую рамку
-            const parent = el.parentNode;
-            const firstLabel = parent.querySelector('.country-label');
-            if (firstLabel) {
-                parent.insertBefore(el, firstLabel);
+            // Находим ПЕРВЫЙ элемент текста, города или маркера армии
+            const topLayerObj = this.svg.querySelector('.country-label, .city-marker, .capital-marker, .army-marker');
+            if (topLayerObj && topLayerObj.parentNode === el.parentNode) {
+                // Вставляем регион ПЕРЕД текстом/маркером (чтобы он всегда был ПОД ними)
+                el.parentNode.insertBefore(el, topLayerObj);
             } else {
-                parent.appendChild(el);
+                el.parentNode.appendChild(el);
             }
         }
     }
 
     selectCountry(countryId) {
         this.clearSelection();
-        const firstLabel = this.svg.querySelector('.country-label');
+        const topLayerObj = this.svg.querySelector('.country-label, .city-marker, .capital-marker, .army-marker');
+        
         this.svg.querySelectorAll(`.region[data-country="${countryId}"]`).forEach(el => {
             if (el && el.parentNode) {
                 el.classList.add('selected-country');
-                
-                const parent = el.parentNode;
-                if (firstLabel && firstLabel.parentNode === parent) {
-                    parent.insertBefore(el, firstLabel);
+                if (topLayerObj && topLayerObj.parentNode === el.parentNode) {
+                    el.parentNode.insertBefore(el, topLayerObj);
                 } else {
-                    parent.appendChild(el);
+                    el.parentNode.appendChild(el);
                 }
             }
         });
@@ -540,70 +539,26 @@ class MapEngine {
         });
     }
 
-    // Математический расчет Центра Масс (Polygon Centroid)
-    getRegionCentroid(path) {
-        const d = path.getAttribute('d');
-        if (!d) {
-            const bbox = path.getBBox();
-            return { x: bbox.x + bbox.width / 2, y: bbox.y + bbox.height / 2 };
+    getRegionCenter(path) {
+        const id = path.id;
+        const bbox = path.getBBox();
+        let cx = bbox.x + bbox.width / 2;
+        let cy = bbox.y + bbox.height / 2;
+
+        // РУЧНАЯ КОРРЕКТИРОВКА ДЛЯ СЛОЖНЫХ РЕГИОНОВ
+        // Смещаем значок (dx: вправо/влево, dy: вниз/вверх)
+        const offsets = {
+            'UA-51': { dx: 3.5, dy: -2 }, // Одесская область (Сдвигаем из Молдовы правее и выше)
+            // Если заметите еще кривой регион, просто добавьте его ID сюда. Например:
+            // 'ID-РЕГИОНА': { dx: 2, dy: -1 }
+        };
+
+        if (offsets[id]) {
+            cx += offsets[id].dx;
+            cy += offsets[id].dy;
         }
 
-        // Разбиваем путь на под-пути (острова/эксклавы), ориентируясь на команды M/m
-        const subPaths = d.split(/[Mm]/).filter(s => s.trim().length > 0);
-        
-        let bestCentroid = null;
-        let maxArea = -1;
-
-        for (const sub of subPaths) {
-            // Вытаскиваем все числа (координаты) из текста
-            const coords = sub.match(/-?\d+(?:\.\d+)?/g);
-            if (!coords || coords.length < 6) continue;
-
-            const pts = [];
-            for (let i = 0; i < coords.length; i += 2) {
-                pts.push({ x: parseFloat(coords[i]), y: parseFloat(coords[i+1]) });
-            }
-
-            let signedArea = 0;
-            let cx = 0;
-            let cy = 0;
-
-            // Формула площади и центроида для полигонов
-            for (let i = 0; i < pts.length; i++) {
-                const p1 = pts[i];
-                const p2 = pts[(i + 1) % pts.length]; // Замыкаем линию с первой точкой
-                const crossProduct = (p1.x * p2.y - p2.x * p1.y);
-                signedArea += crossProduct;
-                cx += (p1.x + p2.x) * crossProduct;
-                cy += (p1.y + p2.y) * crossProduct;
-            }
-
-            signedArea /= 2;
-            const absoluteArea = Math.abs(signedArea);
-
-            // Если регион из нескольких кусков, ищем самый большой кусок суши
-            if (absoluteArea > maxArea) {
-                maxArea = absoluteArea;
-                bestCentroid = { 
-                    x: cx / (6 * signedArea), 
-                    y: cy / (6 * signedArea) 
-                };
-            }
-        }
-
-        // Резервный вариант, если координаты оказались слишком сложными
-        if (!bestCentroid || maxArea < 0.01 || isNaN(bestCentroid.x) || isNaN(bestCentroid.y)) {
-            const bbox = path.getBBox();
-            return { x: bbox.x + bbox.width / 2, y: bbox.y + bbox.height / 2 };
-        }
-
-        return bestCentroid;
-    }
-    
-    formatPower(num) {
-        if (num >= 1000000) return (num / 1000000).toFixed(1) + 'M';
-        if (num >= 1000) return (num / 1000).toFixed(1) + 'K';
-        return Math.floor(num);
+        return { x: cx, y: cy };
     }
 
     drawArmyMarkers() {
@@ -651,7 +606,7 @@ class MapEngine {
 
             if (shouldDraw) {
                 // === ИСПОЛЬЗУЕМ НОВУЮ МАТЕМАТИКУ ЦЕНТРА МАСС ===
-                const center = this.getRegionCentroid(path);
+                const center = this.getRegionCenter(path);
 
                 const group = document.createElementNS("http://www.w3.org/2000/svg", "g");
                 group.setAttribute("class", "army-marker");
