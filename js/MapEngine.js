@@ -307,14 +307,16 @@ class MapEngine {
             if (this.wasDragging) {
                 e.stopPropagation();
                 e.preventDefault();
-                return; // Важно добавить return
-        // Если клик был прямо по SVG (а не по <path> региона) - сбрасываем выделение
+                return;
+            } // <--- ВОТ ЭТУ СКОБКУ НУЖНО ВЕРНУТЬ
+
+            // Если клик был прямо по SVG (а не по <path> региона) - сбрасываем выделение
             if (e.target.tagName.toLowerCase() === 'svg') {
                 this.clearSelection();
                 // Отправляем событие, чтобы UI закрыл панель
                 document.dispatchEvent(new Event('panelClosed'));
             }
-        }, false); // Уберите true, чтобы клики по регионам обрабатывались первыми
+        }, false);
 
         // --- ПК (МЫШЬ И КОЛЕСИКО) ---
         this.container.addEventListener('wheel', (e) => {
