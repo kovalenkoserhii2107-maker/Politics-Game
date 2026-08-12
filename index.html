@@ -41,14 +41,14 @@
             background-size: 60px 60px, 60px 60px, 100% 100%;
         }
         
-	/* Базовые стили региона */
+		/* Базовые стили региона */
         .region { 
             stroke-linejoin: round; 
             /* Убрали filter из transition, добавили fill-opacity */
             transition: fill 0.2s, fill-opacity 0.2s, stroke 0.2s, stroke-width 0.2s; 
         }
 
-	/* UI Интерфейс */
+		/* UI Интерфейс */
         #ui-layer { 
             position: fixed; /* Защита от сдвигов при случайном масштабировании */
             top: 0; 
@@ -60,7 +60,7 @@
         }
         .ui-element { pointer-events: auto; }
 
-	/* ================= ВЕРХНЯЯ ПАНЕЛЬ ================= */
+		/* ================= ВЕРХНЯЯ ПАНЕЛЬ ================= */
         #top-bar { 
             background: var(--ui-bg); 
             border-bottom: 1px solid var(--ui-border); 
@@ -86,7 +86,7 @@
         .top-btn.warning { background: var(--ui-accent-country); color: #000; border: none; }
         .top-btn.primary { background: var(--ui-accent); border: none; }
 
-	/* ================= СТАРТОВЫЙ ЭКРАН ================= */
+		/* ================= СТАРТОВЫЙ ЭКРАН ================= */
         #start-screen {
             position: fixed; top: 0; left: 0; width: 100%; height: 100%;
             background: rgba(11, 17, 33, 0.85); 
@@ -363,16 +363,30 @@
             fill-opacity: 0.2 !important; pointer-events: none;
         }
 
-		/* --- ВЫДЕЛЕННЫЙ РЕГИОН/СТРАНА --- */
+		/* --- НАДЕЖНОЕ ВЫДЕЛЕНИЕ (Не слетает при движении мыши) --- */
         .region.selected-region {
-            fill-opacity: 0.5 !important;
             stroke: #ffffff !important;
-            stroke-width: 0.08 !important;
+            stroke-width: 1.5px !important;
+            vector-effect: non-scaling-stroke !important; /* Обводка не зависит от зума */
+            filter: brightness(1.5) drop-shadow(0 0 4px rgba(255,255,255,0.6)) !important;
+            fill-opacity: 1 !important;
         }
+        
         .region.selected-country {
-            fill-opacity: 0.5 !important;
             stroke: #ffffff !important;
-            stroke-width: 0.05 !important;
+            stroke-width: 1px !important;
+            vector-effect: non-scaling-stroke !important;
+            filter: brightness(1.3) !important;
+            fill-opacity: 1 !important;
+        }
+
+		/* --- ФИКС ПРОКЛИКИВАНИЯ ПЛАНА НА НЕДЕЛЮ --- */
+        #orders-panel {
+            pointer-events: auto !important; /* Блокируем клики сквозь панель! */
+            background: rgba(15, 23, 42, 0.98) !important; /* Плотный темный фон */
+            border: 1px solid var(--ui-border);
+            box-shadow: 0 8px 20px rgba(0,0,0,0.8);
+            z-index: 1000;
         }
 
     /* --- АДАПТАЦИЯ ДЛЯ МОБИЛЬНЫХ ТЕЛЕФОНОВ --- */
