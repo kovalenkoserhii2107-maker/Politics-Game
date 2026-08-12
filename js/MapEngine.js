@@ -239,6 +239,25 @@ class MapEngine {
         });
     }
 
+    selectRegion(regionId) {
+        this.clearSelection();
+        const el = document.getElementById(regionId);
+        if (el) el.classList.add('selected-region');
+    }
+
+    selectCountry(countryId) {
+        this.clearSelection();
+        this.svg.querySelectorAll(`.region[data-country="${countryId}"]`).forEach(el => {
+            el.classList.add('selected-country');
+        });
+    }
+
+    clearSelection() {
+        this.svg.querySelectorAll('.selected-region, .selected-country').forEach(el => {
+            el.classList.remove('selected-region', 'selected-country');
+        });
+    }
+    
     // 3. ИДЕАЛЬНЫЙ ЗУМ ДЛЯ ПК, ANDROID И iPHONE
     initEvents() {
         // --- ПК (МЫШЬ И КОЛЕСИКО) ---
