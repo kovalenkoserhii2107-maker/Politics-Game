@@ -242,7 +242,10 @@ class UIManager {
                     const prob = 95; // Шанс успеха
                     
                     if (gameData.queueRecon(region.id, cost, prob, region.name)) {
-                        this.updateTopBar(gameData);
+                        
+                        // === ИСПРАВЛЕНО: Правильно обновляем счетчик денег в интерфейсе ===
+                        document.getElementById('glob-money').innerText = this.formatNumber(gameData.getCountry(playerCountryId).money);
+                        
                         this.updateOrdersPanel(gameData.orders);
                         
                         spyBtn.innerText = "Разведка в плане";

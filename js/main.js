@@ -32,10 +32,11 @@ class GameCore {
                     if (type === 'recon') {
                         const order = this.data.orders.recon[index];
                         
-                        // ПРАВИЛЬНЫЙ ВОЗВРАТ ДЕНЕГ В КАЗНУ ИГРОКА
                         const player = this.data.getCountry(this.data.playerCountry);
-                        player.money += order.cost; 
-                        this.ui.updateTopBar(this.data);
+                        player.money += order.cost; // Возвращаем $50k
+                        
+                        // === ИСПРАВЛЕНО: Правильный вызов обновления верхней панели ===
+                        this.loop.updateTopBarUI(); 
                         
                         // Если карточка отмененного региона открыта прямо сейчас — возвращаем кнопку
                         const actionPanel = document.getElementById('army-action-panel');
