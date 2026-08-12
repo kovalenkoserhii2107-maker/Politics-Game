@@ -540,6 +540,66 @@ class MapEngine {
         });
     }
 
+    // Математический расчет Центра Масс (Polygon Centroid)
+    getRegionCentroid(path) {
+        const d = path.getAttribute('d');
+        if (!d) {
+            const bbox = path.getBBox();
+            return { x: bbox.x + bbox.width / 2, y: bbox.y + bbox.height / 2 };
+        }
+
+        // Разбиваем путь на под-пути (острова/эксклавы), ориентируясь на команды M/m
+        const subPaths = d.split(/[Mm]/).filter(s => s.trim().length > 0);
+        
+        let bestCentroid = null;
+        let maxArea = -1;
+
+        for (const sub of subPaths) {
+            // Вытаскиваем все числа (координаты) из текста
+            const coords = sub.match(/-?\d+(?:\.\d+)?/g);
+            if (!coords || coords.length < 6) continue;
+
+            const pts = [];
+            for (let i = 0; i < coords.length; i += 2) {
+                pts.push({ x: parseFloat(coords[i]), y: parseFloat(coords[i+1]) });
+            }
+
+            let signedArea = 0;
+            let cx = 0;
+            let cy = 0;
+
+            // Формула площади и центроида для полигонов
+            for (let i = 0; i < pts.length; i++) {
+                const p1 = pts[i];
+                const p2 = pts[(i + 1) % pts.length]; // Замыкаем линию с первой точкой
+                const crossProduct = (p1.x * p2.y - p2.x * p1.y);
+                signedArea += crossProduct;
+                cx += (p1.x + p2.x) * crossProduct;
+                cy += (p1.y + p2.y) * crossProduct;
+            }
+
+            signedArea /= 2;
+            const absoluteArea = Math.abs(signedArea);
+
+            // Если регион из нескольких кусков, ищем самый большой кусок суши
+            if (absoluteArea > maxArea) {
+                maxArea = absoluteArea;
+                bestCentroid = { 
+                    x: cx / (6 * signedArea), 
+                    y: cy / (6 * signedArea) 
+                };
+            }
+        }
+
+        // Резервный вариант, если координаты оказались слишком сложными
+        if (!bestCentroid || maxArea < 0.01 || isNaN(bestCentroid.x) || isNaN(bestCentroid.y)) {
+            const bbox = path.getBBox();
+            return { x: bbox.x + bbox.width / 2, y: bbox.y + bbox.height / 2 };
+        }
+
+        return bestCentroid;
+    }
+    
     formatPower(num) {
         if (num >= 1000000) return (num / 1000000).toFixed(1) + 'M';
         if (num >= 1000) return (num / 1000).toFixed(1) + 'K';
@@ -547,7 +607,6 @@ class MapEngine {
     }
 
     drawArmyMarkers() {
-        // Удаляем старые маркеры перед перерисовкой
         this.svg.querySelectorAll('.army-marker').forEach(el => el.remove());
 
         const playerCountryId = this.gameData.playerCountry;
@@ -566,61 +625,54 @@ class MapEngine {
             let textVal = '';
             let color = '';
 
-            // === ПРАВИЛА ОТОБРАЖЕНИЯ ===
+            // ПРАВИЛА ОТОБРАЖЕНИЯ И ЛОГИКА ТУМАНА ВОЙНЫ
             if (isOwner) {
-                // Своя территория
                 if (power > 0) {
                     shouldDraw = true;
                     icon = '🛡️';
                     textVal = ` ${this.formatPower(power)}`;
-                    color = '#4ade80'; // Зеленый
+                    color = '#4ade80';
                 }
             } else {
-                // Чужая территория (только если есть хоть 1 солдат)
                 if (power > 0) {
                     if (isReconActive) {
-                        // Была разведка (неважно, сосед или нет)
                         shouldDraw = true;
                         icon = '⚔️';
                         textVal = ` ${this.formatPower(power)}`;
-                        color = '#f87171'; // Ярко-красный
+                        color = '#f87171';
                     } else if (isNeighbor) {
-                        // Сосед, но разведки не было
                         shouldDraw = true;
                         icon = '⚔️';
-                        textVal = ''; // Пусто! Без цифр и знаков вопроса
+                        textVal = ''; 
                         color = '#f87171';
                     }
-                    // Если НЕ сосед и НЕТ разведки -> shouldDraw остается false
                 }
             }
 
             if (shouldDraw) {
-                const bbox = path.getBBox();
-                if (bbox.width > 0 && bbox.height > 0) {
-                    const centerX = bbox.x + bbox.width / 2;
-                    const centerY = bbox.y + bbox.height / 2;
+                // === ИСПОЛЬЗУЕМ НОВУЮ МАТЕМАТИКУ ЦЕНТРА МАСС ===
+                const center = this.getRegionCentroid(path);
 
-                    const group = document.createElementNS("http://www.w3.org/2000/svg", "g");
-                    group.setAttribute("class", "army-marker");
-                    // Сдвигаем маркер в центр и чуть ниже названия города (на 0.2px)
-                    group.setAttribute("transform", `translate(${centerX}, ${centerY + 0.2})`);
+                const group = document.createElementNS("http://www.w3.org/2000/svg", "g");
+                group.setAttribute("class", "army-marker");
+                
+                // Сдвигаем маркер в ИДЕАЛЬНЫЙ центр. 
+                // Y + 0.2 - это легкий сдвиг вниз, чтобы маркер не перекрывал название столицы
+                group.setAttribute("transform", `translate(${center.x}, ${center.y + 0.2})`);
 
-                    const text = document.createElementNS("http://www.w3.org/2000/svg", "text");
-                    text.setAttribute("text-anchor", "middle");
-                    text.setAttribute("dominant-baseline", "central");
-                    // Уменьшили шрифт, чтобы значки аккуратно ложились в границы региона
-                    text.setAttribute("font-size", "0.25px"); 
-                    text.setAttribute("font-weight", "bold");
-                    text.setAttribute("fill", color);
-                    text.setAttribute("stroke", "rgba(0,0,0,0.8)");
-                    text.setAttribute("stroke-width", "0.05px");
-                    text.setAttribute("paint-order", "stroke");
+                const text = document.createElementNS("http://www.w3.org/2000/svg", "text");
+                text.setAttribute("text-anchor", "middle");
+                text.setAttribute("dominant-baseline", "central");
+                text.setAttribute("font-size", "0.25px"); 
+                text.setAttribute("font-weight", "bold");
+                text.setAttribute("fill", color);
+                text.setAttribute("stroke", "rgba(0,0,0,0.8)");
+                text.setAttribute("stroke-width", "0.05px");
+                text.setAttribute("paint-order", "stroke");
 
-                    text.textContent = icon + textVal;
-                    group.appendChild(text);
-                    this.svg.appendChild(group);
-                }
+                text.textContent = icon + textVal;
+                group.appendChild(text);
+                this.svg.appendChild(group);
             }
         });
     }
