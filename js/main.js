@@ -32,15 +32,39 @@ class GameCore {
             }
         });
 
+        // Сбрасываем выделение на карте при закрытии боковой панели
+        document.addEventListener('click', (e) => {
+            if (e.target.classList.contains('close-btn')) {
+                this.map.clearSelection();
+            }
+        });
+        
         this.initGovPanelLogic();
         this.initMoveLogic(); 
 
         document.getElementById('log-btn').addEventListener('click', () => {
             this.ui.showHistory(this.data.history);
         });
+
+        // Глобальный слушатель для кнопок "Отменить" в журнале приказов
+        document.addEventListener('click', (e) => {
+            if (e.target.classList.contains('cancel-order-btn')) {
+                const index = parseInt(e.target.dataset.orderIndex);
+                if (!isNaN(index) && this.data.orders) {
+                    this.data.orders.splice(index, 1); // Удаляем приказ из плана
+                    this.ui.updateOrdersPanel(this.data.orders); // Перерисовываем журнал
+                    
+                    // Обновляем доступные кнопки, если открыта инфо-панель региона
+                    const actionPanel = document.getElementById('army-action-panel');
+                    if (actionPanel && actionPanel.dataset.regionId && actionPanel.style.display !== 'block') {
+                        this.updateActionButtonsVisibility(actionPanel.dataset.regionId);
+                    }
+                }
+            }
+        });
     }
 
-    initMoveLogic() {
+initMoveLogic() {
         this.armyActionState = { active: false, type: null, fromId: null, forces: {} };
 
         const initMoveBtn = document.getElementById('init-move-btn');
@@ -49,6 +73,25 @@ class GameCore {
         const confirmBtn = document.getElementById('confirm-action-btn');
         const cancelBtn = document.getElementById('cancel-action-btn');
         const actionInputs = document.getElementById('action-army-inputs');
+
+        // НОВОЕ: Функция расчета ДОСТУПНЫХ войск (минус те, что уже в приказах)
+        const getAvailableArmy = (regionId) => {
+            const region = this.data.getRegion(regionId);
+            let available = { ...region.army };
+            
+            if (this.data.orders) {
+                this.data.orders.forEach(order => {
+                    if ((order.type === 'move' || order.type === 'attack') && order.from === regionId) {
+                        Object.keys(order.forces).forEach(unitId => {
+                            if (available[unitId] !== undefined) {
+                                available[unitId] -= order.forces[unitId];
+                            }
+                        });
+                    }
+                });
+            }
+            return available;
+        };
 
         const openPanel = (type) => {
             initMoveBtn.style.display = 'none';
@@ -60,16 +103,52 @@ class GameCore {
             const region = this.data.getRegion(regionId);
             if (!region) return;
             
+            const availableArmy = getAvailableArmy(regionId); // Берем только свободные войска
+            
             actionInputs.innerHTML = '';
             Object.keys(UnitsDB).forEach(unitId => {
-                const count = region.army[unitId] || 0;
+                const count = availableArmy[unitId] || 0;
                 if (count > 0) {
                     const unit = UnitsDB[unitId];
+                    // НОВОЕ: Дизайн с ползунком и кнопкой MAX
                     actionInputs.innerHTML += `
-                        <div class="army-row">
-                            <span>${unit.icon} ${unit.name} (Макс: ${count})</span>
-                            <input type="number" id="action-${unitId}-input" value="0" min="0" max="${count}" style="width: 60px; background: rgba(0,0,0,0.5); color: white; border: 1px solid var(--ui-border); border-radius: 4px; padding: 4px;">
+                        <div class="army-row" style="flex-direction: column; align-items: stretch; gap: 8px; margin-bottom: 15px;">
+                            <div style="display: flex; justify-content: space-between; align-items: center;">
+                                <span>${unit.icon} ${unit.name} <span style="color:#94a3b8; font-size:0.85em;">(Дост: ${count})</span></span>
+                                <div style="display: flex; gap: 5px; align-items: center;">
+                                    <button class="top-btn" id="action-${unitId}-max" style="padding: 2px 6px; font-size: 10px; background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2);">MAX</button>
+                                    <input type="number" id="action-${unitId}-input" value="0" min="0" max="${count}" style="width: 50px; background: rgba(0,0,0,0.5); color: white; border: 1px solid var(--ui-border); border-radius: 4px; padding: 4px; text-align: center;">
+                                </div>
+                            </div>
+                            <input type="range" id="action-${unitId}-slider" value="0" min="0" max="${count}" style="width: 100%; margin: 0; accent-color: var(--ui-accent);">
                         </div>`;
+                }
+            });
+            
+            // Навешиваем логику на ползунки и MAX
+            Object.keys(UnitsDB).forEach(unitId => {
+                const count = availableArmy[unitId] || 0;
+                if (count > 0) {
+                    const input = document.getElementById(`action-${unitId}-input`);
+                    const slider = document.getElementById(`action-${unitId}-slider`);
+                    const maxBtn = document.getElementById(`action-${unitId}-max`);
+                    
+                    if(input && slider && maxBtn) {
+                        input.addEventListener('input', (e) => {
+                            let val = parseInt(e.target.value) || 0;
+                            if(val > count) val = count;
+                            if(val < 0) val = 0;
+                            e.target.value = val;
+                            slider.value = val;
+                        });
+                        slider.addEventListener('input', (e) => {
+                            input.value = e.target.value;
+                        });
+                        maxBtn.addEventListener('click', () => {
+                            input.value = count;
+                            slider.value = count;
+                        });
+                    }
                 }
             });
             
@@ -130,8 +209,6 @@ class GameCore {
 
     updateActionButtonsVisibility(regionId) {
         const region = this.data.getRegion(regionId);
-        
-        // ЗАЩИТА: Если региона нет, скрываем всё и выходим
         if (!region) {
             document.getElementById('recruit-btn').style.display = 'none';
             document.getElementById('init-move-btn').style.display = 'none';
@@ -151,12 +228,28 @@ class GameCore {
             return;
         }
 
-        let hasTroops = false;
+        // Высчитываем, остались ли вообще свободные войска
+        const availableArmy = (() => {
+            let available = { ...region.army };
+            if (this.data.orders) {
+                this.data.orders.forEach(order => {
+                    if ((order.type === 'move' || order.type === 'attack') && order.from === regionId) {
+                        Object.keys(order.forces).forEach(unitId => {
+                            if (available[unitId] !== undefined) available[unitId] -= order.forces[unitId];
+                        });
+                    }
+                });
+            }
+            return available;
+        })();
+
+        let hasAvailableTroops = false;
         Object.keys(UnitsDB).forEach(unitId => {
-            if ((region.army[unitId] || 0) > 0) hasTroops = true;
+            if ((availableArmy[unitId] || 0) > 0) hasAvailableTroops = true;
         });
 
-        if (hasTroops) {
+        // Если свободных войск нет - прячем кнопки марша и атаки
+        if (hasAvailableTroops) {
             const moveTargets = this.data.getValidMoveTargets(regionId);
             document.getElementById('init-move-btn').style.display = moveTargets.length > 0 ? 'block' : 'none';
             
@@ -264,6 +357,9 @@ class GameCore {
         if (!country) return;
 
         if (this.map.isRegionalZoom) {
+            // === НОВОЕ: ВЫДЕЛЯЕМ РЕГИОН НА КАРТЕ ===
+            this.map.selectRegion(regionId);
+
             this.ui.showRegionInfo(region, country, this.data, this.data.playerCountry);
             
             const armyActionPanel = document.getElementById('army-action-panel');
@@ -275,6 +371,9 @@ class GameCore {
             this.updateActionButtonsVisibility(region.id);
 
         } else {
+            // === НОВОЕ: ВЫДЕЛЯЕМ ЦЕЛИКОМ СТРАНУ НА КАРТЕ ===
+            this.map.selectCountry(country.id);
+
             const countryStats = this.data.getCountryStats(country.id);
             this.ui.showCountryInfo(country, countryStats, this.data);
         }
