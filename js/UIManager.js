@@ -261,7 +261,7 @@ class UIManager {
         this.panel.classList.add('active');
     }
 
-	updateOrdersPanel(orders) {
+updateOrdersPanel(orders) {
         const panel = document.getElementById('orders-panel');
         const list = document.getElementById('orders-list');
         if (!panel || !list) return;
@@ -277,22 +277,25 @@ class UIManager {
 
         panel.style.display = 'block';
 
-        // Добавляем крестики с указанием типа приказа (data-type) и индекса (data-order-index)
+        const btnStyle = 'background: none; border: none; color: #ef4444; font-size: 1.5em; font-weight: bold; cursor: pointer; padding: 0 5px; line-height: 0.8;';
+        const liStyle = 'margin-bottom: 5px; display: flex; justify-content: space-between; align-items: center;';
+
         orders.recruitment.forEach((order, index) => { 
-            list.innerHTML += `<li style="color: #60a5fa; margin-bottom: 5px;">🛡️ ${order.text} <button class="cancel-order-btn" data-type="recruitment" data-order-index="${index}" style="float: right; background: none; border: none; color: #ef4444; font-size: 1.5em; font-weight: bold; cursor: pointer; padding: 0 5px; line-height: 0.8;">&times;</button></li>`; 
+            list.innerHTML += `<li style="color: #60a5fa; ${liStyle}"><span>🛡️ ${order.text}</span> <button class="cancel-order-btn" data-type="recruitment" data-order-index="${index}" style="${btnStyle}">&times;</button></li>`; 
         });
         
         orders.movements.forEach((order, index) => { 
-            list.innerHTML += `<li style="color: #c084fc; margin-bottom: 5px;">🚚 ${order.text} <button class="cancel-order-btn" data-type="movements" data-order-index="${index}" style="float: right; background: none; border: none; color: #ef4444; font-size: 1.5em; font-weight: bold; cursor: pointer; padding: 0 5px; line-height: 0.8;">&times;</button></li>`; 
+            list.innerHTML += `<li style="color: #c084fc; ${liStyle}"><span>🚚 ${order.text}</span> <button class="cancel-order-btn" data-type="movements" data-order-index="${index}" style="${btnStyle}">&times;</button></li>`; 
         });
         
         orders.attacks.forEach((order, index) => { 
-            list.innerHTML += `<li style="color: #f87171; margin-bottom: 5px;">⚔️ ${order.text} <button class="cancel-order-btn" data-type="attacks" data-order-index="${index}" style="float: right; background: none; border: none; color: #ef4444; font-size: 1.5em; font-weight: bold; cursor: pointer; padding: 0 5px; line-height: 0.8;">&times;</button></li>`; 
+            list.innerHTML += `<li style="color: #f87171; ${liStyle}"><span>⚔️ ${order.text}</span> <button class="cancel-order-btn" data-type="attacks" data-order-index="${index}" style="${btnStyle}">&times;</button></li>`; 
         });
     }
 
-    closePanel() {
+	closePanel() {
         if(this.panel) this.panel.classList.remove('active');
+        document.dispatchEvent(new Event('panelClosed')); // <--- НОВАЯ СТРОКА
     }
 
     openGovPanel() { 
