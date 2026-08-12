@@ -552,6 +552,7 @@ class MapEngine {
     
     drawArmyMarkers() {
         try {
+            // Удаляем старые маркеры
             this.svg.querySelectorAll('.army-marker').forEach(el => el.remove());
 
             const playerCountryId = this.gameData.playerCountry;
@@ -560,24 +561,36 @@ class MapEngine {
                 const region = this.gameData.getRegion(path.id);
                 if (!region) return;
 
+                // === КРИТИЧЕСКИЙ ФИКС: Создаем пустую армию, если её нет ===
+                if (!region.army) region.army = {};
+
                 const isOwner = region.owner === playerCountryId;
-                const isNeighbor = this.gameData.isNeighborToPlayer(region.id);
+                
+                // Безопасная проверка на соседа
+                const isNeighbor = typeof this.gameData.isNeighborToPlayer === 'function' 
+                    ? this.gameData.isNeighborToPlayer(region.id) 
+                    : false;
+                
                 const isReconActive = region.reconActiveUntil && region.reconActiveUntil >= this.gameData.currentDate;
                 
-                // Безопасный подсчет
-                const power = this.gameData.calculateRegionMilitaryPower(region.id) || 0;
+                // Безопасный подсчет мощи
+                let power = 0;
+                try {
+                    power = this.gameData.calculateRegionMilitaryPower(region.id) || 0;
+                } catch(e) { power = 0; }
 
                 let shouldDraw = false;
                 let icon = '';
                 let textVal = '';
                 let color = '';
 
+                // === ПРАВИЛА ОТОБРАЖЕНИЯ ===
                 if (isOwner) {
                     if (power > 0) {
                         shouldDraw = true;
                         icon = '🛡️';
                         textVal = ` ${this.formatPower(power)}`;
-                        color = '#4ade80';
+                        color = '#4ade80'; // Зеленый
                     }
                 } else {
                     if (power > 0) {
@@ -585,12 +598,12 @@ class MapEngine {
                             shouldDraw = true;
                             icon = '⚔️';
                             textVal = ` ${this.formatPower(power)}`;
-                            color = '#f87171';
+                            color = '#f87171'; // Красный
                         } else if (isNeighbor) {
                             shouldDraw = true;
                             icon = '⚔️';
-                            textVal = ''; 
-                            color = '#f87171';
+                            textVal = ''; // Пусто, если разведки не было
+                            color = '#fca5a5'; // Бледно-красный
                         }
                     }
                 }
@@ -600,17 +613,26 @@ class MapEngine {
 
                     const group = document.createElementNS("http://www.w3.org/2000/svg", "g");
                     group.setAttribute("class", "army-marker");
-                    group.setAttribute("transform", `translate(${center.x}, ${center.y + 0.2})`);
-                    group.setAttribute("pointer-events", "none"); // Защита от перехвата кликов значком
+                    group.setAttribute("pointer-events", "none");
+                    
+                    // === ХАК ПРОТИВ БАГА БРАУЗЕРОВ ===
+                    // Смещаем маркер в центр и сжимаем его в 40 раз (scale(0.025)),
+                    // чтобы обойти принудительную блокировку мелких шрифтов.
+                    group.setAttribute("transform", `translate(${center.x}, ${center.y + 0.4}) scale(0.025)`);
 
                     const text = document.createElementNS("http://www.w3.org/2000/svg", "text");
                     text.setAttribute("text-anchor", "middle");
                     text.setAttribute("dominant-baseline", "central");
-                    text.setAttribute("font-size", "0.25px"); 
+                    
+                    // Ставим "большой" шрифт, который сожмется масштабированием группы
+                    text.setAttribute("font-size", "10px"); 
+                    text.setAttribute("font-family", "Arial, sans-serif");
                     text.setAttribute("font-weight", "bold");
                     text.setAttribute("fill", color);
+                    
+                    // Делаем красивую черную обводку
                     text.setAttribute("stroke", "rgba(0,0,0,0.8)");
-                    text.setAttribute("stroke-width", "0.05px");
+                    text.setAttribute("stroke-width", "1.5px"); 
                     text.setAttribute("paint-order", "stroke");
 
                     text.textContent = icon + textVal;
