@@ -543,6 +543,13 @@ class MapEngine {
         return { x: cx, y: cy };
     }
 
+    // Метод для красивого сокращения больших цифр (1500 -> 1.5K)
+    formatPower(num) {
+        if (num >= 1000000) return (num / 1000000).toFixed(1) + 'M';
+        if (num >= 1000) return (num / 1000).toFixed(1) + 'K';
+        return Math.floor(num);
+    }
+    
     drawArmyMarkers() {
         try {
             this.svg.querySelectorAll('.army-marker').forEach(el => el.remove());
