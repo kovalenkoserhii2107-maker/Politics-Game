@@ -261,7 +261,7 @@ class UIManager {
         this.panel.classList.add('active');
     }
 
-    updateOrdersPanel(orders) {
+	updateOrdersPanel(orders) {
         const panel = document.getElementById('orders-panel');
         const list = document.getElementById('orders-list');
         if (!panel || !list) return;
@@ -277,9 +277,18 @@ class UIManager {
 
         panel.style.display = 'block';
 
-        orders.recruitment.forEach(order => { list.innerHTML += `<li style="color: #60a5fa;">🛡️ ${order.text}</li>`; });
-        orders.movements.forEach(order => { list.innerHTML += `<li style="color: #c084fc;">🚚 ${order.text}</li>`; });
-        orders.attacks.forEach(order => { list.innerHTML += `<li style="color: #f87171;">⚔️ ${order.text}</li>`; });
+        // Добавляем крестики с указанием типа приказа (data-type) и индекса (data-order-index)
+        orders.recruitment.forEach((order, index) => { 
+            list.innerHTML += `<li style="color: #60a5fa; margin-bottom: 5px;">🛡️ ${order.text} <button class="cancel-order-btn" data-type="recruitment" data-order-index="${index}" style="float: right; background: none; border: none; color: #ef4444; font-size: 1.5em; font-weight: bold; cursor: pointer; padding: 0 5px; line-height: 0.8;">&times;</button></li>`; 
+        });
+        
+        orders.movements.forEach((order, index) => { 
+            list.innerHTML += `<li style="color: #c084fc; margin-bottom: 5px;">🚚 ${order.text} <button class="cancel-order-btn" data-type="movements" data-order-index="${index}" style="float: right; background: none; border: none; color: #ef4444; font-size: 1.5em; font-weight: bold; cursor: pointer; padding: 0 5px; line-height: 0.8;">&times;</button></li>`; 
+        });
+        
+        orders.attacks.forEach((order, index) => { 
+            list.innerHTML += `<li style="color: #f87171; margin-bottom: 5px;">⚔️ ${order.text} <button class="cancel-order-btn" data-type="attacks" data-order-index="${index}" style="float: right; background: none; border: none; color: #ef4444; font-size: 1.5em; font-weight: bold; cursor: pointer; padding: 0 5px; line-height: 0.8;">&times;</button></li>`; 
+        });
     }
 
     closePanel() {
