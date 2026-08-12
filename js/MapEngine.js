@@ -39,13 +39,12 @@ class MapEngine {
     selectRegion(regionId) {
         this.clearSelection();
         const el = document.getElementById(regionId);
-        if (el) {
+        if (el && el.parentNode) {
             el.classList.add('selected-region');
             
-            // МАГИЯ: Поднимаем выбранный регион поверх соседей, чтобы они не перекрывали его белую рамку.
-            // При этом оставляем его строго под текстом (названиями стран).
             const firstLabel = this.svg.querySelector('.country-label');
-            if (firstLabel) {
+            // БЕЗОПАСНО: перемещаем только если элементы лежат в одном и том же слое (svg)
+            if (firstLabel && firstLabel.parentNode === el.parentNode) {
                 el.parentNode.insertBefore(el, firstLabel);
             } else {
                 el.parentNode.appendChild(el);
@@ -57,13 +56,13 @@ class MapEngine {
         this.clearSelection();
         const firstLabel = this.svg.querySelector('.country-label');
         this.svg.querySelectorAll(`.region[data-country="${countryId}"]`).forEach(el => {
-            el.classList.add('selected-country');
-            
-            // Поднимаем все регионы страны на передний план
-            if (firstLabel) {
-                el.parentNode.insertBefore(el, firstLabel);
-            } else {
-                el.parentNode.appendChild(el);
+            if (el && el.parentNode) {
+                el.classList.add('selected-country');
+                if (firstLabel && firstLabel.parentNode === el.parentNode) {
+                    el.parentNode.insertBefore(el, firstLabel);
+                } else {
+                    el.parentNode.appendChild(el);
+                }
             }
         });
     }
