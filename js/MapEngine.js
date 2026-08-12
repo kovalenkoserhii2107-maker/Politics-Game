@@ -39,13 +39,32 @@ class MapEngine {
     selectRegion(regionId) {
         this.clearSelection();
         const el = document.getElementById(regionId);
-        if (el) el.classList.add('selected-region');
+        if (el) {
+            el.classList.add('selected-region');
+            
+            // МАГИЯ: Поднимаем выбранный регион поверх соседей, чтобы они не перекрывали его белую рамку.
+            // При этом оставляем его строго под текстом (названиями стран).
+            const firstLabel = this.svg.querySelector('.country-label');
+            if (firstLabel) {
+                el.parentNode.insertBefore(el, firstLabel);
+            } else {
+                el.parentNode.appendChild(el);
+            }
+        }
     }
 
     selectCountry(countryId) {
         this.clearSelection();
+        const firstLabel = this.svg.querySelector('.country-label');
         this.svg.querySelectorAll(`.region[data-country="${countryId}"]`).forEach(el => {
             el.classList.add('selected-country');
+            
+            // Поднимаем все регионы страны на передний план
+            if (firstLabel) {
+                el.parentNode.insertBefore(el, firstLabel);
+            } else {
+                el.parentNode.appendChild(el);
+            }
         });
     }
 
