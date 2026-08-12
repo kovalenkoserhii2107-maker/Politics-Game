@@ -3133,23 +3133,19 @@
         </div>
     </div>
 
-    <!-- ПОДКЛЮЧАЕМ СКРИПТЫ СТРОГО В ТАКОМ ПОРЯДКЕ: -->
-    <!-- 1. Конфигурации и базы данных -->
-    <script src="js/RegionsDB.js"></script>
+    <!-- Базы данных (Справочники) -->
     <script src="js/UnitsDB.js"></script>
+    <script src="js/RegionsDB.js"></script>
     <script src="js/CitiesDB.js"></script>
+    <script src="js/NeighborsDB.js"></script> <!-- НОВЫЙ -->
+    <script src="js/CountriesDB.js"></script> <!-- НОВЫЙ -->
+
+    <!-- Логика и движок игры -->
     <script src="js/GameData.js"></script>
-
-    <!-- 2. Затем независимые движки -->
-    <script src="js/UIManager.js"></script>
     <script src="js/MapEngine.js"></script>
-
-    <!-- 3. Игровой цикл (использует GameData и UIManager) -->
+    <script src="js/UIManager.js"></script>
     <script src="js/GameLoop.js"></script>
-
-    <!-- 4. Главный контроллер, который собирает и запускает всё вместе -->
     <script src="js/main.js"></script>
-    <!-- Очередь приказов (План на неделю) -->
-    
 </body>
 </html>
+
