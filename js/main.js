@@ -411,12 +411,11 @@ class GameCore {
 
 let selectedFactionId = null;
 
-// === ИСПРАВЛЕНИЕ: ЗАГРУЖАЕМ КАРТУ ПРИ ЗАПУСКЕ ПРИЛОЖЕНИЯ ===
+// === ИСПРАВЛЕНИЕ: БЕЗОПАСНАЯ ЗАГРУЗКА КАРТЫ ===
 window.onload = () => {
-    // 1. Сначала скачиваем карту
     fetch('world-map.svg')
         .then(response => {
-            if (!response.ok) throw new Error("Сетевая ошибка при загрузке карты");
+            if (!response.ok) throw new Error("Сетевая ошибка: Файл карты не найден (404)");
             return response.text();
         })
         .then(svgText => {
@@ -427,13 +426,13 @@ window.onload = () => {
             if (svgElement) {
                 document.getElementById('world-map').replaceWith(svgElement);
             }
-
-            // 2. Только когда карта физически появилась на странице, генерируем стартовое меню
+            // Запускаем меню только когда карта физически внедрена
             initStartScreen();
         })
         .catch(err => {
-            console.error("Ошибка загрузки файла карты world-map.svg:", err);
-            alert("Не удалось загрузить карту мира. Запустите игру через локальный сервер (например, Live Server в VS Code).");
+            console.warn("Внимание: world-map.svg не загружен. Запускаем резервный режим...", err);
+            // Запускаем меню в любом случае, чтобы не блокировать игру!
+            initStartScreen();
         });
 };
 
@@ -475,36 +474,42 @@ function initStartScreen() {
             const minimap = document.getElementById('info-minimap');
             minimap.innerHTML = ''; 
             
-            const paths = Array.from(document.querySelectorAll('#world-map path')).filter(p => p.id.startsWith(id + '-'));
+            const paths = Array.from(document.querySelectorAll('#world-map path')).filter(p => p.id && p.id.startsWith(id + '-'));
             let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
             
             paths.forEach(p => {
-                const clone = p.cloneNode(true);
-                // Защита от undefined style для узлов, распарсенных через DOMParser
-                if (!clone.style) {
-                    clone.setAttribute('style', `fill: ${fac.color}; stroke: rgba(255,255,255,0.7); stroke-width: 0.5;`);
-                } else {
-                    clone.style.fill = fac.color;
-                    clone.style.stroke = 'rgba(255,255,255,0.7)';
-                    clone.style.strokeWidth = '0.5';
-                }
-                minimap.appendChild(clone);
-                
-                const bbox = p.getBBox();
-                if (bbox.width > 0 && bbox.x > 10) { 
-                    if (bbox.x < minX) minX = bbox.x;
-                    if (bbox.y < minY) minY = bbox.y;
-                    if (bbox.x + bbox.width > maxX) maxX = bbox.x + bbox.width;
-                    if (bbox.y + bbox.height > maxY) maxY = bbox.y + bbox.height;
+                // === ЖЕЛЕЗОБЕТОННАЯ ЗАЩИТА ОТ КРАША getBBox ===
+                if (typeof p.getBBox === 'function') {
+                    try {
+                        const clone = p.cloneNode(true);
+                        if (!clone.style) {
+                            clone.setAttribute('style', `fill: ${fac.color}; stroke: rgba(255,255,255,0.7); stroke-width: 0.5;`);
+                        } else {
+                            clone.style.fill = fac.color;
+                            clone.style.stroke = 'rgba(255,255,255,0.7)';
+                            clone.style.strokeWidth = '0.5';
+                        }
+                        minimap.appendChild(clone);
+                        
+                        const bbox = p.getBBox();
+                        if (bbox.width > 0 && bbox.x > 10) { 
+                            if (bbox.x < minX) minX = bbox.x;
+                            if (bbox.y < minY) minY = bbox.y;
+                            if (bbox.x + bbox.width > maxX) maxX = bbox.x + bbox.width;
+                            if (bbox.y + bbox.height > maxY) maxY = bbox.y + bbox.height;
+                        }
+                    } catch (e) {
+                        // Молча игнорируем элементы, которые невозможно отрисовать
+                    }
                 }
             });
             
-            // === ЗАЩИТА ОТ ИНФИНИТИ (INFINITY BUG FIX) ===
             if (minX !== Infinity && maxX !== -Infinity) {
                 const pad = 5;
                 minimap.setAttribute('viewBox', `${minX - pad} ${minY - pad} ${(maxX - minX) + pad * 2} ${(maxY - minY) + pad * 2}`);
             }
             
+            // Эта кнопка теперь разблокируется всегда, даже если карта битая!
             document.getElementById('start-game-btn').disabled = false;
         };
         listEl.appendChild(div);
