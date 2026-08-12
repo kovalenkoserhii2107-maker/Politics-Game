@@ -115,7 +115,7 @@ class UIManager {
         document.getElementById('panel-agro').innerText = region.resources.agro;
         document.getElementById('panel-ind').innerText = region.resources.industry;
 
-	const armyContainer = document.getElementById('region-army-container');
+		const armyContainer = document.getElementById('region-army-container');
         
         // --- ЛОГИКА ТУМАНА ВОЙНЫ И РАЗВЕДКИ ---
         const isOwner = region.owner === playerCountryId;
@@ -199,37 +199,32 @@ class UIManager {
         if (armyContainer) armyContainer.innerHTML = powerHtml + armyHtml;
 
         // ВЕШАЕМ СЛУШАТЕЛЬ НА КНОПКУ РАЗВЕДКИ С ВЫЧИСЛЕНИЕМ ШАНСА
-        const reconBtn = document.getElementById('btn-recon');
-        if (reconBtn) {
-            reconBtn.addEventListener('click', () => {
-                const player = gameData.getCountry(playerCountryId);
-                const reconCost = 50000;
-                
-                if (player.money >= reconCost) {
-                    player.money -= reconCost; // Списываем деньги в любом случае
+		const spyBtn = document.getElementById('spy-btn'); // Проверьте свой ID кнопки
+        if (spyBtn) {
+            // Проверяем, не отправляли ли мы уже шпионов сюда в этом ходу
+            const isQueued = gameData.orders && gameData.orders.recon && gameData.orders.recon.some(o => o.target === region.id);
+            
+            if (isQueued) {
+                spyBtn.innerText = "Разведка в плане";
+                spyBtn.disabled = true;
+                spyBtn.style.opacity = "0.5";
+            } else {
+                spyBtn.onclick = () => {
+                    const cost = 50000;
+                    const prob = 95; // Или ваша формула вероятности
                     
-                    const chance = parseInt(reconBtn.getAttribute('data-chance'));
-                    const roll = Math.random() * 100; // Кидаем "кубик" от 0 до 100
-
-                    if (roll <= chance) {
-                        // УСПЕХ! Открываем туман на 2 хода (14 дней)
-                        let reconDate = new Date(gameData.currentDate);
-                        reconDate.setDate(reconDate.getDate() + 14); 
-                        region.reconActiveUntil = reconDate;
+                    if (gameData.queueRecon(region.id, cost, prob, region.name)) {
+                        this.updateTopBar(gameData);
+                        this.updateOrdersPanel(gameData.orders);
                         
-                        alert("✅ Разведка прошла успешно! Агентура доложила точный состав гарнизона.");
+                        spyBtn.innerText = "Разведка в плане";
+                        spyBtn.disabled = true;
+                        spyBtn.style.opacity = "0.5";
                     } else {
-                        // ПРОВАЛ! 
-                        alert("❌ Провал! Ваши шпионы были раскрыты контрразведкой противника.");
+                        alert('Недостаточно средств в казне!');
                     }
-                    
-                    // Перерисовываем панель (снимет туман при успехе, или просто обновит деньги при провале)
-                    this.showRegionInfo(region, country, gameData, playerCountryId);
-                    document.getElementById('glob-money').innerText = this.formatNumber(player.money);
-                } else {
-                    alert("Недостаточно средств для проведения разведки!");
-                }
-            });
+                };
+            }
         }
 
         const actionBtns = document.getElementById('action-buttons-container');
@@ -261,7 +256,7 @@ class UIManager {
         this.panel.classList.add('active');
     }
 
-updateOrdersPanel(orders) {
+	updateOrdersPanel(orders) {
         const panel = document.getElementById('orders-panel');
         const list = document.getElementById('orders-list');
         if (!panel || !list) return;
@@ -283,7 +278,21 @@ updateOrdersPanel(orders) {
         orders.recruitment.forEach((order, index) => { 
             list.innerHTML += `<li style="color: #60a5fa; ${liStyle}"><span>🛡️ ${order.text}</span> <button class="cancel-order-btn" data-type="recruitment" data-order-index="${index}" style="${btnStyle}">&times;</button></li>`; 
         });
-        
+
+		if (orders.recon && orders.recon.length > 0) {
+            orders.recon.forEach((order, index) => {
+                html += `
+                    <div class="order-item">
+                        <div class="order-info">
+                            <span class="order-icon" style="color: #a855f7;">🕵️</span>
+                            <span>Разведка: <b>${order.regionName}</b></span>
+                        </div>
+                        <button class="cancel-order-btn" data-type="recon" data-order-index="${index}">✖</button>
+                    </div>
+                `;
+            });
+        }
+	
         orders.movements.forEach((order, index) => { 
             list.innerHTML += `<li style="color: #c084fc; ${liStyle}"><span>🚚 ${order.text}</span> <button class="cancel-order-btn" data-type="movements" data-order-index="${index}" style="${btnStyle}">&times;</button></li>`; 
         });
