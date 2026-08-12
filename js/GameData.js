@@ -2,7 +2,7 @@ class GameData {
     constructor(playerCountryId = 'UA', cheatMode = false) {
         this.currentDate = new Date(2024, 0, 1);
         this.playerCountry = playerCountryId; 
-        this.cheatMode = cheatMode; // Активация чит-кода
+        this.cheatMode = cheatMode; 
 
         this.generateEmptyArmy = () => {
             let army = {};
@@ -16,90 +16,22 @@ class GameData {
             return tech;
         };
 
-        this.countries = {
-            'UA': { id: 'UA', name: 'Украина', color: '#eab308', money: 5000000, influence: 100, taxRate: 0.05, lastNetIncome: 0, army: this.generateEmptyArmy(), tech: this.generateBaseTech() },
-            'PL': { id: 'PL', name: 'Польша', color: '#ef4444', money: 7000000, influence: 120, taxRate: 0.05, lastNetIncome: 0, army: this.generateEmptyArmy(), tech: this.generateBaseTech() },
-            'BY': { id: 'BY', name: 'Беларусь', color: '#22c55e', money: 3000000, influence: 50, taxRate: 0.05, lastNetIncome: 0, army: this.generateEmptyArmy(), tech: this.generateBaseTech() },
-            'RO': { id: 'RO', name: 'Румыния', color: '#3b82f6', money: 4500000, influence: 80, taxRate: 0.05, lastNetIncome: 0, army: this.generateEmptyArmy(), tech: this.generateBaseTech() },
-            'MD': { id: 'MD', name: 'Молдова', color: '#9333ea', money: 1000000, influence: 40, taxRate: 0.05, lastNetIncome: 0, army: this.generateEmptyArmy(), tech: this.generateBaseTech() },
-            'SK': { id: 'SK', name: 'Словакия', color: '#f97316', money: 2000000, influence: 45, taxRate: 0.05, lastNetIncome: 0, army: this.generateEmptyArmy(), tech: this.generateBaseTech() },
-            'HU': { id: 'HU', name: 'Венгрия', color: '#14b8a6', money: 3500000, influence: 60, taxRate: 0.05, lastNetIncome: 0, army: this.generateEmptyArmy(), tech: this.generateBaseTech() },
-            'RU': { id: 'RU', name: 'Россия', color: '#b91c1c', money: 15000000, influence: 200, taxRate: 0.05, lastNetIncome: 0, army: this.generateEmptyArmy(), tech: this.generateBaseTech() },
-            'TR': { id: 'TR', name: 'Турция', color: '#06b6d4', money: 8000000, influence: 110, taxRate: 0.05, lastNetIncome: 0, army: this.generateEmptyArmy(), tech: this.generateBaseTech() },
-            'BG': { id: 'BG', name: 'Болгария', color: '#84cc16', money: 2500000, influence: 40, taxRate: 0.05, lastNetIncome: 0, army: this.generateEmptyArmy(), tech: this.generateBaseTech() },
-            'GE': { id: 'GE', name: 'Грузия', color: '#ec4899', money: 1200000, influence: 30, taxRate: 0.05, lastNetIncome: 0, army: this.generateEmptyArmy(), tech: this.generateBaseTech() },
-            'DE': { id: 'DE', name: 'Германия', color: '#64748b', money: 12000000, influence: 180, taxRate: 0.05, lastNetIncome: 0, army: this.generateEmptyArmy(), tech: this.generateBaseTech() },
-            'FR': { id: 'FR', name: 'Франция', color: '#2563eb', money: 11000000, influence: 170, taxRate: 0.05, lastNetIncome: 0, army: this.generateEmptyArmy(), tech: this.generateBaseTech() },
-            'IT': { id: 'IT', name: 'Италия', color: '#059669', money: 9000000, influence: 140, taxRate: 0.05, lastNetIncome: 0, army: this.generateEmptyArmy(), tech: this.generateBaseTech() },
-            'ES': { id: 'ES', name: 'Испания', color: '#d97706', money: 8000000, influence: 130, taxRate: 0.05, lastNetIncome: 0, army: this.generateEmptyArmy(), tech: this.generateBaseTech() },
-            'CN': { id: 'CN', name: 'Китай', color: '#dc2626', money: 20000000, influence: 250, taxRate: 0.05, lastNetIncome: 0, army: this.generateEmptyArmy(), tech: this.generateBaseTech() },
-            'GB': { id: 'GB', name: 'Великобритания', color: '#1e3a8a', money: 9500000, influence: 150, taxRate: 0.05, lastNetIncome: 0, army: this.generateEmptyArmy(), tech: this.generateBaseTech() },
-            'IN': { id: 'IN', name: 'Индия', color: '#ea580c', money: 10000000, influence: 160, taxRate: 0.05, lastNetIncome: 0, army: this.generateEmptyArmy(), tech: this.generateBaseTech() },
-            'JP': { id: 'JP', name: 'Япония', color: '#be123c', money: 13000000, influence: 160, taxRate: 0.05, lastNetIncome: 0, army: this.generateEmptyArmy(), tech: this.generateBaseTech() },
-            'KZ': { id: 'KZ', name: 'Казахстан', color: '#047857', money: 4000000, influence: 70, taxRate: 0.05, lastNetIncome: 0, army: this.generateEmptyArmy(), tech: this.generateBaseTech() },
-            'IQ': { id: 'IQ', name: 'Ирак', color: '#ca8a04', money: 3000000, influence: 50, taxRate: 0.05, lastNetIncome: 0, army: this.generateEmptyArmy(), tech: this.generateBaseTech() },
-            'IR': { id: 'IR', name: 'Иран', color: '#4338ca', money: 6000000, influence: 90, taxRate: 0.05, lastNetIncome: 0, army: this.generateEmptyArmy(), tech: this.generateBaseTech() },
-            'SA': { id: 'SA', name: 'Саудовская Аравия', color: '#15803d', money: 12000000, influence: 110, taxRate: 0.05, lastNetIncome: 0, army: this.generateEmptyArmy(), tech: this.generateBaseTech() },
-            'AT': { id: 'AT', name: 'Австрия', color: '#6b7280', money: 4000000, influence: 65, taxRate: 0.05, lastNetIncome: 0, army: this.generateEmptyArmy(), tech: this.generateBaseTech() },
-            'CZ': { id: 'CZ', name: 'Чехия', color: '#475569', money: 3500000, influence: 60, taxRate: 0.05, lastNetIncome: 0, army: this.generateEmptyArmy(), tech: this.generateBaseTech() },
-            'FI': { id: 'FI', name: 'Финляндия', color: '#0284c7', money: 3500000, influence: 55, taxRate: 0.05, lastNetIncome: 0, army: this.generateEmptyArmy(), tech: this.generateBaseTech() },
-            'SE': { id: 'SE', name: 'Швеция', color: '#0369a1', money: 5500000, influence: 85, taxRate: 0.05, lastNetIncome: 0, army: this.generateEmptyArmy(), tech: this.generateBaseTech() },
-            'NO': { id: 'NO', name: 'Норвегия', color: '#0c4a6e', money: 6000000, influence: 80, taxRate: 0.05, lastNetIncome: 0, army: this.generateEmptyArmy(), tech: this.generateBaseTech() },
-            'CH': { id: 'CH', name: 'Швейцария', color: '#991b1b', money: 7000000, influence: 90, taxRate: 0.05, lastNetIncome: 0, army: this.generateEmptyArmy(), tech: this.generateBaseTech() },
-            'PT': { id: 'PT', name: 'Португалия', color: '#b45309', money: 3000000, influence: 50, taxRate: 0.05, lastNetIncome: 0, army: this.generateEmptyArmy(), tech: this.generateBaseTech() },
-            'GR': { id: 'GR', name: 'Греция', color: '#1d4ed8', money: 2500000, influence: 50, taxRate: 0.05, lastNetIncome: 0, army: this.generateEmptyArmy(), tech: this.generateBaseTech() },
-            'RS': { id: 'RS', name: 'Сербия', color: '#7f1d1d', money: 2000000, influence: 40, taxRate: 0.05, lastNetIncome: 0, army: this.generateEmptyArmy(), tech: this.generateBaseTech() },
-            'HR': { id: 'HR', name: 'Хорватия', color: '#1e40af', money: 2200000, influence: 40, taxRate: 0.05, lastNetIncome: 0, army: this.generateEmptyArmy(), tech: this.generateBaseTech() },
-            'BA': { id: 'BA', name: 'Босния и Герцеговина', color: '#047857', money: 1000000, influence: 25, taxRate: 0.05, lastNetIncome: 0, army: this.generateEmptyArmy(), tech: this.generateBaseTech() },
-            'ME': { id: 'ME', name: 'Черногория', color: '#b91c1c', money: 800000, influence: 20, taxRate: 0.05, lastNetIncome: 0, army: this.generateEmptyArmy(), tech: this.generateBaseTech() },
-            'MK': { id: 'MK', name: 'Северная Македония', color: '#c2410c', money: 900000, influence: 20, taxRate: 0.05, lastNetIncome: 0, army: this.generateEmptyArmy(), tech: this.generateBaseTech() },
-            'AL': { id: 'AL', name: 'Албания', color: '#991b1b', money: 1000000, influence: 25, taxRate: 0.05, lastNetIncome: 0, army: this.generateEmptyArmy(), tech: this.generateBaseTech() },
-            'SI': { id: 'SI', name: 'Словения', color: '#0f766e', money: 2000000, influence: 35, taxRate: 0.05, lastNetIncome: 0, army: this.generateEmptyArmy(), tech: this.generateBaseTech() },
-            'EE': { id: 'EE', name: 'Эстония', color: '#0369a1', money: 1500000, influence: 35, taxRate: 0.05, lastNetIncome: 0, army: this.generateEmptyArmy(), tech: this.generateBaseTech() },
-            'LV': { id: 'LV', name: 'Латвия', color: '#881337', money: 1500000, influence: 35, taxRate: 0.05, lastNetIncome: 0, army: this.generateEmptyArmy(), tech: this.generateBaseTech() },
-            'LT': { id: 'LT', name: 'Литва', color: '#f59e0b', money: 1800000, influence: 40, taxRate: 0.05, lastNetIncome: 0, army: this.generateEmptyArmy(), tech: this.generateBaseTech() },
-            'DK': { id: 'DK', name: 'Дания', color: '#dc2626', money: 4500000, influence: 65, taxRate: 0.05, lastNetIncome: 0, army: this.generateEmptyArmy(), tech: this.generateBaseTech() },
-            'NL': { id: 'NL', name: 'Нидерланды', color: '#ea580c', money: 7500000, influence: 95, taxRate: 0.05, lastNetIncome: 0, army: this.generateEmptyArmy(), tech: this.generateBaseTech() },
-            'BE': { id: 'BE', name: 'Бельгия', color: '#4338ca', money: 6500000, influence: 85, taxRate: 0.05, lastNetIncome: 0, army: this.generateEmptyArmy(), tech: this.generateBaseTech() },
-            'IE': { id: 'IE', name: 'Ирландия', color: '#15803d', money: 5500000, influence: 60, taxRate: 0.05, lastNetIncome: 0, army: this.generateEmptyArmy(), tech: this.generateBaseTech() },
-            'CY': { id: 'CY', name: 'Кипр', color: '#d97706', money: 1200000, influence: 25, taxRate: 0.05, lastNetIncome: 0, army: this.generateEmptyArmy(), tech: this.generateBaseTech() },
-            'IS': { id: 'IS', name: 'Исландия', color: '#0284c7', money: 1500000, influence: 30, taxRate: 0.05, lastNetIncome: 0, army: this.generateEmptyArmy(), tech: this.generateBaseTech() },
-            'LU': { id: 'LU', name: 'Люксембург', color: '#1e3a8a', money: 3000000, influence: 40, taxRate: 0.05, lastNetIncome: 0, army: this.generateEmptyArmy(), tech: this.generateBaseTech() },
-            'AM': { id: 'AM', name: 'Армения', color: '#0284c7', money: 1000000, influence: 30, taxRate: 0.05, lastNetIncome: 0, army: this.generateEmptyArmy(), tech: this.generateBaseTech() },
-            'AZ': { id: 'AZ', name: 'Азербайджан', color: '#047857', money: 3500000, influence: 60, taxRate: 0.05, lastNetIncome: 0, army: this.generateEmptyArmy(), tech: this.generateBaseTech() },
-            'TJ': { id: 'TJ', name: 'Таджикистан', color: '#15803d', money: 1000000, influence: 30, taxRate: 0.05, lastNetIncome: 0, army: this.generateEmptyArmy(), tech: this.generateBaseTech() },
-            'UZ': { id: 'UZ', name: 'Узбекистан', color: '#2563eb', money: 2500000, influence: 50, taxRate: 0.05, lastNetIncome: 0, army: this.generateEmptyArmy(), tech: this.generateBaseTech() },
-            'TM': { id: 'TM', name: 'Туркменистан', color: '#059669', money: 2000000, influence: 40, taxRate: 0.05, lastNetIncome: 0, army: this.generateEmptyArmy(), tech: this.generateBaseTech() },
-            'KG': { id: 'KG', name: 'Кыргызстан', color: '#dc2626', money: 900000, influence: 25, taxRate: 0.05, lastNetIncome: 0, army: this.generateEmptyArmy(), tech: this.generateBaseTech() },
-            'AF': { id: 'AF', name: 'Афганистан', color: '#166534', money: 800000, influence: 30, taxRate: 0.05, lastNetIncome: 0, army: this.generateEmptyArmy(), tech: this.generateBaseTech() },
-            'PK': { id: 'PK', name: 'Пакистан', color: '#047857', money: 5000000, influence: 95, taxRate: 0.05, lastNetIncome: 0, army: this.generateEmptyArmy(), tech: this.generateBaseTech() },
-            'NP': { id: 'NP', name: 'Непал', color: '#dc2626', money: 900000, influence: 25, taxRate: 0.05, lastNetIncome: 0, army: this.generateEmptyArmy(), tech: this.generateBaseTech() },
-            'BT': { id: 'BT', name: 'Бутан', color: '#ea580c', money: 500000, influence: 15, taxRate: 0.05, lastNetIncome: 0, army: this.generateEmptyArmy(), tech: this.generateBaseTech() },
-            'BD': { id: 'BD', name: 'Бангладеш', color: '#15803d', money: 3500000, influence: 55, taxRate: 0.05, lastNetIncome: 0, army: this.generateEmptyArmy(), tech: this.generateBaseTech() },
-            'MM': { id: 'MM', name: 'Мьянма', color: '#b91c1c', money: 2000000, influence: 40, taxRate: 0.05, lastNetIncome: 0, army: this.generateEmptyArmy(), tech: this.generateBaseTech() },
-            'TH': { id: 'TH', name: 'Таиланд', color: '#4338ca', money: 6000000, influence: 85, taxRate: 0.05, lastNetIncome: 0, army: this.generateEmptyArmy(), tech: this.generateBaseTech() },
-            'LA': { id: 'LA', name: 'Лаос', color: '#b91c1c', money: 800000, influence: 20, taxRate: 0.05, lastNetIncome: 0, army: this.generateEmptyArmy(), tech: this.generateBaseTech() },
-            'KH': { id: 'KH', name: 'Камбоджа', color: '#047857', money: 1000000, influence: 25, taxRate: 0.05, lastNetIncome: 0, army: this.generateEmptyArmy(), tech: this.generateBaseTech() },
-            'VN': { id: 'VN', name: 'Вьетнам', color: '#dc2626', money: 4500000, influence: 75, taxRate: 0.05, lastNetIncome: 0, army: this.generateEmptyArmy(), tech: this.generateBaseTech() },
-            'MY': { id: 'MY', name: 'Малайзия', color: '#b45309', money: 6500000, influence: 80, taxRate: 0.05, lastNetIncome: 0, army: this.generateEmptyArmy(), tech: this.generateBaseTech() },
-            'SG': { id: 'SG', name: 'Сингапур', color: '#ef4444', money: 8000000, influence: 70, taxRate: 0.05, lastNetIncome: 0, army: this.generateEmptyArmy(), tech: this.generateBaseTech() },
-            'ID': { id: 'ID', name: 'Индонезия', color: '#dc2626', money: 8500000, influence: 110, taxRate: 0.05, lastNetIncome: 0, army: this.generateEmptyArmy(), tech: this.generateBaseTech() },
-            'PH': { id: 'PH', name: 'Филиппины', color: '#2563eb', money: 5000000, influence: 70, taxRate: 0.05, lastNetIncome: 0, army: this.generateEmptyArmy(), tech: this.generateBaseTech() },
-            'TW': { id: 'TW', name: 'Тайвань', color: '#0284c7', money: 7500000, influence: 85, taxRate: 0.05, lastNetIncome: 0, army: this.generateEmptyArmy(), tech: this.generateBaseTech() },
-            'KP': { id: 'KP', name: 'Северная Корея', color: '#b91c1c', money: 1500000, influence: 40, taxRate: 0.05, lastNetIncome: 0, army: this.generateEmptyArmy(), tech: this.generateBaseTech() },
-            'KR': { id: 'KR', name: 'Южная Корея', color: '#1d4ed8', money: 11000000, influence: 130, taxRate: 0.05, lastNetIncome: 0, army: this.generateEmptyArmy(), tech: this.generateBaseTech() },
-            'MN': { id: 'MN', name: 'Монголия', color: '#d97706', money: 1200000, influence: 30, taxRate: 0.05, lastNetIncome: 0, army: this.generateEmptyArmy(), tech: this.generateBaseTech() },
-            'LK': { id: 'LK', name: 'Шри-Ланка', color: '#15803d', money: 2000000, influence: 40, taxRate: 0.05, lastNetIncome: 0, army: this.generateEmptyArmy(), tech: this.generateBaseTech() },
-            'KW': { id: 'KW', name: 'Кувейт', color: '#047857', money: 5000000, influence: 45, taxRate: 0.05, lastNetIncome: 0, army: this.generateEmptyArmy(), tech: this.generateBaseTech() },
-            'QA': { id: 'QA', name: 'Катар', color: '#7f1d1d', money: 7000000, influence: 50, taxRate: 0.05, lastNetIncome: 0, army: this.generateEmptyArmy(), tech: this.generateBaseTech() },
-            'BH': { id: 'BH', name: 'Бахрейн', color: '#b91c1c', money: 2500000, influence: 30, taxRate: 0.05, lastNetIncome: 0, army: this.generateEmptyArmy(), tech: this.generateBaseTech() },
-            'OM': { id: 'OM', name: 'Оман', color: '#ca8a04', money: 4000000, influence: 45, taxRate: 0.05, lastNetIncome: 0, army: this.generateEmptyArmy(), tech: this.generateBaseTech() },
-            'YE': { id: 'YE', name: 'Йемен', color: '#1e3a8a', money: 1000000, influence: 30, taxRate: 0.05, lastNetIncome: 0, army: this.generateEmptyArmy(), tech: this.generateBaseTech() },
-            'JO': { id: 'JO', name: 'Иордания', color: '#0f766e', money: 2000000, influence: 35, taxRate: 0.05, lastNetIncome: 0, army: this.generateEmptyArmy(), tech: this.generateBaseTech() },
-            'SY': { id: 'SY', name: 'Сирия', color: '#b91c1c', money: 1000000, influence: 35, taxRate: 0.05, lastNetIncome: 0, army: this.generateEmptyArmy(), tech: this.generateBaseTech() },
-            'LB': { id: 'LB', name: 'Ливан', color: '#15803d', money: 1500000, influence: 30, taxRate: 0.05, lastNetIncome: 0, army: this.generateEmptyArmy(), tech: this.generateBaseTech() },
-            'IL': { id: 'IL', name: 'Израиль', color: '#2563eb', money: 8000000, influence: 100, taxRate: 0.05, lastNetIncome: 0, army: this.generateEmptyArmy(), tech: this.generateBaseTech() }
-        };
+        // Загружаем страны динамически из CountriesDB
+        this.countries = {};
+        Object.keys(CountriesDB).forEach(id => {
+            const c = CountriesDB[id];
+            this.countries[id] = {
+                id: id,
+                name: c.name,
+                color: c.color,
+                money: c.money,
+                influence: c.influence,
+                taxRate: c.taxRate,
+                lastNetIncome: 0,
+                army: this.generateEmptyArmy(),
+                tech: this.generateBaseTech()
+            };
+        });
 
         this.regions = {};
         this.history = [];
