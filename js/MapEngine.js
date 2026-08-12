@@ -232,30 +232,51 @@ class MapEngine {
 
     colorRegions() {
         const paths = document.querySelectorAll('.region');
+        
+        // Флаг для определения сенсорных устройств
+        const isTouchDevice = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
+    
         paths.forEach(path => {
-            // Вешаем события ТОЛЬКО ОДИН РАЗ при старте игры
             path.addEventListener('click', (e) => {
-                if (!this.wasDragging) this.onRegionClick(path.id);
-            });
-
-            path.addEventListener('mouseenter', () => {
-                if (!this.isRegionalZoom) {
-                    const countryId = path.getAttribute('data-country');
-                    this.svg.querySelectorAll(`.region[data-country="${countryId}"]`)
-                        .forEach(p => p.classList.add('country-hover'));
+                // Игнорируем клик, если мы тащили карту
+                if (this.wasDragging) {
+                    e.stopPropagation();
+                    e.preventDefault();
+                    return;
                 }
+                this.onRegionClick(path.id);
             });
-
-            path.addEventListener('mouseleave', () => {
-                if (!this.isRegionalZoom) {
-                    const countryId = path.getAttribute('data-country');
-                    this.svg.querySelectorAll(`.region[data-country="${countryId}"]`)
-                        .forEach(p => p.classList.remove('country-hover'));
-                }
-            });
+    
+            // На мобилках hover часто "залипает", поэтому мы его отключаем 
+            // или делаем менее навязчивым. 
+            if (!isTouchDevice) {
+                path.addEventListener('mouseenter', () => {
+                    if (this.isDragging || this.wasDragging) return; // Не подсвечивать при скролле
+    
+                    if (!this.isRegionalZoom) {
+                        // Подсвечиваем всю страну на глобальном уровне
+                        const countryId = path.getAttribute('data-country');
+                        this.svg.querySelectorAll(`.region[data-country="${countryId}"]`)
+                            .forEach(p => p.classList.add('country-hover'));
+                    } else {
+                        // На региональном уровне подсвечивается только CSS (:hover), 
+                        // JS тут не нужен, но если хотите JS-контроль:
+                        path.classList.add('region-hover');
+                    }
+                });
+    
+                path.addEventListener('mouseleave', () => {
+                    if (!this.isRegionalZoom) {
+                        const countryId = path.getAttribute('data-country');
+                        this.svg.querySelectorAll(`.region[data-country="${countryId}"]`)
+                            .forEach(p => p.classList.remove('country-hover'));
+                    } else {
+                        path.classList.remove('region-hover');
+                    }
+                });
+            }
         });
         
-        // Первичная покраска
         this.refreshColors();
     }
 
@@ -286,8 +307,14 @@ class MapEngine {
             if (this.wasDragging) {
                 e.stopPropagation();
                 e.preventDefault();
+                return; // Важно добавить return
+        // Если клик был прямо по SVG (а не по <path> региона) - сбрасываем выделение
+            if (e.target.tagName.toLowerCase() === 'svg') {
+                this.clearSelection();
+                // Отправляем событие, чтобы UI закрыл панель
+                document.dispatchEvent(new Event('panelClosed'));
             }
-        }, true); // true = перехват срабатывает ДО того, как клик дойдет до региона
+        }, false); // Уберите true, чтобы клики по регионам обрабатывались первыми
 
         // --- ПК (МЫШЬ И КОЛЕСИКО) ---
         this.container.addEventListener('wheel', (e) => {
