@@ -165,7 +165,7 @@ class UIManager {
                     <div style="color: #fca5a5; font-size: 0.85em; margin-bottom: 10px; font-weight: bold;">
                         Вероятность успеха: ~${successChance}%
                     </div>
-                    <button id="btn-recon" data-chance="${successChance}" style="background: #8b5cf6; color: white; border: none; padding: 10px 15px; border-radius: 6px; cursor: pointer; font-weight: bold; width: 100%; transition: 0.2s;">
+                    <button id="spy-btn" data-chance="${successChance}" style="background: #8b5cf6; color: white; border: none; padding: 10px 15px; border-radius: 6px; cursor: pointer; font-weight: bold; width: 100%; transition: 0.2s;">
                         Отправить шпионов ($50k)
                     </button>
                 </div>
