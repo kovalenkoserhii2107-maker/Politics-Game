@@ -260,6 +260,8 @@ class MapEngine {
     
     // 3. ИДЕАЛЬНЫЙ ЗУМ ДЛЯ ПК, ANDROID И iPHONE
     initEvents() {
+        this.lastTouchTime = 0; // ЗАЩИТА ОТ ФАНТОМНЫХ КЛИКОВ НА ТЕЛЕФОНЕ
+
         // --- ПК (МЫШЬ И КОЛЕСИКО) ---
         this.container.addEventListener('wheel', (e) => {
             e.preventDefault();
@@ -282,9 +284,12 @@ class MapEngine {
         }, { passive: false });
 
         this.container.addEventListener('mousedown', (e) => {
+            // ИГНОРИРУЕМ ФАНТОМНЫЕ КЛИКИ БРАУЗЕРА ПОСЛЕ КАСАНИЯ ПАЛЬЦЕМ
+            if (Date.now() - this.lastTouchTime < 500) return; 
+
             if (e.button !== 0) return;
             this.isDragging = true;
-            this.wasDragging = false;
+            this.wasDragging = false; // Сбрасываем только для реальной мышки
             this.startX = e.clientX - this.translateX;
             this.startY = e.clientY - this.translateY;
         });
@@ -304,7 +309,7 @@ class MapEngine {
         let initialPinchDist = null;
 
         this.container.addEventListener('touchstart', (e) => {
-            this.wasDragging = false;
+            this.wasDragging = false; // Сбрасываем флаг при касании
             if (e.touches.length === 1) {
                 this.isDragging = true;
                 this.startX = e.touches[0].clientX - this.translateX;
@@ -321,7 +326,7 @@ class MapEngine {
         this.container.addEventListener('touchmove', (e) => {
             e.preventDefault(); 
             if (e.touches.length === 1 && this.isDragging) {
-                this.wasDragging = true;
+                this.wasDragging = true; // ПАЛЕЦ СДВИНУЛСЯ - ЭТО СКРОЛЛ, А НЕ КЛИК!
                 this.translateX = e.touches[0].clientX - this.startX;
                 this.translateY = e.touches[0].clientY - this.startY;
                 this.updateTransform();
@@ -334,7 +339,6 @@ class MapEngine {
                 const oldZoomLevel = this.isRegionalZoom;
                 const oldScale = this.scale;
                 
-                // 1:1 плавный зум от пальцев
                 const factor = currentDist / initialPinchDist;
                 this.scale = Math.min(Math.max(2, this.scale * factor), 80);
 
@@ -355,6 +359,8 @@ class MapEngine {
         }, { passive: false });
 
         this.container.addEventListener('touchend', (e) => {
+            this.lastTouchTime = Date.now(); // ЗАПОМИНАЕМ ВРЕМЯ ОТРЫВА ПАЛЬЦА
+            
             if (e.touches.length === 1) {
                 this.isDragging = true;
                 this.startX = e.touches[0].clientX - this.translateX;
@@ -382,7 +388,6 @@ class MapEngine {
             
             this.scale = Math.min(Math.max(2, iosInitialScale * e.scale), 80);
             
-            // На iPhone зуммируем в центр экрана, чтобы карта не улетала
             const pinchX = window.innerWidth / 2;
             const pinchY = window.innerHeight / 2;
 
@@ -399,6 +404,7 @@ class MapEngine {
 
         this.container.addEventListener('gestureend', (e) => {
             e.preventDefault();
+            this.lastTouchTime = Date.now(); // Защита от кликов для iPhone
         });
     }
 
