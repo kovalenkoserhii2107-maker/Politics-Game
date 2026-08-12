@@ -260,7 +260,16 @@ class MapEngine {
     
     // 3. ИДЕАЛЬНЫЙ ЗУМ ДЛЯ ПК, ANDROID И iPHONE
     initEvents() {
-        this.lastTouchTime = 0; // ЗАЩИТА ОТ ФАНТОМНЫХ КЛИКОВ НА ТЕЛЕФОНЕ
+        this.lastTouchTime = 0; 
+
+        // === ГЛОБАЛЬНЫЙ ПЕРЕХВАТЧИК КЛИКОВ ===
+        // Если мы скроллили карту - жестко блокируем фантомный клик!
+        this.svg.addEventListener('click', (e) => {
+            if (this.wasDragging) {
+                e.stopPropagation();
+                e.preventDefault();
+            }
+        }, true); // true = перехват срабатывает ДО того, как клик дойдет до региона
 
         // --- ПК (МЫШЬ И КОЛЕСИКО) ---
         this.container.addEventListener('wheel', (e) => {
@@ -284,38 +293,51 @@ class MapEngine {
         }, { passive: false });
 
         this.container.addEventListener('mousedown', (e) => {
-            // ИГНОРИРУЕМ ФАНТОМНЫЕ КЛИКИ БРАУЗЕРА ПОСЛЕ КАСАНИЯ ПАЛЬЦЕМ
             if (Date.now() - this.lastTouchTime < 500) return; 
-
             if (e.button !== 0) return;
             this.isDragging = true;
-            this.wasDragging = false; // Сбрасываем только для реальной мышки
+            this.wasDragging = false; 
+            this.mouseStartX = e.clientX;
+            this.mouseStartY = e.clientY;
             this.startX = e.clientX - this.translateX;
             this.startY = e.clientY - this.translateY;
         });
 
         this.container.addEventListener('mousemove', (e) => {
             if (!this.isDragging) return;
-            this.wasDragging = true;
+            
+            // Считаем это перетаскиванием, только если мышь сдвинулась больше чем на 3 пикселя
+            const dx = e.clientX - this.mouseStartX;
+            const dy = e.clientY - this.mouseStartY;
+            if (Math.abs(dx) > 3 || Math.abs(dy) > 3) {
+                this.wasDragging = true;
+            }
+
             this.translateX = e.clientX - this.startX;
             this.translateY = e.clientY - this.startY;
             this.updateTransform();
         });
 
-        this.container.addEventListener('mouseup', () => this.isDragging = false);
+        this.container.addEventListener('mouseup', () => {
+            this.isDragging = false;
+        });
+        
         this.container.addEventListener('mouseleave', () => this.isDragging = false);
 
-        // --- ANDROID (ТАЧСКРИН) ---
+        // --- ANDROID & iOS (ТАЧСКРИН) ---
         let initialPinchDist = null;
 
         this.container.addEventListener('touchstart', (e) => {
-            this.wasDragging = false; // Сбрасываем флаг при касании
+            this.wasDragging = false; 
             if (e.touches.length === 1) {
                 this.isDragging = true;
+                this.touchStartX = e.touches[0].clientX;
+                this.touchStartY = e.touches[0].clientY;
                 this.startX = e.touches[0].clientX - this.translateX;
                 this.startY = e.touches[0].clientY - this.translateY;
             } else if (e.touches.length === 2) {
                 this.isDragging = false;
+                this.wasDragging = true; // Зум - это тоже манипуляция, клик не нужен
                 initialPinchDist = Math.hypot(
                     e.touches[0].clientX - e.touches[1].clientX,
                     e.touches[0].clientY - e.touches[1].clientY
@@ -326,11 +348,20 @@ class MapEngine {
         this.container.addEventListener('touchmove', (e) => {
             e.preventDefault(); 
             if (e.touches.length === 1 && this.isDragging) {
-                this.wasDragging = true; // ПАЛЕЦ СДВИНУЛСЯ - ЭТО СКРОЛЛ, А НЕ КЛИК!
+                
+                // Защита от микро-дрожания пальца. Движение < 4px не считается скроллом
+                const dx = e.touches[0].clientX - this.touchStartX;
+                const dy = e.touches[0].clientY - this.touchStartY;
+                if (Math.abs(dx) > 4 || Math.abs(dy) > 4) {
+                    this.wasDragging = true; 
+                }
+
                 this.translateX = e.touches[0].clientX - this.startX;
                 this.translateY = e.touches[0].clientY - this.startY;
                 this.updateTransform();
             } else if (e.touches.length === 2 && initialPinchDist) {
+                this.wasDragging = true;
+                
                 const currentDist = Math.hypot(
                     e.touches[0].clientX - e.touches[1].clientX,
                     e.touches[0].clientY - e.touches[1].clientY
@@ -359,10 +390,12 @@ class MapEngine {
         }, { passive: false });
 
         this.container.addEventListener('touchend', (e) => {
-            this.lastTouchTime = Date.now(); // ЗАПОМИНАЕМ ВРЕМЯ ОТРЫВА ПАЛЬЦА
+            this.lastTouchTime = Date.now(); 
             
             if (e.touches.length === 1) {
                 this.isDragging = true;
+                this.touchStartX = e.touches[0].clientX;
+                this.touchStartY = e.touches[0].clientY;
                 this.startX = e.touches[0].clientX - this.translateX;
                 this.startY = e.touches[0].clientY - this.translateY;
                 initialPinchDist = null;
@@ -378,11 +411,13 @@ class MapEngine {
         this.container.addEventListener('gesturestart', (e) => {
             e.preventDefault();
             this.isDragging = false;
+            this.wasDragging = true;
             iosInitialScale = this.scale;
         });
 
         this.container.addEventListener('gesturechange', (e) => {
             e.preventDefault();
+            this.wasDragging = true;
             const oldZoomLevel = this.isRegionalZoom;
             const oldScale = this.scale;
             
@@ -404,7 +439,7 @@ class MapEngine {
 
         this.container.addEventListener('gestureend', (e) => {
             e.preventDefault();
-            this.lastTouchTime = Date.now(); // Защита от кликов для iPhone
+            this.lastTouchTime = Date.now(); 
         });
     }
 
