@@ -198,36 +198,7 @@ class UIManager {
         
         if (armyContainer) armyContainer.innerHTML = powerHtml + armyHtml;
 
-        // ВЕШАЕМ СЛУШАТЕЛЬ НА КНОПКУ РАЗВЕДКИ С ВЫЧИСЛЕНИЕМ ШАНСА
-		const spyBtn = document.getElementById('spy-btn'); // Проверьте свой ID кнопки
-        if (spyBtn) {
-            // Проверяем, не отправляли ли мы уже шпионов сюда в этом ходу
-            const isQueued = gameData.orders && gameData.orders.recon && gameData.orders.recon.some(o => o.target === region.id);
-            
-            if (isQueued) {
-                spyBtn.innerText = "Разведка в плане";
-                spyBtn.disabled = true;
-                spyBtn.style.opacity = "0.5";
-            } else {
-                spyBtn.onclick = () => {
-                    const cost = 50000;
-                    const prob = 95; // Или ваша формула вероятности
-                    
-                    if (gameData.queueRecon(region.id, cost, prob, region.name)) {
-                        this.updateTopBar(gameData);
-                        this.updateOrdersPanel(gameData.orders);
-                        
-                        spyBtn.innerText = "Разведка в плане";
-                        spyBtn.disabled = true;
-                        spyBtn.style.opacity = "0.5";
-                    } else {
-                        alert('Недостаточно средств в казне!');
-                    }
-                };
-            }
-        }
-
-        const actionBtns = document.getElementById('action-buttons-container');
+		const actionBtns = document.getElementById('action-buttons-container');
         if (actionBtns) actionBtns.style.display = 'block';
 
         const recruitBtn = document.getElementById('recruit-btn');
@@ -254,6 +225,36 @@ class UIManager {
         if (armyActionPanel) armyActionPanel.style.display = 'none';
         
         this.panel.classList.add('active');
+
+		const spyBtn = document.getElementById('spy-btn');
+        if (spyBtn) {
+            // Проверяем, не отправляли ли мы уже шпионов сюда в этом ходу
+            const isQueued = gameData.orders && gameData.orders.recon && gameData.orders.recon.some(o => o.target === region.id);
+            
+            if (isQueued) {
+                spyBtn.innerText = "Разведка в плане";
+                spyBtn.disabled = true;
+                spyBtn.style.opacity = "0.5";
+                spyBtn.style.cursor = "not-allowed";
+            } else {
+                spyBtn.onclick = () => {
+                    const cost = 50000;
+                    const prob = 95; // Шанс успеха
+                    
+                    if (gameData.queueRecon(region.id, cost, prob, region.name)) {
+                        this.updateTopBar(gameData);
+                        this.updateOrdersPanel(gameData.orders);
+                        
+                        spyBtn.innerText = "Разведка в плане";
+                        spyBtn.disabled = true;
+                        spyBtn.style.opacity = "0.5";
+                        spyBtn.style.cursor = "not-allowed";
+                    } else {
+                        alert('Недостаточно средств для проведения разведки (нужно $50K)!');
+                    }
+                };
+            }
+        }
     }
 
 	updateOrdersPanel(orders) {
