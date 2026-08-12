@@ -16,6 +16,20 @@ class GameCore {
 
         document.addEventListener('zoomLevelChanged', (e) => {
             this.ui.updateZoomMode(e.detail.isRegional);
+            
+            // Логика появления и автоматического скрытия
+            const indicator = document.getElementById('zoom-indicator');
+            if (indicator) {
+                indicator.classList.add('visible'); // Показываем
+                
+                // Если игрок быстро зумит туда-сюда, отменяем старый таймер
+                if (this.zoomTimeout) clearTimeout(this.zoomTimeout);
+                
+                // Прячем ровно через 2 секунды (2000 мс)
+                this.zoomTimeout = setTimeout(() => {
+                    indicator.classList.remove('visible');
+                }, 2000);
+            }
         });
 
         this.initGovPanelLogic();
