@@ -3,123 +3,141 @@
 // =====================================================================
 class GameCore {
     constructor(playerCountryId, cheatMode) {
-        this.data = new GameData(playerCountryId, cheatMode);
-        this.data.buildDatabaseFromSVG();
-        
-        this.ui = new UIManager();
-        this.map = new MapEngine(this.data, (regionId) => this.handleMapClick(regionId));
-        this.loop = new GameLoop(this.data, this.ui, this.map);
-
-        this.armyActionState = {
-            active: false, type: null, fromId: null, forces: {}
-        };
-
-        // Снимаем выделение, когда интерфейс сообщает о закрытии панели
-        document.addEventListener('panelClosed', () => this.map.clearSelection());
-
-        // Глобальный слушатель для кнопок "Отменить" (Крестик) в журнале приказов
-        document.addEventListener('click', (e) => {
-            const btn = e.target.closest('.cancel-order-btn');
-            if (btn) {
-                e.stopPropagation(); 
+        // 1. Асинхронно загружаем SVG-карту перед инициализацией механик
+        fetch('world-map.svg')
+            .then(response => {
+                if (!response.ok) throw new Error("Сетевая ошибка при загрузке карты");
+                return response.text();
+            })
+            .then(svgText => {
+                // 2. Парсим полученный текст в HTML/SVG элементы
+                const parser = new DOMParser();
+                const doc = parser.parseFromString(svgText, 'image/svg+xml');
+                const svgElement = doc.getElementById('world-map');
                 
-                const index = parseInt(btn.dataset.orderIndex);
-                const type = btn.dataset.type; 
+                // 3. Заменяем пустой <svg> в index.html на загруженную карту
+                if (svgElement) {
+                    document.getElementById('world-map').replaceWith(svgElement);
+                } else {
+                    console.error("Не найден элемент #world-map внутри world-map.svg");
+                }
+
+                // ==========================================
+                // СТАРТ ОСНОВНОЙ ЛОГИКИ ИГРЫ (После загрузки карты)
+                // ==========================================
+                this.data = new GameData(playerCountryId, cheatMode);
+                this.data.buildDatabaseFromSVG(); // Теперь карта точно есть на экране
                 
-                if (!isNaN(index) && type && this.data.orders[type]) {
-                    
-                    // === ОТМЕНА РАЗВЕДКИ ===
-                    if (type === 'recon') {
-                        const order = this.data.orders.recon[index];
+                this.ui = new UIManager();
+                this.map = new MapEngine(this.data, (regionId) => this.handleMapClick(regionId));
+                this.loop = new GameLoop(this.data, this.ui, this.map);
+
+                this.armyActionState = {
+                    active: false, type: null, fromId: null, forces: {}
+                };
+
+                // Снимаем выделение, когда интерфейс сообщает о закрытии панели
+                document.addEventListener('panelClosed', () => this.map.clearSelection());
+
+                // Глобальный слушатель для кнопок "Отменить" (Крестик) в журнале приказов
+                document.addEventListener('click', (e) => {
+                    const btn = e.target.closest('.cancel-order-btn');
+                    if (btn) {
+                        e.stopPropagation(); 
                         
-                        const player = this.data.getCountry(this.data.playerCountry);
-                        player.money += order.cost; // Возвращаем $50k
+                        const index = parseInt(btn.dataset.orderIndex);
+                        const type = btn.dataset.type; 
                         
-                        // === ИСПРАВЛЕНО: Правильный вызов обновления верхней панели ===
-                        this.loop.updateTopBarUI(); 
-                        
-                        // Если карточка отмененного региона открыта прямо сейчас — возвращаем кнопку
-                        const actionPanel = document.getElementById('army-action-panel');
-                        if (actionPanel && actionPanel.dataset.regionId === order.target) {
-                            const spyBtn = document.getElementById('spy-btn');
-                            if (spyBtn) {
-                                spyBtn.innerText = "Отправить шпионов ($50k)"; 
-                                spyBtn.disabled = false;
-                                spyBtn.style.opacity = "1";
-                                spyBtn.style.cursor = "pointer";
+                        if (!isNaN(index) && type && this.data.orders[type]) {
+                            
+                            // === ОТМЕНА РАЗВЕДКИ ===
+                            if (type === 'recon') {
+                                const order = this.data.orders.recon[index];
+                                
+                                const player = this.data.getCountry(this.data.playerCountry);
+                                player.money += order.cost; // Возвращаем $50k
+                                
+                                this.loop.updateTopBarUI(); // Обновляем верхнюю панель
+                                
+                                // Если карточка отмененного региона открыта прямо сейчас — возвращаем кнопку
+                                const actionPanel = document.getElementById('army-action-panel');
+                                if (actionPanel && actionPanel.dataset.regionId === order.target) {
+                                    const spyBtn = document.getElementById('spy-btn');
+                                    if (spyBtn) {
+                                        spyBtn.innerText = "Отправить шпионов ($50k)"; 
+                                        spyBtn.disabled = false;
+                                        spyBtn.style.opacity = "1";
+                                        spyBtn.style.cursor = "pointer";
+                                    }
+                                }
+                            }
+                            
+                            // 1. Удаляем приказ из плана
+                            this.data.orders[type].splice(index, 1); 
+                            
+                            // 2. Обновляем окошко (если список станет пустым - оно автоматически закроется)
+                            this.ui.updateOrdersPanel(this.data.orders); 
+                            
+                            // 3. Моментально возвращаем войска в доступный резерв
+                            const actionPanel = document.getElementById('army-action-panel');
+                            if (actionPanel && actionPanel.dataset.regionId) {
+                                const regionId = actionPanel.dataset.regionId;
+                                this.updateActionButtonsVisibility(regionId);
+                                
+                                // Обновляем значения доступных войск на лету
+                                if (actionPanel.style.display === 'block') {
+                                    const availableArmy = this.getAvailableArmy(regionId);
+                                    Object.keys(UnitsDB).forEach(unitId => {
+                                        const count = availableArmy[unitId] || 0;
+                                        const input = document.getElementById(`action-${unitId}-input`);
+                                        const slider = document.getElementById(`action-${unitId}-slider`);
+                                        if (input && slider) {
+                                            input.max = count;
+                                            slider.max = count;
+                                            const row = input.closest('.army-row');
+                                            if (row) {
+                                                const span = row.querySelector('span span');
+                                                if (span) span.innerText = `(Дост: ${count})`;
+                                            }
+                                        }
+                                    });
+                                }
                             }
                         }
                     }
+                });
+                
+                document.addEventListener('zoomLevelChanged', (e) => {
+                    this.ui.updateZoomMode(e.detail.isRegional);
                     
-                    // 1. Удаляем приказ из плана
-                    this.data.orders[type].splice(index, 1); 
-                    
-                    // 2. Обновляем окошко (если список станет пустым - оно автоматически закроется)
-                    this.ui.updateOrdersPanel(this.data.orders); 
-                    
-                    // ... (Остальной ваш код возврата войск для move/attack остается без изменений) ...
-                    
-                    // 3. Моментально возвращаем войска в доступный резерв
-                    const actionPanel = document.getElementById('army-action-panel');
-                    if (actionPanel && actionPanel.dataset.regionId) {
-                        const regionId = actionPanel.dataset.regionId;
-                        this.updateActionButtonsVisibility(regionId);
-                        
-                        // МАГИЯ UX: Если меню ползунков войск открыто прямо сейчас, 
-                        // обновляем значения доступных войск на лету, не закрывая меню!
-                        if (actionPanel.style.display === 'block') {
-                            const availableArmy = this.getAvailableArmy(regionId);
-                            Object.keys(UnitsDB).forEach(unitId => {
-                                const count = availableArmy[unitId] || 0;
-                                const input = document.getElementById(`action-${unitId}-input`);
-                                const slider = document.getElementById(`action-${unitId}-slider`);
-                                if (input && slider) {
-                                    input.max = count;
-                                    slider.max = count;
-                                    const row = input.closest('.army-row');
-                                    if (row) {
-                                        const span = row.querySelector('span span');
-                                        if (span) span.innerText = `(Дост: ${count})`;
-                                    }
-                                }
-                            });
-                        }
+                    const indicator = document.getElementById('zoom-indicator');
+                    if (indicator) {
+                        indicator.classList.add('visible'); 
+                        if (this.zoomTimeout) clearTimeout(this.zoomTimeout);
+                        this.zoomTimeout = setTimeout(() => {
+                            indicator.classList.remove('visible');
+                        }, 2000);
                     }
-                }
-            }
-        });
-        
-        document.addEventListener('zoomLevelChanged', (e) => {
-            this.ui.updateZoomMode(e.detail.isRegional);
-            
-            // Логика появления и автоматического скрытия
-            const indicator = document.getElementById('zoom-indicator');
-            if (indicator) {
-                indicator.classList.add('visible'); // Показываем
-                
-                // Если игрок быстро зумит туда-сюда, отменяем старый таймер
-                if (this.zoomTimeout) clearTimeout(this.zoomTimeout);
-                
-                // Прячем ровно через 2 секунды (2000 мс)
-                this.zoomTimeout = setTimeout(() => {
-                    indicator.classList.remove('visible');
-                }, 2000);
-            }
-        });
+                });
 
-        // Сбрасываем выделение на карте при закрытии боковой панели
-        document.addEventListener('click', (e) => {
-            if (e.target.classList.contains('close-btn')) {
-                this.map.clearSelection();
-            }
-        });
-        
-        this.initGovPanelLogic();
-        this.initMoveLogic(); 
+                document.addEventListener('click', (e) => {
+                    if (e.target.classList.contains('close-btn')) {
+                        this.map.clearSelection();
+                    }
+                });
+                
+                this.initGovPanelLogic();
+                this.initMoveLogic(); 
 
-        document.getElementById('log-btn').addEventListener('click', () => {
-            this.ui.showHistory(this.data.history);
-        });
+                document.getElementById('log-btn').addEventListener('click', () => {
+                    this.ui.showHistory(this.data.history);
+                });
+                
+            })
+            .catch(err => {
+                console.error("Ошибка загрузки файла карты world-map.svg:", err);
+                alert("Не удалось загрузить карту мира. Запустите игру через локальный сервер (например, Live Server в VS Code).");
+            });
     }
 
     // === НОВЫЙ МЕТОД: ВЫЧИСЛЯЕТ СВОБОДНЫЕ ВОЙСКА ===
