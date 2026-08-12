@@ -65,12 +65,27 @@ class GameData {
                     defaultPop = 350000; 
                 }
 
+                // === НОВАЯ ЛОГИКА: УМНЫЕ РЕГИОНЫ НА ОСНОВЕ ГОРОДОВ ===
+                let regionName = `Провинция ${regionId}`;
+                let finalPop = defaultPop;
+                let finalInd = defaultInd;
+
+                // Ищем, есть ли в этом квадрате крупный город из базы
+                const city = typeof CitiesDB !== 'undefined' ? CitiesDB.find(c => c.regionId === regionId) : null;
+                
+                if (city) {
+                    regionName = `Округ ${city.name}`; // Например: "Округ Токио"
+                    // Даем бонус к экономике и населению за город
+                    finalPop = city.isCapital ? defaultPop * 4 : defaultPop * 2;
+                    finalInd = city.isCapital ? defaultInd * 3 : Math.floor(defaultInd * 1.5);
+                }
+
                 const dbInfo = RegionsDB[regionId] || { 
-                    name: `Провинция ${regionId}`, 
-                    population: defaultPop, 
+                    name: regionName, 
+                    population: finalPop, 
                     oil: 0, 
                     agro: defaultAgro, 
-                    industry: defaultInd 
+                    industry: finalInd 
                 };
 
                 this.regions[regionId] = {
