@@ -31,17 +31,21 @@ class GameCore {
                     // === ОТМЕНА РАЗВЕДКИ ===
                     if (type === 'recon') {
                         const order = this.data.orders.recon[index];
-                        this.data.treasury += order.cost; // Возвращаем $50k
+                        
+                        // ПРАВИЛЬНЫЙ ВОЗВРАТ ДЕНЕГ В КАЗНУ ИГРОКА
+                        const player = this.data.getCountry(this.data.playerCountry);
+                        player.money += order.cost; 
                         this.ui.updateTopBar(this.data);
                         
-                        // Если карточка отмененного региона открыта прямо сейчас — возвращаем кнопку к жизни
+                        // Если карточка отмененного региона открыта прямо сейчас — возвращаем кнопку
                         const actionPanel = document.getElementById('army-action-panel');
                         if (actionPanel && actionPanel.dataset.regionId === order.target) {
                             const spyBtn = document.getElementById('spy-btn');
                             if (spyBtn) {
-                                spyBtn.innerText = "Отправить шпионов ($50k)"; // Ваш стандартный текст
+                                spyBtn.innerText = "Отправить шпионов ($50k)"; 
                                 spyBtn.disabled = false;
                                 spyBtn.style.opacity = "1";
+                                spyBtn.style.cursor = "pointer";
                             }
                         }
                     }
