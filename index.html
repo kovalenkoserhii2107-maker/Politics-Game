@@ -343,34 +343,34 @@
             fill-opacity: 0.2 !important; pointer-events: none;
         }
 
-		/* --- ИДЕАЛЬНОЕ ВЫДЕЛЕНИЕ (Без vector-effect, только SVG-единицы) --- */
+		/* --- ИДЕАЛЬНОЕ ВЫДЕЛЕНИЕ (SVG-координаты) --- */
         #world-map .region.selected-region {
             stroke: #ffffff !important;
-            stroke-width: 0.15 !important; /* Тонкая и четкая белая рамка (в 16 раз тоньше, чем было!) */
+            stroke-width: 0.04 !important; /* В 4 раза тоньше */
             fill-opacity: 1 !important;
             filter: brightness(1.4) saturate(1.2) !important;
         }
         
         #world-map .region.selected-country {
             stroke: #ffffff !important;
-            stroke-width: 0.05 !important; /* Очень тонкая линия для границ всей страны */
+            stroke-width: 0.015 !important; /* В 3 раза тоньше */
             fill-opacity: 1 !important;
             filter: brightness(1.2) !important;
         }
 
-        /* --- УМНЫЙ ХОВЕР (Защита от фантомных нажатий на мобильных) --- */
+        /* --- УМНЫЙ ХОВЕР --- */
         @media (hover: hover) {
             #world-map.regional-view .region:not(.selected-region):hover {
                 stroke: #ffffff !important;
-                stroke-width: 0.1 !important;
-                filter: brightness(1.2);
+                stroke-width: 0.025 !important; /* В 4 раза тоньше */
+                filter: brightness(1.2) !important; /* Жестко меняем яркость */
                 cursor: pointer;
             }
             #world-map.global-view .region:not(.selected-country):hover,
             #world-map.global-view .region.country-hover:not(.selected-country) {
                 stroke: rgba(255, 255, 255, 0.8) !important;
-                stroke-width: 0.05 !important;
-                filter: brightness(1.15);
+                stroke-width: 0.015 !important; 
+                filter: brightness(1.15) !important;
                 cursor: pointer;
             }
         }
