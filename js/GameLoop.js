@@ -37,7 +37,7 @@ class GameLoop {
             expenses[id] = 0; 
         });
 
-        // 1. РАСЧЕТ ДОХОДОВ
+// 1. РАСЧЕТ ДОХОДОВ И РАСХОДОВ НА АРМИЮ В РЕГИОНАХ
         Object.values(this.data.regions).forEach(region => {
             const owner = region.owner;
             if (owner && incomes[owner] !== undefined) {
@@ -45,14 +45,20 @@ class GameLoop {
                 const popTax = region.population * country.taxRate * region.loyalty;
                 const indIncome = region.resources.industry * this.INDUSTRY_VALUE;
                 incomes[owner] += (popTax + indIncome);
+
+                // === НОВОЕ: Списываем деньги за солдат, стоящих в этом регионе ===
+                if (region.army) {
+                    Object.keys(UnitsDB).forEach(unitId => {
+                        expenses[owner] += (region.army[unitId] || 0) * UnitsDB[unitId].maintenanceCost;
+                    });
+                }
             }
         });
 
-        // 2. РАСЧЕТ РАСХОДОВ (Динамический)
+        // 2. РАСЧЕТ РАСХОДОВ (Резерв в правительстве)
         Object.keys(this.data.countries).forEach(countryId => {
             const country = this.data.countries[countryId];
             if (country.army) {
-                // Проходимся по всем видам войск и списываем их стоимость содержания
                 Object.keys(UnitsDB).forEach(unitId => {
                     const unitCount = country.army[unitId] || 0;
                     expenses[countryId] += unitCount * UnitsDB[unitId].maintenanceCost;
@@ -114,7 +120,7 @@ class GameLoop {
         document.getElementById('glob-date').innerText = `${d.getDate()} ${this.monthNames[d.getMonth()]} ${d.getFullYear()}`;
     }
 
-    getProjectedNetIncome(countryId) {
+	getProjectedNetIncome(countryId) {
         let income = 0;
         let expense = 0;
         const country = this.data.countries[countryId];
@@ -124,10 +130,17 @@ class GameLoop {
                 const popTax = region.population * country.taxRate * region.loyalty;
                 const indIncome = region.resources.industry * this.INDUSTRY_VALUE;
                 income += (popTax + indIncome);
+
+                // === НОВОЕ: Прогноз расходов на армию в регионе ===
+                if (region.army) {
+                    Object.keys(UnitsDB).forEach(unitId => {
+                        expense += (region.army[unitId] || 0) * UnitsDB[unitId].maintenanceCost;
+                    });
+                }
             }
         });
 
-	// Считаем потенциальные расходы
+        // Считаем потенциальные расходы резерва
         if (country.army) {
             Object.keys(UnitsDB).forEach(unitId => {
                 const unitCount = country.army[unitId] || 0;
