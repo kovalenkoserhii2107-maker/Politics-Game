@@ -50,11 +50,13 @@ class GameCore {
         document.addEventListener('click', (e) => {
             if (e.target.classList.contains('cancel-order-btn')) {
                 const index = parseInt(e.target.dataset.orderIndex);
-                if (!isNaN(index) && this.data.orders) {
-                    this.data.orders.splice(index, 1); // Удаляем приказ из плана
+                const type = e.target.dataset.type; // 'recruitment', 'movements' или 'attacks'
+                
+                if (!isNaN(index) && type && this.data.orders[type]) {
+                    this.data.orders[type].splice(index, 1); // Удаляем приказ из правильной категории
                     this.ui.updateOrdersPanel(this.data.orders); // Перерисовываем журнал
                     
-                    // Обновляем доступные кнопки, если открыта инфо-панель региона
+                    // Возвращаем войска в список доступных, если панель открыта
                     const actionPanel = document.getElementById('army-action-panel');
                     if (actionPanel && actionPanel.dataset.regionId && actionPanel.style.display !== 'block') {
                         this.updateActionButtonsVisibility(actionPanel.dataset.regionId);
