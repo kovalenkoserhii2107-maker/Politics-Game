@@ -424,14 +424,6 @@ class GameCore {
     }
 }
 
-// База доступных для игры стран на стартовом экране (Добавлен color)
-const PlayableFactions = {
-    'UA': { name: 'Украина', color: '#eab308', capital: 'Киев', pop: '~38 млн', area: '603 628 км²', gdp: '$160 млрд', army: '900k+ (вкл. резерв)', wiki: 'https://ru.wikipedia.org/wiki/Украина' },
-    'KZ': { name: 'Казахстан', color: '#047857', capital: 'Астана', pop: '~20 млн', area: '2 724 902 км²', gdp: '$220 млрд', army: '70k+', wiki: 'https://ru.wikipedia.org/wiki/Казахстан' },
-    'DE': { name: 'Германия', color: '#64748b', capital: 'Берлин', pop: '~83 млн', area: '357 022 км²', gdp: '$4.1 трлн', army: '180k+', wiki: 'https://ru.wikipedia.org/wiki/Германия' },
-    'NO': { name: 'Норвегия', color: '#0c4a6e', capital: 'Осло', pop: '~5.4 млн', area: '385 207 км²', gdp: '$480 млрд', army: '23k+', wiki: 'https://ru.wikipedia.org/wiki/Норвегия' }
-};
-
 let selectedFactionId = null;
 
 window.onload = () => {
