@@ -40,33 +40,17 @@ class MapEngine {
     selectRegion(regionId) {
         this.clearSelection();
         const el = document.getElementById(regionId);
-        if (el && el.parentNode) {
+        if (el) {
             el.classList.add('selected-region');
-            
-            // Находим ПЕРВЫЙ элемент текста, города или маркера армии
-            const topLayerObj = this.svg.querySelector('.country-label, .city-marker, .capital-marker, .army-marker');
-            if (topLayerObj && topLayerObj.parentNode === el.parentNode) {
-                // Вставляем регион ПЕРЕД текстом/маркером (чтобы он всегда был ПОД ними)
-                el.parentNode.insertBefore(el, topLayerObj);
-            } else {
-                el.parentNode.appendChild(el);
-            }
+            // Мы убрали перемещение слоев (insertBefore), так как из-за него браузер
+            // "терял" значки войск при перерисовке SVG. Тонкая рамка будет видна и так!
         }
     }
 
     selectCountry(countryId) {
         this.clearSelection();
-        const topLayerObj = this.svg.querySelector('.country-label, .city-marker, .capital-marker, .army-marker');
-        
         this.svg.querySelectorAll(`.region[data-country="${countryId}"]`).forEach(el => {
-            if (el && el.parentNode) {
-                el.classList.add('selected-country');
-                if (topLayerObj && topLayerObj.parentNode === el.parentNode) {
-                    el.parentNode.insertBefore(el, topLayerObj);
-                } else {
-                    el.parentNode.appendChild(el);
-                }
-            }
+            if (el) el.classList.add('selected-country');
         });
     }
 
@@ -545,12 +529,10 @@ class MapEngine {
         let cx = bbox.x + bbox.width / 2;
         let cy = bbox.y + bbox.height / 2;
 
-        // РУЧНАЯ КОРРЕКТИРОВКА ДЛЯ СЛОЖНЫХ РЕГИОНОВ
-        // Смещаем значок (dx: вправо/влево, dy: вниз/вверх)
+        // РУЧНАЯ КОРРЕКТИРОВКА ДЛЯ СЛОЖНЫХ РЕГИОНОВ (Форма полумесяца и т.д.)
         const offsets = {
-            'UA-51': { dx: 3.5, dy: -2 }, // Одесская область (Сдвигаем из Молдовы правее и выше)
-            // Если заметите еще кривой регион, просто добавьте его ID сюда. Например:
-            // 'ID-РЕГИОНА': { dx: 2, dy: -1 }
+            'UA-51': { dx: 3.5, dy: -3 }, // Одесская область (Сдвигаем севернее и правее от Молдовы)
+            // Если заметите еще кривой регион, добавьте его сюда. Формат: 'ID': { dx: X, dy: Y }
         };
 
         if (offsets[id]) {
@@ -562,73 +544,75 @@ class MapEngine {
     }
 
     drawArmyMarkers() {
-        this.svg.querySelectorAll('.army-marker').forEach(el => el.remove());
+        try {
+            this.svg.querySelectorAll('.army-marker').forEach(el => el.remove());
 
-        const playerCountryId = this.gameData.playerCountry;
+            const playerCountryId = this.gameData.playerCountry;
 
-        document.querySelectorAll('.region').forEach(path => {
-            const region = this.gameData.getRegion(path.id);
-            if (!region) return;
+            document.querySelectorAll('.region').forEach(path => {
+                const region = this.gameData.getRegion(path.id);
+                if (!region) return;
 
-            const isOwner = region.owner === playerCountryId;
-            const isNeighbor = this.gameData.isNeighborToPlayer(region.id);
-            const isReconActive = region.reconActiveUntil && region.reconActiveUntil >= this.gameData.currentDate;
-            const power = this.gameData.calculateRegionMilitaryPower(region.id);
+                const isOwner = region.owner === playerCountryId;
+                const isNeighbor = this.gameData.isNeighborToPlayer(region.id);
+                const isReconActive = region.reconActiveUntil && region.reconActiveUntil >= this.gameData.currentDate;
+                
+                // Безопасный подсчет
+                const power = this.gameData.calculateRegionMilitaryPower(region.id) || 0;
 
-            let shouldDraw = false;
-            let icon = '';
-            let textVal = '';
-            let color = '';
+                let shouldDraw = false;
+                let icon = '';
+                let textVal = '';
+                let color = '';
 
-            // ПРАВИЛА ОТОБРАЖЕНИЯ И ЛОГИКА ТУМАНА ВОЙНЫ
-            if (isOwner) {
-                if (power > 0) {
-                    shouldDraw = true;
-                    icon = '🛡️';
-                    textVal = ` ${this.formatPower(power)}`;
-                    color = '#4ade80';
-                }
-            } else {
-                if (power > 0) {
-                    if (isReconActive) {
+                if (isOwner) {
+                    if (power > 0) {
                         shouldDraw = true;
-                        icon = '⚔️';
+                        icon = '🛡️';
                         textVal = ` ${this.formatPower(power)}`;
-                        color = '#f87171';
-                    } else if (isNeighbor) {
-                        shouldDraw = true;
-                        icon = '⚔️';
-                        textVal = ''; 
-                        color = '#f87171';
+                        color = '#4ade80';
+                    }
+                } else {
+                    if (power > 0) {
+                        if (isReconActive) {
+                            shouldDraw = true;
+                            icon = '⚔️';
+                            textVal = ` ${this.formatPower(power)}`;
+                            color = '#f87171';
+                        } else if (isNeighbor) {
+                            shouldDraw = true;
+                            icon = '⚔️';
+                            textVal = ''; 
+                            color = '#f87171';
+                        }
                     }
                 }
-            }
 
-            if (shouldDraw) {
-                // === ИСПОЛЬЗУЕМ НОВУЮ МАТЕМАТИКУ ЦЕНТРА МАСС ===
-                const center = this.getRegionCenter(path);
+                if (shouldDraw) {
+                    const center = this.getRegionCenter(path);
 
-                const group = document.createElementNS("http://www.w3.org/2000/svg", "g");
-                group.setAttribute("class", "army-marker");
-                
-                // Сдвигаем маркер в ИДЕАЛЬНЫЙ центр. 
-                // Y + 0.2 - это легкий сдвиг вниз, чтобы маркер не перекрывал название столицы
-                group.setAttribute("transform", `translate(${center.x}, ${center.y + 0.2})`);
+                    const group = document.createElementNS("http://www.w3.org/2000/svg", "g");
+                    group.setAttribute("class", "army-marker");
+                    group.setAttribute("transform", `translate(${center.x}, ${center.y + 0.2})`);
+                    group.setAttribute("pointer-events", "none"); // Защита от перехвата кликов значком
 
-                const text = document.createElementNS("http://www.w3.org/2000/svg", "text");
-                text.setAttribute("text-anchor", "middle");
-                text.setAttribute("dominant-baseline", "central");
-                text.setAttribute("font-size", "0.25px"); 
-                text.setAttribute("font-weight", "bold");
-                text.setAttribute("fill", color);
-                text.setAttribute("stroke", "rgba(0,0,0,0.8)");
-                text.setAttribute("stroke-width", "0.05px");
-                text.setAttribute("paint-order", "stroke");
+                    const text = document.createElementNS("http://www.w3.org/2000/svg", "text");
+                    text.setAttribute("text-anchor", "middle");
+                    text.setAttribute("dominant-baseline", "central");
+                    text.setAttribute("font-size", "0.25px"); 
+                    text.setAttribute("font-weight", "bold");
+                    text.setAttribute("fill", color);
+                    text.setAttribute("stroke", "rgba(0,0,0,0.8)");
+                    text.setAttribute("stroke-width", "0.05px");
+                    text.setAttribute("paint-order", "stroke");
 
-                text.textContent = icon + textVal;
-                group.appendChild(text);
-                this.svg.appendChild(group);
-            }
-        });
+                    text.textContent = icon + textVal;
+                    group.appendChild(text);
+                    this.svg.appendChild(group);
+                }
+            });
+        } catch(e) {
+            console.error("Ошибка при отрисовке маркеров войск:", e);
+        }
     }
 }
