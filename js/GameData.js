@@ -83,7 +83,7 @@ class GameData {
                     resources: { oil: dbInfo.oil, agro: dbInfo.agro, industry: dbInfo.industry }
                 };
             } else {
-                path.style.display = 'none';
+                path.setAttribute('display', 'none'); 
             }
         });
         
