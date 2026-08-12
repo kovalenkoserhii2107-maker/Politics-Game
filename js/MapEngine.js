@@ -19,6 +19,7 @@ class MapEngine {
         
         this.createCountryLabels();
         this.drawCities();
+        this.drawArmyMarkers(); // <--- НОВАЯ СТРОКА
         this.updateLOD();
     }
 
@@ -298,6 +299,8 @@ class MapEngine {
                 path.setAttribute('data-country', countryId);
             }
         });
+        // Обновляем маркеры армий вместе с покраской карты
+        this.drawArmyMarkers(); // <--- НОВАЯ СТРОКА
     }
     
     // 3. ИДЕАЛЬНЫЙ ЗУМ ДЛЯ ПК, ANDROID И iPHONE
@@ -534,6 +537,84 @@ class MapEngine {
     disableTargetSelection() {
         document.querySelectorAll('.region').forEach(path => {
             path.classList.remove('move-target', 'attack-target', 'dimmed');
+        });
+    }
+
+    formatPower(num) {
+        if (num >= 1000000) return (num / 1000000).toFixed(1) + 'M';
+        if (num >= 1000) return (num / 1000).toFixed(1) + 'K';
+        return Math.floor(num);
+    }
+
+    drawArmyMarkers() {
+        // Удаляем старые маркеры перед перерисовкой
+        this.svg.querySelectorAll('.army-marker').forEach(el => el.remove());
+
+        const playerCountryId = this.gameData.playerCountry;
+
+        document.querySelectorAll('.region').forEach(path => {
+            const region = this.gameData.getRegion(path.id);
+            if (!region) return;
+
+            const isOwner = region.owner === playerCountryId;
+            const isNeighbor = this.gameData.isNeighborToPlayer(region.id);
+            const isReconActive = region.reconActiveUntil && region.reconActiveUntil >= this.gameData.currentDate;
+            const power = this.gameData.calculateRegionMilitaryPower(region.id);
+
+            let shouldDraw = false;
+            let icon = '';
+            let textVal = '';
+            let color = '';
+
+            if (isOwner) {
+                if (power > 0) {
+                    shouldDraw = true;
+                    icon = '🛡️';
+                    textVal = this.formatPower(power);
+                    color = '#4ade80'; // Зеленый для своих
+                }
+            } else {
+                if (isReconActive && power > 0) {
+                    // Если разведка активна, показываем точную мощь врага
+                    shouldDraw = true;
+                    icon = '⚔️';
+                    textVal = this.formatPower(power);
+                    color = '#f87171'; // Ярко-красный
+                } else if (isNeighbor) {
+                    // На границе без разведки показываем только знак вопроса
+                    shouldDraw = true;
+                    icon = '⚔️';
+                    textVal = '?';
+                    color = '#fca5a5'; // Бледно-красный
+                }
+            }
+
+            if (shouldDraw) {
+                const bbox = path.getBBox();
+                if (bbox.width > 0 && bbox.height > 0) {
+                    const centerX = bbox.x + bbox.width / 2;
+                    const centerY = bbox.y + bbox.height / 2 + 0.6; // Опускаем значок чуть ниже названия города
+
+                    const text = document.createElementNS("http://www.w3.org/2000/svg", "text");
+                    text.setAttribute("x", centerX);
+                    text.setAttribute("y", centerY);
+                    text.setAttribute("class", "army-marker");
+                    text.setAttribute("text-anchor", "middle");
+                    text.setAttribute("dominant-baseline", "central");
+                    text.setAttribute("font-size", "0.6px");
+                    text.setAttribute("font-weight", "bold");
+                    text.setAttribute("pointer-events", "none");
+                    text.setAttribute("fill", color);
+                    
+                    // Делаем красивую черную обводку текста, чтобы он читался на любом фоне
+                    text.setAttribute("stroke", "rgba(0,0,0,0.8)");
+                    text.setAttribute("stroke-width", "0.15px");
+                    text.setAttribute("paint-order", "stroke");
+
+                    text.textContent = `${icon} ${textVal}`;
+                    this.svg.appendChild(text);
+                }
+            }
         });
     }
 }
