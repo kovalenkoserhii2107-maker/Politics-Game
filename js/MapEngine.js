@@ -380,6 +380,33 @@ class MapEngine {
                 initialPinchDist = null;
             }
         });
+        
+        // --- СПЕЦИАЛЬНЫЙ ЗУМ ДЛЯ iPHONE / iPAD (Safari Gestures) ---
+        let iosInitialScale = 1;
+
+        this.container.addEventListener('gesturestart', (e) => {
+            e.preventDefault();
+            this.isDragging = false;
+            iosInitialScale = this.scale;
+        });
+
+        this.container.addEventListener('gesturechange', (e) => {
+            e.preventDefault();
+            const oldZoomLevel = this.isRegionalZoom;
+            
+            // Apple сама считает расстояние между пальцами и передает в e.scale
+            this.scale = Math.min(Math.max(2, iosInitialScale * e.scale), 80);
+            this.updateTransform();
+
+            if (oldZoomLevel !== this.isRegionalZoom) {
+                this.updateLOD();
+                document.dispatchEvent(new CustomEvent('zoomLevelChanged', { detail: { isRegional: this.isRegionalZoom }}));
+            }
+        });
+
+        this.container.addEventListener('gestureend', (e) => {
+            e.preventDefault();
+        });
     }
 
     drawCities() {
