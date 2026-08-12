@@ -285,16 +285,37 @@
         
         .gov-summary { margin-top: 20px; font-size: 1.2em; font-weight: bold; text-align: center; padding: 15px; background: rgba(0,0,0,0.5); border-radius: 8px; }
         
-		/* --- РЕЖИМ 1: ГЛОБАЛЬНЫЙ ВИД (Отдаление) --- */
-        #world-map.global-view .region {
-            stroke: transparent; 
-        }
-
-        /* --- РЕЖИМ 2: РЕГИОНАЛЬНЫЙ ВИД (Приближение) --- */
-        #world-map.regional-view .region {
-            stroke: #000;          
-            stroke-width: 0.03;
-        }
+		/* --- ГЛОБАЛЬНЫЙ УРОВЕНЬ --- */
+		/* Наведение (Ховер) */
+		#world-map.global-view .region.country-hover:not(.selected-country) {
+		    stroke: rgba(255, 255, 255, 0.8) !important;
+		    stroke-width: 0.015 !important; 
+		    filter: brightness(1.15) !important;
+		}
+		
+		/* Клик (Выделение) - цвет ярче, границы светятся */
+		#world-map.global-view .region.selected-country {
+		    stroke: #ffffff !important;
+		    stroke-width: 0.02 !important; 
+		    fill-opacity: 1 !important;
+		    filter: brightness(1.3) drop-shadow(0px 0px 1px rgba(255,255,255,0.5)) !important; /* Делаем заливку ярче и добавляем свечение границ */
+		}
+		
+		/* --- РЕГИОНАЛЬНЫЙ УРОВЕНЬ --- */
+		/* Наведение (Ховер) */
+		#world-map.regional-view .region.region-hover:not(.selected-region) {
+		    stroke: #ffffff !important;
+		    stroke-width: 0.025 !important;
+		    filter: brightness(1.2) !important;
+		}
+		
+		/* Клик (Выделение) - цвет ярче */
+		#world-map.regional-view .region.selected-region {
+		    stroke: #ffffff !important;
+		    stroke-width: 0.04 !important;
+		    fill-opacity: 1 !important;
+		    filter: brightness(1.5) saturate(1.2) drop-shadow(0px 0px 0.5px rgba(255,255,255,0.8)) !important;
+		}
 
         /* --- Текстовые метки стран --- */
         .country-label {
@@ -341,21 +362,6 @@
         }
         .region.dimmed {
             fill-opacity: 0.2 !important; pointer-events: none;
-        }
-
-		/* --- ИДЕАЛЬНОЕ ВЫДЕЛЕНИЕ (SVG-координаты) --- */
-        #world-map .region.selected-region {
-            stroke: #ffffff !important;
-            stroke-width: 0.04 !important; /* В 4 раза тоньше */
-            fill-opacity: 1 !important;
-            filter: brightness(1.4) saturate(1.2) !important;
-        }
-        
-        #world-map .region.selected-country {
-            stroke: #ffffff !important;
-            stroke-width: 0.015 !important; /* В 3 раза тоньше */
-            fill-opacity: 1 !important;
-            filter: brightness(1.2) !important;
         }
 
         /* --- УМНЫЙ ХОВЕР --- */
