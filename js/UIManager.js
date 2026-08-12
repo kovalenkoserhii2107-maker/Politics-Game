@@ -176,7 +176,7 @@ class UIManager {
             armyHtml += '<div class="army-list">';
             Object.keys(UnitsDB).forEach(unitId => {
                 const unit = UnitsDB[unitId];
-                const count = region.army[unitId] || 0;
+				const count = (region.army && region.army[unitId]) ? region.army[unitId] : 0;
                 
                 if (count > 0 || isOwner) {
                     hasAnyTroops = true;
