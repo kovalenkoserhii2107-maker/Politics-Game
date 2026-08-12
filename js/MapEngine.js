@@ -42,12 +42,13 @@ class MapEngine {
         if (el && el.parentNode) {
             el.classList.add('selected-region');
             
-            const firstLabel = this.svg.querySelector('.country-label');
-            // БЕЗОПАСНО: перемещаем только если элементы лежат в одном и том же слое (svg)
-            if (firstLabel && firstLabel.parentNode === el.parentNode) {
-                el.parentNode.insertBefore(el, firstLabel);
+            // Вытягиваем регион на передний план, чтобы соседи не перекрывали белую рамку
+            const parent = el.parentNode;
+            const firstLabel = parent.querySelector('.country-label');
+            if (firstLabel) {
+                parent.insertBefore(el, firstLabel);
             } else {
-                el.parentNode.appendChild(el);
+                parent.appendChild(el);
             }
         }
     }
@@ -58,10 +59,12 @@ class MapEngine {
         this.svg.querySelectorAll(`.region[data-country="${countryId}"]`).forEach(el => {
             if (el && el.parentNode) {
                 el.classList.add('selected-country');
-                if (firstLabel && firstLabel.parentNode === el.parentNode) {
-                    el.parentNode.insertBefore(el, firstLabel);
+                
+                const parent = el.parentNode;
+                if (firstLabel && firstLabel.parentNode === parent) {
+                    parent.insertBefore(el, firstLabel);
                 } else {
-                    el.parentNode.appendChild(el);
+                    parent.appendChild(el);
                 }
             }
         });
