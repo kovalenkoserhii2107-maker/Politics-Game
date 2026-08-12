@@ -21,18 +21,38 @@ class GameCore {
         document.addEventListener('click', (e) => {
             const btn = e.target.closest('.cancel-order-btn');
             if (btn) {
-                // ВАЖНО: Останавливаем клик, чтобы он 100% не улетел на карту под панелью
                 e.stopPropagation(); 
                 
                 const index = parseInt(btn.dataset.orderIndex);
                 const type = btn.dataset.type; 
                 
                 if (!isNaN(index) && type && this.data.orders[type]) {
+                    
+                    // === ОТМЕНА РАЗВЕДКИ ===
+                    if (type === 'recon') {
+                        const order = this.data.orders.recon[index];
+                        this.data.treasury += order.cost; // Возвращаем $50k
+                        this.ui.updateTopBar(this.data);
+                        
+                        // Если карточка отмененного региона открыта прямо сейчас — возвращаем кнопку к жизни
+                        const actionPanel = document.getElementById('army-action-panel');
+                        if (actionPanel && actionPanel.dataset.regionId === order.target) {
+                            const spyBtn = document.getElementById('spy-btn');
+                            if (spyBtn) {
+                                spyBtn.innerText = "Отправить шпионов ($50k)"; // Ваш стандартный текст
+                                spyBtn.disabled = false;
+                                spyBtn.style.opacity = "1";
+                            }
+                        }
+                    }
+                    
                     // 1. Удаляем приказ из плана
                     this.data.orders[type].splice(index, 1); 
                     
                     // 2. Обновляем окошко (если список станет пустым - оно автоматически закроется)
                     this.ui.updateOrdersPanel(this.data.orders); 
+                    
+                    // ... (Остальной ваш код возврата войск для move/attack остается без изменений) ...
                     
                     // 3. Моментально возвращаем войска в доступный резерв
                     const actionPanel = document.getElementById('army-action-panel');
