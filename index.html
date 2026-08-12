@@ -343,35 +343,39 @@
             fill-opacity: 0.2 !important; pointer-events: none;
         }
 
-		/* --- УМНЫЙ ХОВЕР (ТОЛЬКО ДЛЯ ПК, защита от фантомных нажатий на смартфонах) --- */
+		/* --- УМНЫЙ ХОВЕР (Работает только на ПК мышкой) --- */
         @media (hover: hover) {
-            #world-map.global-view .region:not(.selected-country):hover,
-            #world-map.global-view .region.country-hover:not(.selected-country) {
-                fill-opacity: 0.8 !important;
-                stroke: rgba(0, 0, 0, 0.3) !important;
-                stroke-width: 0.02 !important;
+            #world-map.regional-view .region:not(.selected-region):hover {
+                stroke: #ffffff !important;
+                stroke-width: 1.5px !important;
+                vector-effect: non-scaling-stroke !important;
+                filter: brightness(1.2);
                 cursor: pointer;
             }
-            #world-map.regional-view .region:not(.selected-region):hover {
-                fill-opacity: 0.8 !important;
-                stroke: #ffffff !important;
-                stroke-width: 0.08 !important;
+            #world-map.global-view .region:not(.selected-country):hover,
+            #world-map.global-view .region.country-hover:not(.selected-country) {
+                stroke: rgba(255, 255, 255, 0.8) !important;
+                stroke-width: 1px !important;
+                vector-effect: non-scaling-stroke !important;
+                filter: brightness(1.15);
                 cursor: pointer;
             }
         }
-
-        /* --- ЖЕЛЕЗОБЕТОННОЕ ВЫДЕЛЕНИЕ (Никогда не сбрасывается и не просвечивается) --- */
+		
+		/* --- ИДЕАЛЬНОЕ ВЫДЕЛЕНИЕ (Не зависит от зума и перекрытий) --- */
         #world-map .region.selected-region {
             stroke: #ffffff !important;
-            stroke-width: 0.3 !important;       /* Белая граница */
-            fill-opacity: 1 !important;         /* НИКАКОЙ ПРОЗРАЧНОСТИ */
-            filter: brightness(1.4) !important; /* Яркая подсветка */
+            stroke-width: 2.5px !important; /* Фиксированная толщина в экранных пикселях */
+            vector-effect: non-scaling-stroke !important; /* Рамка больше не худеет/толстеет при зуме! */
+            fill-opacity: 1 !important;
+            filter: brightness(1.4) saturate(1.2) !important; /* Сочный, яркий цвет */
         }
         
         #world-map .region.selected-country {
-            stroke: #ffffff !important;
-            stroke-width: 0.1 !important;       /* Тонкая граница внутри страны */
-            fill-opacity: 1 !important;         /* НИКАКОЙ ПРОЗРАЧНОСТИ */
+            stroke: rgba(255, 255, 255, 0.5) !important; /* Полупрозрачная граница для внутренних районов страны */
+            stroke-width: 1px !important;
+            vector-effect: non-scaling-stroke !important;
+            fill-opacity: 1 !important;
             filter: brightness(1.2) !important;
         }
 
