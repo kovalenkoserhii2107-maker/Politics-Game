@@ -133,63 +133,38 @@ class MapEngine {
         });
     }
 
+    // 2. ИСПРАВЛЕННОЕ ЦЕНТРИРОВАНИЕ КАМЕРЫ НА СТРАНЕ
     centerMap() {
-        const rect = this.container.getBoundingClientRect();
-        
-        // Надежно получаем размеры экрана
-        const screenWidth = rect.width || window.innerWidth;
-        const screenHeight = rect.height || window.innerHeight;
+        const screenWidth = window.innerWidth;
+        const screenHeight = window.innerHeight;
 
-        // Дефолтные координаты (Центр Европы), если страна вдруг не найдена
-        let targetX = 150; 
-        let targetY = 100; 
-        this.scale = 4; 
-
-        // Ищем все регионы, принадлежащие выбранной стране игрока
-        const playerCountryId = this.gameData.playerCountry;
+        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
         const paths = Array.from(this.svg.querySelectorAll('path')).filter(path => {
-            const regionData = this.gameData.getRegion(path.id);
-            return regionData && regionData.owner === playerCountryId;
+            const region = this.gameData.getRegion(path.id);
+            return region && region.owner === this.gameData.playerCountry;
         });
 
         if (paths.length > 0) {
-            let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-            
-            // Вычисляем крайние точки (габариты) страны в координатах SVG
             paths.forEach(path => {
                 const bbox = path.getBBox(); 
-                if (bbox.x > 10 && bbox.width > 0 && bbox.height > 0) { 
+                if (bbox.width > 0 && bbox.height > 0) { 
                     if (bbox.x < minX) minX = bbox.x;
                     if (bbox.y < minY) minY = bbox.y;
                     if (bbox.x + bbox.width > maxX) maxX = bbox.x + bbox.width;
                     if (bbox.y + bbox.height > maxY) maxY = bbox.y + bbox.height;
                 }
             });
-
-            // 1. Устанавливаем математический центр страны (в сетке 1200x800)
-            targetX = minX + (maxX - minX) / 2;
-            targetY = minY + (maxY - minY) / 2;
-
-            // 2. Умный зум: чтобы страна занимала комфортные 45% экрана
-            const maxDimensionSVG = Math.max(maxX - minX, maxY - minY);
-            if (maxDimensionSVG > 0) {
-                // Вычисляем, насколько браузер сам растянул SVG
-                const svgBaseScale = Math.min(screenWidth / 1200, screenHeight / 800);
-                const countryPixelSize = maxDimensionSVG * svgBaseScale;
-                const desiredPixelSize = Math.min(screenWidth, screenHeight) * 0.45;
-                
-                const desiredScale = desiredPixelSize / countryPixelSize;
-                // Лимитируем зум, чтобы не вывалиться в региональный режим (22)
-                this.scale = Math.min(Math.max(desiredScale, 2.5), 18.0);
-            }
+        } else {
+            minX = 500; minY = 300; maxX = 700; maxY = 500; // Резервный центр
         }
 
-        // 3. СЛОЖНАЯ МАТЕМАТИКА ПЕРЕВОДА: SVG -> Физические пиксели экрана
+        const targetX = minX + (maxX - minX) / 2;
+        const targetY = minY + (maxY - minY) / 2;
+
         const svgAspect = 1200 / 800;
         const screenAspect = screenWidth / screenHeight;
         let baseScale, offsetX = 0, offsetY = 0;
 
-        // Учитываем черные полосы (letterboxing), которые браузер добавляет для сохранения пропорций
         if (screenAspect > svgAspect) {
             baseScale = screenHeight / 800;
             offsetX = (screenWidth - 1200 * baseScale) / 2;
@@ -198,18 +173,23 @@ class MapEngine {
             offsetY = (screenHeight - 800 * baseScale) / 2;
         }
 
-        // Вычисляем реальное положение центра страны на мониторе ДО зума
         const physicalX = offsetX + targetX * baseScale;
         const physicalY = offsetY + targetY * baseScale;
 
-        // 4. Двигаем камеру так, чтобы центр страны оказался ровно по центру экрана
+        const maxDim = Math.max(maxX - minX, maxY - minY) * baseScale;
+        const desiredSize = Math.min(screenWidth, screenHeight) * 0.45;
+        this.scale = maxDim > 0 ? Math.min(Math.max(desiredSize / maxDim, 2.5), 18.0) : 4;
+
         this.translateX = (screenWidth / 2) - (physicalX * this.scale);
         this.translateY = (screenHeight / 2) - (physicalY * this.scale); 
-        
+
         this.updateTransform();
+        this.updateLOD(); 
     }
 
+    // 1. ЖЕСТКО ФИКСИРУЕМ ТОЧКУ ЗУМА
     updateTransform() {
+        this.svg.style.transformOrigin = '0px 0px'; // <--- ЭТО ИСПРАВИТ УЛЕТАНИЕ КАРТЫ ВБОК
         this.svg.style.transform = `translate(${this.translateX}px, ${this.translateY}px) scale(${this.scale})`;
     }
 
@@ -259,17 +239,16 @@ class MapEngine {
         });
     }
 
+    // 3. ИДЕАЛЬНЫЙ ЗУМ ДЛЯ ПК, ANDROID И iPHONE
     initEvents() {
-        // --- СОБЫТИЯ МЫШИ (ПК) ---
+        // --- ПК (МЫШЬ И КОЛЕСИКО) ---
         this.container.addEventListener('wheel', (e) => {
             e.preventDefault();
             const oldZoomLevel = this.isRegionalZoom;
-            
-            const zoomSpeed = 0.15;
-            const delta = e.deltaY < 0 ? 1 : -1; 
             const oldScale = this.scale;
             
-            this.scale += delta * zoomSpeed * this.scale;
+            const delta = e.deltaY < 0 ? 1 : -1; 
+            this.scale += delta * 0.15 * this.scale;
             this.scale = Math.min(Math.max(2, this.scale), 80); 
             
             const mouseX = e.clientX, mouseY = e.clientY;
@@ -302,18 +281,16 @@ class MapEngine {
         this.container.addEventListener('mouseup', () => this.isDragging = false);
         this.container.addEventListener('mouseleave', () => this.isDragging = false);
 
-        // --- СОБЫТИЯ КАСАНИЙ (МОБИЛЬНЫЕ ТЕЛЕФОНЫ / ТАЧСКРИНЫ) ---
+        // --- ANDROID (ТАЧСКРИН) ---
         let initialPinchDist = null;
 
         this.container.addEventListener('touchstart', (e) => {
             this.wasDragging = false;
             if (e.touches.length === 1) {
-                // Перемещение одним пальцем
                 this.isDragging = true;
                 this.startX = e.touches[0].clientX - this.translateX;
                 this.startY = e.touches[0].clientY - this.translateY;
             } else if (e.touches.length === 2) {
-                // Начало зума (щипок)
                 this.isDragging = false;
                 initialPinchDist = Math.hypot(
                     e.touches[0].clientX - e.touches[1].clientX,
@@ -323,53 +300,42 @@ class MapEngine {
         }, { passive: false });
 
         this.container.addEventListener('touchmove', (e) => {
-            e.preventDefault(); // Блокируем скролл телефона
-
+            e.preventDefault(); 
             if (e.touches.length === 1 && this.isDragging) {
-                // Двигаем карту
                 this.wasDragging = true;
                 this.translateX = e.touches[0].clientX - this.startX;
                 this.translateY = e.touches[0].clientY - this.startY;
                 this.updateTransform();
-            } else if (e.touches.length === 2) {
-                // Зум
+            } else if (e.touches.length === 2 && initialPinchDist) {
                 const currentDist = Math.hypot(
                     e.touches[0].clientX - e.touches[1].clientX,
                     e.touches[0].clientY - e.touches[1].clientY
                 );
+                
+                const oldZoomLevel = this.isRegionalZoom;
+                const oldScale = this.scale;
+                
+                // 1:1 плавный зум от пальцев
+                const factor = currentDist / initialPinchDist;
+                this.scale = Math.min(Math.max(2, this.scale * factor), 80);
 
-                if (initialPinchDist) {
-                    const oldZoomLevel = this.isRegionalZoom;
-                    const oldScale = this.scale;
-                    
-                    // Вычисляем разницу между пальцами
-                    const delta = currentDist - initialPinchDist;
-                    
-                    // Скорость зума на телефоне (0.015 - мягкий зум)
-                    this.scale += delta * 0.015 * this.scale;
-                    this.scale = Math.min(Math.max(2, this.scale), 80);
+                const pinchX = (e.touches[0].clientX + e.touches[1].clientX) / 2;
+                const pinchY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
 
-                    // Находим центр между двумя пальцами
-                    const pinchX = (e.touches[0].clientX + e.touches[1].clientX) / 2;
-                    const pinchY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
+                this.translateX = pinchX - (pinchX - this.translateX) * (this.scale / oldScale);
+                this.translateY = pinchY - (pinchY - this.translateY) * (this.scale / oldScale);
 
-                    // Зуммируем ровно в ту точку, где находятся пальцы
-                    this.translateX = pinchX - (pinchX - this.translateX) * (this.scale / oldScale);
-                    this.translateY = pinchY - (pinchY - this.translateY) * (this.scale / oldScale);
+                this.updateTransform();
 
-                    this.updateTransform();
-
-                    if (oldZoomLevel !== this.isRegionalZoom) {
-                        this.updateLOD();
-                        document.dispatchEvent(new CustomEvent('zoomLevelChanged', { detail: { isRegional: this.isRegionalZoom }}));
-                    }
+                if (oldZoomLevel !== this.isRegionalZoom) {
+                    this.updateLOD();
+                    document.dispatchEvent(new CustomEvent('zoomLevelChanged', { detail: { isRegional: this.isRegionalZoom }}));
                 }
-                initialPinchDist = currentDist; // Обновляем для следующего кадра
+                initialPinchDist = currentDist; 
             }
         }, { passive: false });
 
         this.container.addEventListener('touchend', (e) => {
-            // Если убрали один палец из двух - перехватываем управление
             if (e.touches.length === 1) {
                 this.isDragging = true;
                 this.startX = e.touches[0].clientX - this.translateX;
@@ -380,8 +346,8 @@ class MapEngine {
                 initialPinchDist = null;
             }
         });
-        
-        // --- СПЕЦИАЛЬНЫЙ ЗУМ ДЛЯ iPHONE / iPAD (Safari Gestures) ---
+
+        // --- iPHONE / iPAD (Safari Gestures) ---
         let iosInitialScale = 1;
 
         this.container.addEventListener('gesturestart', (e) => {
@@ -393,9 +359,17 @@ class MapEngine {
         this.container.addEventListener('gesturechange', (e) => {
             e.preventDefault();
             const oldZoomLevel = this.isRegionalZoom;
+            const oldScale = this.scale;
             
-            // Apple сама считает расстояние между пальцами и передает в e.scale
             this.scale = Math.min(Math.max(2, iosInitialScale * e.scale), 80);
+            
+            // На iPhone зуммируем в центр экрана, чтобы карта не улетала
+            const pinchX = window.innerWidth / 2;
+            const pinchY = window.innerHeight / 2;
+
+            this.translateX = pinchX - (pinchX - this.translateX) * (this.scale / oldScale);
+            this.translateY = pinchY - (pinchY - this.translateY) * (this.scale / oldScale);
+
             this.updateTransform();
 
             if (oldZoomLevel !== this.isRegionalZoom) {
