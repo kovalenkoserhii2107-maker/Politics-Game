@@ -264,7 +264,8 @@ class UIManager {
         
         list.innerHTML = ''; 
 
-        const totalOrders = orders.recruitment.length + orders.attacks.length + orders.movements.length;
+        // Считаем общее количество приказов (добавили recon)
+        const totalOrders = orders.recruitment.length + orders.attacks.length + orders.movements.length + (orders.recon ? orders.recon.length : 0);
         
         if (totalOrders === 0) {
             panel.style.display = 'none';
@@ -276,32 +277,29 @@ class UIManager {
         const btnStyle = 'background: none; border: none; color: #ef4444; font-size: 1.5em; font-weight: bold; cursor: pointer; padding: 0 5px; line-height: 0.8;';
         const liStyle = 'margin-bottom: 5px; display: flex; justify-content: space-between; align-items: center;';
 
+        // 1. Рекрутинг
         orders.recruitment.forEach((order, index) => { 
             list.innerHTML += `<li style="color: #60a5fa; ${liStyle}"><span>🛡️ ${order.text}</span> <button class="cancel-order-btn" data-type="recruitment" data-order-index="${index}" style="${btnStyle}">&times;</button></li>`; 
         });
 
+        // 2. Разведка (ИСПРАВЛЕННЫЙ БЛОК)
 		if (orders.recon && orders.recon.length > 0) {
             orders.recon.forEach((order, index) => {
-                html += `
-                    <div class="order-item">
-                        <div class="order-info">
-                            <span class="order-icon" style="color: #a855f7;">🕵️</span>
-                            <span>Разведка: <b>${order.regionName}</b></span>
-                        </div>
-                        <button class="cancel-order-btn" data-type="recon" data-order-index="${index}">✖</button>
-                    </div>
-                `;
+                list.innerHTML += `<li style="color: #a855f7; ${liStyle}"><span>🕵️ Разведка: ${order.regionName}</span> <button class="cancel-order-btn" data-type="recon" data-order-index="${index}" style="${btnStyle}">&times;</button></li>`;
             });
         }
 	
+        // 3. Перемещения
         orders.movements.forEach((order, index) => { 
             list.innerHTML += `<li style="color: #c084fc; ${liStyle}"><span>🚚 ${order.text}</span> <button class="cancel-order-btn" data-type="movements" data-order-index="${index}" style="${btnStyle}">&times;</button></li>`; 
         });
         
+        // 4. Атаки
         orders.attacks.forEach((order, index) => { 
             list.innerHTML += `<li style="color: #f87171; ${liStyle}"><span>⚔️ ${order.text}</span> <button class="cancel-order-btn" data-type="attacks" data-order-index="${index}" style="${btnStyle}">&times;</button></li>`; 
         });
     }
+
 
 	closePanel() {
         if(this.panel) this.panel.classList.remove('active');
