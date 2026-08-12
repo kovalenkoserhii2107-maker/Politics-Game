@@ -411,27 +411,23 @@ class GameCore {
 
 let selectedFactionId = null;
 
-// === ИСПРАВЛЕНИЕ: БЕЗОПАСНАЯ ЗАГРУЗКА КАРТЫ ===
+// === ИСПРАВЛЕНИЕ: ПРОБИВАЕМ КЭШ И ВСТАВЛЯЕМ SVG НАДЕЖНО ===
 window.onload = () => {
-    fetch('world-map.svg')
+    // Добавляем ?v=... чтобы заставить GitHub отдать самый свежий файл, игнорируя кэш
+    fetch('world-map.svg?v=' + new Date().getTime())
         .then(response => {
             if (!response.ok) throw new Error("Сетевая ошибка: Файл карты не найден (404)");
             return response.text();
         })
         .then(svgText => {
-            const parser = new DOMParser();
-            const doc = parser.parseFromString(svgText, 'image/svg+xml');
-            const svgElement = doc.getElementById('world-map');
+            // Самый надежный способ вставить SVG в документ (исключает ошибку getBBox)
+            document.getElementById('map-container').innerHTML = svgText;
             
-            if (svgElement) {
-                document.getElementById('world-map').replaceWith(svgElement);
-            }
-            // Запускаем меню только когда карта физически внедрена
+            // Запускаем меню
             initStartScreen();
         })
         .catch(err => {
             console.warn("Внимание: world-map.svg не загружен. Запускаем резервный режим...", err);
-            // Запускаем меню в любом случае, чтобы не блокировать игру!
             initStartScreen();
         });
 };
