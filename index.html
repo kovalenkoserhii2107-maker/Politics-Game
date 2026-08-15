@@ -301,6 +301,25 @@
             filter: brightness(1.2) !important;
         }
 
+        /* --- ЛЕЙБЛЫ --- */
+        #world-map.regional-view .country-label {
+            display: none !important;
+        }
+        
+        #world-map.global-view .region-label {
+            display: none !important;
+        }
+
+        #world-map.regional-view .region-label {
+            display: block;
+            fill: #ffffff;
+            opacity: 0.5;
+            font-size: 1.5px;
+            pointer-events: none;
+            user-select: none;
+            font-weight: bold;
+        }
+
         /* --- УМНЫЙ ХОВЕР --- */
         @media (hover: hover) {
             #world-map.regional-view .region:not(.selected-region):hover {

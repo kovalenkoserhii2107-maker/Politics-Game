@@ -11,12 +11,13 @@ class MapEngine {
         this.translateY = 0;
         this.isDragging = false;
         
-        this.zoomThreshold = 6; // Снизил порог! Теперь не нужно крутить колесо вечность, чтобы увидеть регионы
+        this.zoomThreshold = 3.5; // Снизил порог для регионального уровня
         
         this.initEvents();
         this.centerMap();
         this.colorRegions();
         
+        this.createRegionLabels();
         this.createCountryLabels();
         this.drawCities();
         this.drawArmyMarkers(); // <--- НОВАЯ СТРОКА
@@ -60,86 +61,117 @@ class MapEngine {
         });
     }
 
+    createRegionLabels() {
+        let labelGroup = document.getElementById('region-labels-group');
+        if (!labelGroup) {
+            labelGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+            labelGroup.setAttribute('id', 'region-labels-group');
+            this.svg.appendChild(labelGroup);
+        } else {
+            labelGroup.innerHTML = '';
+        }
+
+        const paths = this.svg.querySelectorAll('.region');
+        paths.forEach(path => {
+            const regionData = this.gameData.getRegion(path.id);
+            if (!regionData) return;
+
+            try {
+                const bbox = path.getBBox();
+                if (bbox.width > 0 && bbox.height > 0) {
+                    const cx = bbox.x + bbox.width / 2;
+                    const cy = bbox.y + bbox.height / 2;
+
+                    const text = document.createElementNS("http://www.w3.org/2000/svg", "text");
+                    text.setAttribute("x", cx);
+                    text.setAttribute("y", cy);
+                    text.setAttribute("text-anchor", "middle"); 
+                    text.setAttribute("dominant-baseline", "central"); 
+                    text.setAttribute("class", "region-label");
+                    // Убираем длинные префиксы, оставляем только название района
+                    text.textContent = regionData.name.replace(/^[A-Z]{2}\s+Регіон\s+/, 'Район ');
+                    
+                    labelGroup.appendChild(text);
+                }
+            } catch(e) {}
+        });
+    }
+
     createCountryLabels() {
         this.svg.querySelectorAll('.country-label').forEach(el => el.remove());
 
         Object.keys(this.gameData.countries).forEach(countryId => {
             const country = this.gameData.countries[countryId];
             
-            const paths = Array.from(this.svg.querySelectorAll('.region')).filter(path => {
-                const regionData = this.gameData.getRegion(path.id);
-                return regionData && regionData.owner === countryId;
-            });
+            const ownedRegionIds = Object.keys(this.gameData.regions).filter(rid => this.gameData.regions[rid].owner === countryId);
+            if (ownedRegionIds.length === 0) return;
 
-            if (paths.length === 0) return;
+            // Find connected components using NeighborsDB
+            let unvisited = new Set(ownedRegionIds);
+            let components = [];
 
-            let regionsStats = [];
-            let totalArea = 0;
+            while (unvisited.size > 0) {
+                let startId = unvisited.values().next().value;
+                let comp = [];
+                let queue = [startId];
+                unvisited.delete(startId);
 
-            paths.forEach(path => {
-                try {
-                    const bbox = path.getBBox();
-                    if (bbox.x > 10 && bbox.width > 0 && bbox.height > 0) { 
-                        const area = bbox.width * bbox.height;
-                        const cx = bbox.x + bbox.width / 2;
-                        const cy = bbox.y + bbox.height / 2;
-                        
-                        regionsStats.push({ cx, cy, area });
-                        totalArea += area;
-                    }
-                } catch(e) {}
-            });
-
-            if (regionsStats.length === 0) return;
-
-            // Group into clusters to find the true "mainland"
-            let clusters = [];
-            regionsStats.forEach(r => {
-                let added = false;
-                for (let c of clusters) {
-                    if (Math.hypot(r.cx - c.cx, r.cy - c.cy) < 50) { // 50px tolerance
-                        c.area += r.area;
-                        c.cx = (c.cx * (c.area - r.area) + r.cx * r.area) / c.area;
-                        c.cy = (c.cy * (c.area - r.area) + r.cy * r.area) / c.area;
-                        c.regions.push(r);
-                        added = true;
-                        break;
+                while (queue.length > 0) {
+                    let curr = queue.shift();
+                    comp.push(curr);
+                    let neighbors = window.NeighborsDB ? window.NeighborsDB[curr] : [];
+                    if (neighbors) {
+                        neighbors.forEach(n => {
+                            if (unvisited.has(n)) {
+                                unvisited.delete(n);
+                                queue.push(n);
+                            }
+                        });
                     }
                 }
-                if (!added) clusters.push({ area: r.area, cx: r.cx, cy: r.cy, regions: [r] });
-            });
-            
-            clusters.sort((a, b) => b.area - a.area);
-            const mainCluster = clusters[0];
+                components.push(comp);
+            }
 
-            const centerX = mainCluster.cx;
-            const centerY = mainCluster.cy;
+            // Find the largest component by area (or number of regions)
+            components.sort((a, b) => b.length - a.length);
+            const mainComponentIds = components[0];
 
-            // Calculate bounding box of the main cluster to fit the text horizontally
             let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
-            mainCluster.regions.forEach(r => {
-                minX = Math.min(minX, r.cx);
-                maxX = Math.max(maxX, r.cx);
-                minY = Math.min(minY, r.cy);
-                maxY = Math.max(maxY, r.cy);
+            
+            mainComponentIds.forEach(rid => {
+                const path = this.svg.querySelector(`#${rid}`);
+                if (path) {
+                    try {
+                        const bbox = path.getBBox();
+                        if (bbox.width > 0) {
+                            minX = Math.min(minX, bbox.x);
+                            maxX = Math.max(maxX, bbox.x + bbox.width);
+                            minY = Math.min(minY, bbox.y);
+                            maxY = Math.max(maxY, bbox.y + bbox.height);
+                        }
+                    } catch(e) {}
+                }
             });
-            // Add approximate cell size (CELL_SIZE=9) to get true width/height
-            const clusterWidth = Math.max(maxX - minX + 10, 10);
-            const clusterHeight = Math.max(maxY - minY + 10, 10);
+
+            if (minX === Infinity) return;
+
+            const centerX = (minX + maxX) / 2;
+            const centerY = (minY + maxY) / 2;
+            const clusterWidth = Math.max(maxX - minX, 10);
+            const clusterHeight = Math.max(maxY - minY, 10);
 
             // Динамический размер: пытаемся вписать текст в ширину и высоту кластера
             const letterCount = country.name.length;
             // Примерная ширина текста = fontSize * letterCount * 0.6
-            // fontSize = clusterWidth * 0.8 / (letterCount * 0.6)
             let calculatedFontSize = (clusterWidth * 0.8) / (letterCount * 0.6);
             
             // Текст не должен превышать высоту кластера
-            if (calculatedFontSize > clusterHeight * 0.7) {
-                calculatedFontSize = clusterHeight * 0.7;
+            if (calculatedFontSize > clusterHeight * 0.8) {
+                calculatedFontSize = clusterHeight * 0.8;
             }
 
             // Ограничиваем шрифты здравым смыслом (от 2 до 24 пикселей)
-            calculatedFontSize = Math.min(Math.max(calculatedFontSize, 2.5), 24.0);
+            calculatedFontSize = Math.min(Math.max(calculatedFontSize, 2.0), 30.0);
 
             // 5. Отрисовываем название
             const text = document.createElementNS("http://www.w3.org/2000/svg", "text");
