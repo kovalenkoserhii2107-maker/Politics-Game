@@ -5,10 +5,10 @@ const turf = require('@turf/turf');
 
 const SVG_FILE = path.join(__dirname, '..', 'world-map.svg');
 const CITIES_FILE = path.join(__dirname, '..', 'js', 'CitiesDB.js');
-const COUNTRIES_FILE = path.join(__dirname, '..', 'js', 'CountriesDB.js');
 const OUTPUT_REGIONS = path.join(__dirname, '..', 'js', 'RegionsDB.js');
+const OUTPUT_NEIGHBORS = path.join(__dirname, '..', 'js', 'NeighborsDB.js');
 
-const CELL_SIZE = 3; 
+const CELL_SIZE = 9; // Grid is 3x larger than before (9x area)
 
 function loadCities() {
     const content = fs.readFileSync(CITIES_FILE, 'utf8');
@@ -17,7 +17,6 @@ function loadCities() {
     return [];
 }
 
-// Naive path parser for point-in-polygon tests (ignores curves, which is fine for dense grids)
 function parseSVGPathToPolygons(d) {
     const polygons = [];
     let currentPoly = [];
@@ -38,7 +37,6 @@ function parseSVGPathToPolygons(d) {
             case 'V': cy=parseFloat(tokens[i]); currentPoly.push([cx,cy]); i++; break;
             case 'v': cy+=parseFloat(tokens[i]); currentPoly.push([cx,cy]); i++; break;
             case 'Z': case 'z': if (currentPoly.length > 2) polygons.push([...currentPoly]); currentPoly=[]; cx=startX; cy=startY; i++; break;
-            // For curves, just use the end point (rough but fast)
             case 'C': cx=parseFloat(tokens[i+4]); cy=parseFloat(tokens[i+5]); currentPoly.push([cx,cy]); i+=6; break;
             case 'c': cx+=parseFloat(tokens[i+4]); cy+=parseFloat(tokens[i+5]); currentPoly.push([cx,cy]); i+=6; break;
             case 'S': case 'Q': cx=parseFloat(tokens[i+2]); cy=parseFloat(tokens[i+3]); currentPoly.push([cx,cy]); i+=4; break;
@@ -76,8 +74,8 @@ function generate() {
     const doc = new DOMParser().parseFromString(svgRaw, 'image/svg+xml');
     const paths = Array.from(doc.getElementsByTagName('path'));
     
-    const countryPolygons = {}; // cc -> array of polygons
-    const countryBBoxes = {}; // cc -> [minX, minY, maxX, maxY]
+    const countryPolygons = {}; 
+    const countryBBoxes = {}; 
     const oldPathsBounds = {}; 
 
     paths.forEach(p => {
@@ -95,7 +93,6 @@ function generate() {
         }
 
         let cx = 0, cy = 0, pts = 0;
-
         polys.forEach(poly => {
             countryPolygons[cc].push(poly);
             poly.forEach(pt => {
@@ -106,8 +103,7 @@ function generate() {
                 if (pt[1] > countryBBoxes[cc][3]) countryBBoxes[cc][3] = pt[1];
             });
         });
-
-        oldPathsBounds[id] = [cx / pts, cy / pts]; // Approximate center
+        oldPathsBounds[id] = [cx / pts, cy / pts]; 
     });
 
     console.log(`Parsed ${Object.keys(countryPolygons).length} countries.`);
@@ -128,12 +124,11 @@ function generate() {
         const width = bbox[2] - bbox[0];
         const height = bbox[3] - bbox[1];
         
-        if (width < CELL_SIZE * 2 && height < CELL_SIZE * 2) {
-            // Small country, 1 region
+        if (width < CELL_SIZE * 1.5 && height < CELL_SIZE * 1.5) {
             const cx = bbox[0] + width / 2;
             const cy = bbox[1] + height / 2;
             const geom = turf.polygon([[[cx-1, cy-1], [cx+1, cy-1], [cx+1, cy+1], [cx-1, cy+1], [cx-1, cy-1]]]);
-            finalRegions[`${cc}-1`] = { geom: geom, cc: cc };
+            finalRegions[`${cc}-1`] = { geom: geom, cc: cc, cx: cx, cy: cy };
             return;
         }
 
@@ -145,18 +140,18 @@ function generate() {
         const cells = [];
         for (let x = startX; x < endX; x += CELL_SIZE) {
             for (let y = startY; y < endY; y += CELL_SIZE) {
-                // Monte Carlo sampling (3x3 points within the cell)
+                // Monte Carlo sampling (5x5 points within the cell for accuracy)
                 let insideCount = 0;
-                for (let i = 1; i <= 3; i++) {
-                    for (let j = 1; j <= 3; j++) {
-                        const px = x + (CELL_SIZE * i / 4);
-                        const py = y + (CELL_SIZE * j / 4);
+                for (let i = 1; i <= 5; i++) {
+                    for (let j = 1; j <= 5; j++) {
+                        const px = x + (CELL_SIZE * i / 6);
+                        const py = y + (CELL_SIZE * j / 6);
                         if (pointInCountry(px, py, polys)) insideCount++;
                     }
                 }
 
                 if (insideCount > 0) {
-                    const areaPct = insideCount / 9;
+                    const areaPct = insideCount / 25;
                     const cellPoly = turf.polygon([[[x, y], [x + CELL_SIZE, y], [x + CELL_SIZE, y + CELL_SIZE], [x, y + CELL_SIZE], [x, y]]]);
                     cells.push({
                         id: `${cc}-G${x/CELL_SIZE}-${y/CELL_SIZE}`,
@@ -195,11 +190,37 @@ function generate() {
 
         validCells.forEach((c, idx) => {
             c.id = `${cc}-G${idx}`;
-            finalRegions[c.id] = { geom: c.geom, cc: cc };
+            finalRegions[c.id] = { geom: c.geom, cc: cc, cx: c.cx, cy: c.cy };
         });
     });
 
     console.log(`Generated ${Object.keys(finalRegions).length} regions.`);
+
+    // NEIGHBOR DETECTION (FAST)
+    console.log('Calculating Neighbors...');
+    const allRegionIds = Object.keys(finalRegions);
+    const neighbors = {};
+
+    for (let i = 0; i < allRegionIds.length; i++) {
+        const id1 = allRegionIds[i];
+        const r1 = finalRegions[id1];
+        neighbors[id1] = new Set();
+
+        for (let j = i + 1; j < allRegionIds.length; j++) {
+            const id2 = allRegionIds[j];
+            const r2 = finalRegions[id2];
+
+            const dx = Math.abs(r1.cx - r2.cx);
+            const dy = Math.abs(r1.cy - r2.cy);
+            
+            // If centers are within ~1.5 grid cells (diagonals included)
+            if (dx <= CELL_SIZE * 1.5 && dy <= CELL_SIZE * 1.5) {
+                neighbors[id1].add(id2);
+                if (!neighbors[id2]) neighbors[id2] = new Set();
+                neighbors[id2].add(id1);
+            }
+        }
+    }
 
     function coordToSVG(coord) {
         if (!coord || coord.length === 0) return '';
@@ -223,7 +244,7 @@ function generate() {
         return pathData.trim();
     }
 
-    let dbContent = `// СГЕНЕРИРОВАНО АВТОМАТИЧЕСКИ (Fast Grid)\nconst RegionsDB = {\n`;
+    let dbContent = `// СГЕНЕРИРОВАНО АВТОМАТИЧЕСКИ (Fast Grid + Neighbors)\nconst RegionsDB = {\n`;
     let count = 0;
     
     Object.keys(finalRegions).forEach(id => {
@@ -253,6 +274,14 @@ function generate() {
     dbContent += `};\n`;
     fs.writeFileSync(OUTPUT_REGIONS, dbContent);
     console.log('Finished writing RegionsDB.js!');
+
+    let nContent = `// СГЕНЕРИРОВАНО АВТОМАТИЧЕСКИ\nconst GeneratedNeighbors = {\n`;
+    Object.keys(neighbors).forEach(id => {
+        nContent += `  '${id}': ['${Array.from(neighbors[id]).join("', '")}'],\n`;
+    });
+    nContent += `};\n`;
+    fs.writeFileSync(OUTPUT_NEIGHBORS, nContent);
+    console.log('Finished writing NeighborsDB.js!');
 }
 
 generate();

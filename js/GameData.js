@@ -43,7 +43,7 @@ class GameData {
         // Оригінальні SVG country paths залишаються для відображення меж/кольорів країн
         // Клікабельні елементи — rect-клітинки сітки
 
-        // 1. Налаштовуємо оригінальні country paths (тільки для відображення, не для кліків)
+        // 1. Налаштовуємо оригінальні country paths
         const countryPaths = document.querySelectorAll('#world-map path');
         countryPaths.forEach(path => {
             if (!path.id) return;
@@ -53,17 +53,15 @@ class GameData {
                 const country = this.countries[cc];
                 if (country && country.color) {
                     path.style.fill = country.color;
-                    path.style.fillOpacity = '1';
                 }
-                path.style.stroke = 'rgba(0,0,0,0.35)';
-                path.style.strokeWidth = '0.2';
+                path.style.opacity = '0'; // MAKE INVISIBLE BUT KEEP RENDERABLE FOR CLIP PATH
                 path.style.pointerEvents = 'none'; // Клік йде на rect нижче
             } else {
-                path.setAttribute('display', 'none');
+                path.style.display = 'none';
             }
         });
 
-        // 1.5 Создаем clipPath для каждой страны
+        // 1.5 Создаем clipPath для каждой страны с помощью cloneNode
         const svgEl = document.getElementById('world-map');
         let defs = svgEl.querySelector('defs');
         if (!defs) {
@@ -75,9 +73,9 @@ class GameData {
             clip.setAttribute('id', `clip-${cc}`);
             const oldPaths = Array.from(svgEl.querySelectorAll(`.region[data-country="${cc}"]`));
             oldPaths.forEach(p => {
-                const use = document.createElementNS('http://www.w3.org/2000/svg', 'use');
-                use.setAttribute('href', `#${p.id}`);
-                clip.appendChild(use);
+                const clone = p.cloneNode(true);
+                clone.removeAttribute('id');
+                clip.appendChild(clone);
             });
             defs.appendChild(clip);
         });
@@ -105,8 +103,8 @@ class GameData {
             path.setAttribute('data-country', countryCode);
             path.setAttribute('fill', this.countries[countryCode].color || '#888');
             path.setAttribute('fill-opacity', '0.001');
-            path.setAttribute('stroke', 'rgba(255,255,255,0.25)');
-            path.setAttribute('stroke-width', '0.5'); 
+            path.setAttribute('stroke', 'rgba(255,255,255,0.4)');
+            path.setAttribute('stroke-width', '1.5'); 
             path.setAttribute('clip-path', `url(#clip-${countryCode})`);
             path.classList.add('region');
 
