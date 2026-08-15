@@ -147,6 +147,7 @@ function generate() {
 
                 polys.forEach(poly => {
                     let feat;
+                    let isValidGeom = true;
                     try {
                         if (poly.length < 3) return;
                         if (poly[0][0] !== poly[poly.length-1][0] || poly[0][1] !== poly[poly.length-1][1]) {
@@ -155,21 +156,29 @@ function generate() {
                         if (poly.length < 4) return;
                         feat = turf.polygon([poly]);
                         feat = turf.simplify(feat, { tolerance: 0.05, highQuality: false });
-                    } catch(e) { return; }
+                    } catch(e) { isValidGeom = false; }
 
-                    const featBbox = turf.bbox(feat);
-                    if (featBbox[0] > cellBbox[2] || featBbox[2] < cellBbox[0] ||
-                        featBbox[1] > cellBbox[3] || featBbox[3] < cellBbox[1]) {
-                        return; // No overlap
+                    if (isValidGeom) {
+                        const featBbox = turf.bbox(feat);
+                        if (featBbox[0] > cellBbox[2] || featBbox[2] < cellBbox[0] ||
+                            featBbox[1] > cellBbox[3] || featBbox[3] < cellBbox[1]) {
+                            return; // No overlap
+                        }
+
+                        try {
+                            const intersected = turf.intersect(turf.featureCollection([cellPoly, feat]));
+                            if (intersected) {
+                                if (!cellIntersection) cellIntersection = intersected;
+                                else cellIntersection = turf.union(turf.featureCollection([cellIntersection, intersected]));
+                            }
+                            return; // SUCCESS, we can return from this subpath
+                        } catch(e) {}
                     }
 
-                    try {
-                        const intersected = turf.intersect(turf.featureCollection([cellPoly, feat]));
-                        if (intersected) {
-                            if (!cellIntersection) cellIntersection = intersected;
-                            else cellIntersection = turf.union(turf.featureCollection([cellIntersection, intersected]));
-                        }
-                    } catch(e) {}
+                    // FALLBACK: if geometry is invalid or intersect failed, check if cell center is inside the subpath
+                    if (pointInPolygon(x + CELL_SIZE/2, y + CELL_SIZE/2, poly)) {
+                        if (!cellIntersection) cellIntersection = cellPoly;
+                    }
                 });
 
                 if (cellIntersection) {

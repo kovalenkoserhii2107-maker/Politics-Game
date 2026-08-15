@@ -64,7 +64,40 @@ class GameData {
             }
         });
 
-        // 1.5 Создаем clipPath удалено, так как обрезка происходит геометрически
+        const svgEl = document.getElementById('world-map');
+        
+        // 1.5 Создаем clipPath для точной обрезки
+        let defs = document.getElementById('map-defs');
+        if (!defs) {
+            defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
+            defs.setAttribute('id', 'map-defs');
+            svgEl.insertBefore(defs, svgEl.firstChild);
+        }
+        defs.innerHTML = '';
+
+        const originalPaths = svgEl.querySelectorAll('path');
+        const clipAdded = new Set();
+        originalPaths.forEach(path => {
+            if (path.id && path.id.length > 0) {
+                const cc = path.id.split('-')[0];
+                if (cc && cc.length === 2 && !clipAdded.has(cc)) {
+                    clipAdded.add(cc);
+                    const clip = document.createElementNS('http://www.w3.org/2000/svg', 'clipPath');
+                    clip.setAttribute('id', `clip-${cc}`);
+                    
+                    const pathsForCc = svgEl.querySelectorAll(`path[id^="${cc}"]`);
+                    pathsForCc.forEach(p => {
+                        // Make sure the path is not a region grid cell, but an original map path
+                        if (!p.classList.contains('region')) {
+                            const use = document.createElementNS('http://www.w3.org/2000/svg', 'use');
+                            use.setAttribute('href', `#${p.id}`);
+                            clip.appendChild(use);
+                        }
+                    });
+                    defs.appendChild(clip);
+                }
+            }
+        });
 
         // 2. Створюємо SVG group для сіткових клітинок
         const svgEl = document.getElementById('world-map');
@@ -93,6 +126,7 @@ class GameData {
             path.setAttribute('fill', this.countries[countryCode].color || '#888');
             path.setAttribute('fill-opacity', '1'); // FULLY VISIBLE
             path.setAttribute('stroke-opacity', '0'); // No white lines by default
+            path.setAttribute('clip-path', `url(#clip-${countryCode})`);
             path.classList.add('region');
 
             gridGroup.appendChild(path);

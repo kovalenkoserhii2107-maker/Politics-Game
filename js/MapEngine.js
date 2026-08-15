@@ -17,7 +17,6 @@ class MapEngine {
         this.centerMap();
         this.colorRegions();
         
-        this.createRegionLabels();
         this.createCountryLabels();
         this.drawCities();
         this.drawArmyMarkers(); // <--- НОВАЯ СТРОКА
@@ -58,42 +57,6 @@ class MapEngine {
     clearSelection() {
         this.svg.querySelectorAll('.selected-region, .selected-country').forEach(el => {
             el.classList.remove('selected-region', 'selected-country');
-        });
-    }
-
-    createRegionLabels() {
-        let labelGroup = document.getElementById('region-labels-group');
-        if (!labelGroup) {
-            labelGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
-            labelGroup.setAttribute('id', 'region-labels-group');
-            this.svg.appendChild(labelGroup);
-        } else {
-            labelGroup.innerHTML = '';
-        }
-
-        const paths = this.svg.querySelectorAll('.region');
-        paths.forEach(path => {
-            const regionData = this.gameData.getRegion(path.id);
-            if (!regionData) return;
-
-            try {
-                const bbox = path.getBBox();
-                if (bbox.width > 0 && bbox.height > 0) {
-                    const cx = bbox.x + bbox.width / 2;
-                    const cy = bbox.y + bbox.height / 2;
-
-                    const text = document.createElementNS("http://www.w3.org/2000/svg", "text");
-                    text.setAttribute("x", cx);
-                    text.setAttribute("y", cy);
-                    text.setAttribute("text-anchor", "middle"); 
-                    text.setAttribute("dominant-baseline", "central"); 
-                    text.setAttribute("class", "region-label");
-                    // Убираем длинные префиксы, оставляем только название района
-                    text.textContent = regionData.name.replace(/^[A-Z]{2}\s+Регіон\s+/, 'Район ');
-                    
-                    labelGroup.appendChild(text);
-                }
-            } catch(e) {}
         });
     }
 
