@@ -66,34 +66,50 @@ class MapEngine {
         Object.keys(this.gameData.countries).forEach(countryId => {
             const country = this.gameData.countries[countryId];
             
-            const ownedRegionIds = Object.keys(this.gameData.regions).filter(rid => this.gameData.regions[rid].owner === countryId);
-            if (ownedRegionIds.length === 0) return;
+            const gridCells = Object.values(this.gameData.regions).filter(r => r.owner === countryId);
+            if (gridCells.length === 0) return;
 
-            // Find connected components using NeighborsDB
-            let unvisited = new Set(ownedRegionIds);
-            let components = [];
+            // 2. Будуємо граф сусідів тільки для ЦІЄЇ країни
+            const graph = {};
+            const cellSet = new Set(gridCells.map(c => c.id));
+            
+            gridCells.forEach(cell => {
+                const id = cell.id;
+                graph[id] = [];
+                const neighbors = typeof GeneratedNeighbors !== 'undefined' ? GeneratedNeighbors[id] : [];
+                if (neighbors) {
+                    neighbors.forEach(nId => {
+                        if (cellSet.has(nId)) {
+                            graph[id].push(nId);
+                        }
+                    });
+                }
+            });
 
-            while (unvisited.size > 0) {
-                let startId = unvisited.values().next().value;
-                let comp = [];
-                let queue = [startId];
-                unvisited.delete(startId);
-
-                while (queue.length > 0) {
-                    let curr = queue.shift();
-                    comp.push(curr);
-                    let neighbors = window.NeighborsDB ? window.NeighborsDB[curr] : [];
-                    if (neighbors) {
-                        neighbors.forEach(n => {
-                            if (unvisited.has(n)) {
-                                unvisited.delete(n);
-                                queue.push(n);
+            // 3. Знаходимо всі компоненти зв'язності (DFS/BFS)
+            const visited = new Set();
+            const components = [];
+            
+            Object.keys(graph).forEach(startNode => {
+                if (!visited.has(startNode)) {
+                    const component = [];
+                    const queue = [startNode];
+                    visited.add(startNode);
+                    
+                    while (queue.length > 0) {
+                        const curr = queue.shift();
+                        component.push(curr);
+                        const nList = graph[curr] || [];
+                        nList.forEach(neighbor => {
+                            if (!visited.has(neighbor)) {
+                                visited.add(neighbor);
+                                queue.push(neighbor);
                             }
                         });
                     }
+                    components.push(component);
                 }
-                components.push(comp);
-            }
+            });
 
             // Find the largest component by area (or number of regions)
             components.sort((a, b) => b.length - a.length);
@@ -103,7 +119,7 @@ class MapEngine {
             let sumX = 0, sumY = 0;
             
             mainComponentIds.forEach(rid => {
-                const dbInfo = window.RegionsDB ? window.RegionsDB[rid] : null;
+                const dbInfo = typeof RegionsDB !== 'undefined' ? RegionsDB[rid] : null;
                 if (dbInfo && dbInfo.cx !== undefined) {
                     minX = Math.min(minX, dbInfo.cx);
                     maxX = Math.max(maxX, dbInfo.cx);
