@@ -89,9 +89,10 @@ class GameData {
                     pathsForCc.forEach(p => {
                         // Make sure the path is not a region grid cell, but an original map path
                         if (!p.classList.contains('region')) {
-                            const use = document.createElementNS('http://www.w3.org/2000/svg', 'use');
-                            use.setAttribute('href', `#${p.id}`);
-                            clip.appendChild(use);
+                            const clone = p.cloneNode(true);
+                            clone.removeAttribute('id'); // Avoid duplicate IDs
+                            clone.style.display = ''; // Ensure the clone is visible for clipping
+                            clip.appendChild(clone);
                         }
                     });
                     defs.appendChild(clip);
