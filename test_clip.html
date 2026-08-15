@@ -1,0 +1,21 @@
+
+<!DOCTYPE html>
+<html>
+<body>
+<svg id="svg" width="200" height="200">
+  <path id="p1" d="M0,0 L100,0 L100,100 L0,100 Z" fill="red" style="display: none"/>
+  <defs id="defs"></defs>
+  <rect id="r1" x="0" y="0" width="200" height="200" fill="blue" clip-path="url(#clip)"/>
+</svg>
+<script>
+  const p1 = document.getElementById('p1');
+  const clone = p1.cloneNode(true);
+  clone.removeAttribute('id');
+  clone.style.display = '';
+  const clip = document.createElementNS('http://www.w3.org/2000/svg', 'clipPath');
+  clip.setAttribute('id', 'clip');
+  clip.appendChild(clone);
+  document.getElementById('defs').appendChild(clip);
+</script>
+</body>
+</html>
