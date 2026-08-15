@@ -53,8 +53,10 @@ class GameData {
                 const country = this.countries[cc];
                 if (country && country.color) {
                     path.style.fill = country.color;
+                    path.style.fillOpacity = '1';
                 }
-                path.style.opacity = '0'; // MAKE INVISIBLE BUT KEEP RENDERABLE FOR CLIP PATH
+                path.style.stroke = 'rgba(0,0,0,0.35)';
+                path.style.strokeWidth = '0.2';
                 path.style.pointerEvents = 'none'; // Клік йде на rect нижче
             } else {
                 path.style.display = 'none';
@@ -102,9 +104,8 @@ class GameData {
             path.setAttribute('d', dbInfo.pathData);
             path.setAttribute('data-country', countryCode);
             path.setAttribute('fill', this.countries[countryCode].color || '#888');
-            path.setAttribute('fill-opacity', '0.001');
-            path.setAttribute('stroke', 'rgba(255,255,255,0.4)');
-            path.setAttribute('stroke-width', '1.5'); 
+            path.setAttribute('fill-opacity', '0.001'); // Invisible normally
+            path.setAttribute('stroke-opacity', '0'); // No white lines by default
             path.setAttribute('clip-path', `url(#clip-${countryCode})`);
             path.classList.add('region');
 
