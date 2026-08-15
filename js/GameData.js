@@ -69,8 +69,8 @@ class GameData {
         if (!gridGroup) {
             gridGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
             gridGroup.setAttribute('id', 'grid-regions');
-            // Вставляємо ПЕРЕД country paths щоб clicks проходили через прозорі rects
-            svgEl.insertBefore(gridGroup, svgEl.firstChild);
+            // Вставляємо ПІСЛЯ country paths щоб сітку було видно ПОВЕРХ країн!
+            svgEl.appendChild(gridGroup);
         }
 
         // 3. Будуємо регіони з RegionsDB

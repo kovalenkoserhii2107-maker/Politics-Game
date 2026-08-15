@@ -6,12 +6,12 @@ class MapEngine {
         this.onRegionClick = onRegionClickCallback;
         
         // НОВЫЕ НАСТРОЙКИ: Географический масштаб
-        this.scale = 15; // Стартовый сильный зум
+        this.scale = 3; // Стартовый зум (нормальный вид мира)
         this.translateX = 0;
         this.translateY = 0;
         this.isDragging = false;
         
-        this.zoomThreshold = 22; // Новая граница перехода LOD (Страна -> Регион)
+        this.zoomThreshold = 6; // Снизил порог! Теперь не нужно крутить колесо вечность, чтобы увидеть регионы
         
         this.initEvents();
         this.centerMap();
@@ -320,8 +320,8 @@ class MapEngine {
             const delta = e.deltaY < 0 ? 1 : -1; 
             this.scale += delta * 0.15 * this.scale;
             
-            // УВЕЛИЧИЛИ ЛИМИТ ЗУМА С 80 ДО 200
-            this.scale = Math.min(Math.max(2, this.scale), 200); 
+            // УВЕЛИЧИЛИ ЛИМИТ ЗУМА ДО 25
+            this.scale = Math.min(Math.max(2, this.scale), 25); 
             
             const mouseX = e.clientX, mouseY = e.clientY;
             this.translateX = mouseX - (mouseX - this.translateX) * (this.scale / oldScale);
@@ -402,8 +402,8 @@ class MapEngine {
                 const oldScale = this.scale;
                 const factor = currentDist / initialPinchDist;
                 
-                // УВЕЛИЧИЛИ ЛИМИТ ЗУМА С 80 ДО 200
-                this.scale = Math.min(Math.max(2, this.scale * factor), 200);
+                // УВЕЛИЧИЛИ ЛИМИТ ЗУМА ДО 25
+                this.scale = Math.min(Math.max(2, this.scale * factor), 25);
 
                 const pinchX = (e.touches[0].clientX + e.touches[1].clientX) / 2;
                 const pinchY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
@@ -450,8 +450,8 @@ class MapEngine {
             const oldZoomLevel = this.isRegionalZoom;
             const oldScale = this.scale;
             
-            // УВЕЛИЧИЛИ ЛИМИТ ЗУМА С 80 ДО 200
-            this.scale = Math.min(Math.max(2, iosInitialScale * e.scale), 200);
+            // УВЕЛИЧИЛИ ЛИМИТ ЗУМА ДО 25
+            this.scale = Math.min(Math.max(2, iosInitialScale * e.scale), 25);
             
             const pinchX = window.innerWidth / 2;
             const pinchY = window.innerHeight / 2;
