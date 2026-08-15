@@ -100,7 +100,6 @@ class GameData {
         });
 
         // 2. Створюємо SVG group для сіткових клітинок
-        const svgEl = document.getElementById('world-map');
         let gridGroup = document.getElementById('grid-regions');
         if (!gridGroup) {
             gridGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
