@@ -63,8 +63,25 @@ class GameData {
             }
         });
 
+        // 1.5 Создаем clipPath для каждой страны
+        let defs = svgEl.querySelector('defs');
+        if (!defs) {
+            defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
+            svgEl.insertBefore(defs, svgEl.firstChild);
+        }
+        Object.keys(this.countries).forEach(cc => {
+            const clip = document.createElementNS('http://www.w3.org/2000/svg', 'clipPath');
+            clip.setAttribute('id', `clip-${cc}`);
+            const oldPaths = Array.from(svgEl.querySelectorAll(`.region[data-country="${cc}"]`));
+            oldPaths.forEach(p => {
+                const use = document.createElementNS('http://www.w3.org/2000/svg', 'use');
+                use.setAttribute('href', `#${p.id}`);
+                clip.appendChild(use);
+            });
+            defs.appendChild(clip);
+        });
+
         // 2. Створюємо SVG group для сіткових клітинок
-        const svgEl = document.getElementById('world-map');
         let gridGroup = document.getElementById('grid-regions');
         if (!gridGroup) {
             gridGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
@@ -80,38 +97,26 @@ class GameData {
 
             if (!this.countries[countryCode]) return;
 
-            // Парсимо координати з ID: CC-GCol-Row
-            const parts = regionId.match(/^(\w+)-G(\d+)-(\d+)$/);
-            if (!parts) return;
+            // Створюємо SVG path — клікабельна клітинка сітки
+            const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+            path.setAttribute('id', regionId);
+            path.setAttribute('d', dbInfo.pathData);
+            path.setAttribute('data-country', countryCode);
+            path.setAttribute('fill', this.countries[countryCode].color || '#888');
+            path.setAttribute('fill-opacity', '0.001');
+            path.setAttribute('stroke', 'rgba(255,255,255,0.25)');
+            path.setAttribute('stroke-width', '0.5'); 
+            path.setAttribute('clip-path', `url(#clip-${countryCode})`);
+            path.classList.add('region');
 
-            const col = parseInt(parts[2]);
-            const row = parseInt(parts[3]);
-            const cell = this._getAdaptiveCellSize(countryCode);
-
-            const x = col * cell;
-            const y = row * cell;
-
-            // Створюємо SVG rect — клікабельна клітинка сітки
-            const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
-            rect.setAttribute('id', regionId);
-            rect.setAttribute('x', x);
-            rect.setAttribute('y', y);
-            rect.setAttribute('width', cell);
-            rect.setAttribute('height', cell);
-            rect.setAttribute('data-country', countryCode);
-            rect.setAttribute('fill', this.countries[countryCode].color || '#888');
-            rect.setAttribute('fill-opacity', '0.001');
-            rect.setAttribute('stroke', 'rgba(255,255,255,0.25)');
-            rect.setAttribute('stroke-width', '0.5'); // Зробив сітку товщою, щоб її було видно!
-            rect.classList.add('region');
-
-            gridGroup.appendChild(rect);
+            gridGroup.appendChild(path);
 
             // Додаємо в базу регіонів
             this.regions[regionId] = {
                 id: regionId,
                 name: dbInfo.name,
                 owner: countryCode,
+                originalOwner: countryCode,
                 population: dbInfo.population,
                 loyalty: 1.0,
                 army: this.generateEmptyArmy(),
