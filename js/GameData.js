@@ -63,26 +63,10 @@ class GameData {
             }
         });
 
-        // 1.5 Создаем clipPath для каждой страны с помощью cloneNode
-        const svgEl = document.getElementById('world-map');
-        let defs = svgEl.querySelector('defs');
-        if (!defs) {
-            defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
-            svgEl.insertBefore(defs, svgEl.firstChild);
-        }
-        Object.keys(this.countries).forEach(cc => {
-            const clip = document.createElementNS('http://www.w3.org/2000/svg', 'clipPath');
-            clip.setAttribute('id', `clip-${cc}`);
-            const oldPaths = Array.from(svgEl.querySelectorAll(`.region[data-country="${cc}"]`));
-            oldPaths.forEach(p => {
-                const clone = p.cloneNode(true);
-                clone.removeAttribute('id');
-                clip.appendChild(clone);
-            });
-            defs.appendChild(clip);
-        });
+        // 1.5 Создаем clipPath удалено, так как обрезка происходит геометрически
 
         // 2. Створюємо SVG group для сіткових клітинок
+        const svgEl = document.getElementById('world-map');
         let gridGroup = document.getElementById('grid-regions');
         if (!gridGroup) {
             gridGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
@@ -106,7 +90,6 @@ class GameData {
             path.setAttribute('fill', this.countries[countryCode].color || '#888');
             path.setAttribute('fill-opacity', '0.001'); // Invisible normally
             path.setAttribute('stroke-opacity', '0'); // No white lines by default
-            path.setAttribute('clip-path', `url(#clip-${countryCode})`);
             path.classList.add('region');
 
             gridGroup.appendChild(path);

@@ -73,11 +73,8 @@ class MapEngine {
 
             if (paths.length === 0) return;
 
-            // 1. Собираем статистику для вычисления "Центра масс" империи
             let regionsStats = [];
             let totalArea = 0;
-            let weightedX = 0;
-            let weightedY = 0;
 
             paths.forEach(path => {
                 try {
@@ -89,27 +86,40 @@ class MapEngine {
                         
                         regionsStats.push({ cx, cy, area });
                         totalArea += area;
-                        weightedX += cx * area;
-                        weightedY += cy * area;
                     }
                 } catch(e) {}
             });
 
             if (regionsStats.length === 0) return;
 
-            // 2. Взвешенный центр империи
-            const centerX = weightedX / totalArea;
-            const centerY = weightedY / totalArea;
+            // Group into clusters to find the true "mainland"
+            let clusters = [];
+            regionsStats.forEach(r => {
+                let added = false;
+                for (let c of clusters) {
+                    if (Math.hypot(r.cx - c.cx, r.cy - c.cy) < 50) { // 50px tolerance
+                        c.area += r.area;
+                        c.cx = (c.cx * (c.area - r.area) + r.cx * r.area) / c.area;
+                        c.cy = (c.cy * (c.area - r.area) + r.cy * r.area) / c.area;
+                        c.regions.push(r);
+                        added = true;
+                        break;
+                    }
+                }
+                if (!added) clusters.push({ area: r.area, cx: r.cx, cy: r.cy, regions: [r] });
+            });
+            
+            clusters.sort((a, b) => b.area - a.area);
+            const mainCluster = clusters[0];
 
-            // ФИЛЬТР: Отбрасываем мелкие острова (меньше 2% площади), чтобы они не ломали ось Норвегии, США, Франции
-            const significantRegions = regionsStats.filter(r => r.area > totalArea * 0.02);
-            const targetRegionsForAxis = significantRegions.length > 0 ? significantRegions : regionsStats;
+            const centerX = mainCluster.cx;
+            const centerY = mainCluster.cy;
 
-            // 3. Вычисляем "Ось империи" по значимым регионам
+            // Вычисляем "Ось империи" по значимым регионам
             let maxDist = 0;
             let furthestRegion = null;
             
-            targetRegionsForAxis.forEach(stat => {
+            mainCluster.regions.forEach(stat => {
                 const dist = Math.hypot(stat.cx - centerX, stat.cy - centerY);
                 if (dist > maxDist) {
                     maxDist = dist;
@@ -118,9 +128,9 @@ class MapEngine {
             });
 
             let angle = 0;
-            let empireLength = Math.sqrt(totalArea);
+            let empireLength = Math.sqrt(mainCluster.area);
 
-            if (furthestRegion && maxDist > Math.sqrt(totalArea) * 0.2) {
+            if (furthestRegion && maxDist > Math.sqrt(mainCluster.area) * 0.2) {
                 let dx = furthestRegion.cx - centerX;
                 let dy = furthestRegion.cy - centerY;
                 angle = Math.atan2(dy, dx) * (180 / Math.PI);
@@ -132,14 +142,11 @@ class MapEngine {
                 empireLength = maxDist * 2.2;
             }
 
-            // 4. Динамический размер без жесткого потолка в 4px
+            // Динамический размер
             const letterCount = country.name.length;
-            
-            // Если BBox дал очень малую площадь (потому что это сетка), мы принудительно делаем текст видимым!
-            // Увеличим базовый множитель для шрифта
             let calculatedFontSize = (empireLength * 1.5) / (letterCount * 0.6);
             
-            calculatedFontSize = Math.min(calculatedFontSize, Math.max(Math.sqrt(totalArea) * 0.8, 8.0), 24.0); 
+            calculatedFontSize = Math.min(calculatedFontSize, Math.max(Math.sqrt(mainCluster.area) * 0.8, 8.0), 24.0); 
             calculatedFontSize = Math.max(calculatedFontSize, 1.5);
 
             // 5. Отрисовываем название

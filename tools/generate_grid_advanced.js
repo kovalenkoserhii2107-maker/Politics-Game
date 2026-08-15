@@ -140,25 +140,48 @@ function generate() {
         const cells = [];
         for (let x = startX; x < endX; x += CELL_SIZE) {
             for (let y = startY; y < endY; y += CELL_SIZE) {
-                // Monte Carlo sampling (5x5 points within the cell for accuracy)
-                let insideCount = 0;
-                for (let i = 1; i <= 5; i++) {
-                    for (let j = 1; j <= 5; j++) {
-                        const px = x + (CELL_SIZE * i / 6);
-                        const py = y + (CELL_SIZE * j / 6);
-                        if (pointInCountry(px, py, polys)) insideCount++;
-                    }
-                }
+                const cellBbox = [x, y, x + CELL_SIZE, y + CELL_SIZE];
+                const cellPoly = turf.polygon([[[x, y], [x + CELL_SIZE, y], [x + CELL_SIZE, y + CELL_SIZE], [x, y + CELL_SIZE], [x, y]]]);
+                
+                let cellIntersection = null;
 
-                if (insideCount > 0) {
-                    const areaPct = insideCount / 25;
-                    const cellPoly = turf.polygon([[[x, y], [x + CELL_SIZE, y], [x + CELL_SIZE, y + CELL_SIZE], [x, y + CELL_SIZE], [x, y]]]);
-                    cells.push({
-                        id: `${cc}-G${x/CELL_SIZE}-${y/CELL_SIZE}`,
-                        geom: cellPoly,
-                        areaPct: areaPct,
-                        cx: x + CELL_SIZE/2, cy: y + CELL_SIZE/2
-                    });
+                polys.forEach(poly => {
+                    let feat;
+                    try {
+                        if (poly.length < 3) return;
+                        if (poly[0][0] !== poly[poly.length-1][0] || poly[0][1] !== poly[poly.length-1][1]) {
+                            poly.push([poly[0][0], poly[0][1]]);
+                        }
+                        if (poly.length < 4) return;
+                        feat = turf.polygon([poly]);
+                        feat = turf.simplify(feat, { tolerance: 0.05, highQuality: false });
+                    } catch(e) { return; }
+
+                    const featBbox = turf.bbox(feat);
+                    if (featBbox[0] > cellBbox[2] || featBbox[2] < cellBbox[0] ||
+                        featBbox[1] > cellBbox[3] || featBbox[3] < cellBbox[1]) {
+                        return; // No overlap
+                    }
+
+                    try {
+                        const intersected = turf.intersect(turf.featureCollection([cellPoly, feat]));
+                        if (intersected) {
+                            if (!cellIntersection) cellIntersection = intersected;
+                            else cellIntersection = turf.union(turf.featureCollection([cellIntersection, intersected]));
+                        }
+                    } catch(e) {}
+                });
+
+                if (cellIntersection) {
+                    const area = turf.area(cellIntersection);
+                    if (area > 0.01) {
+                        cells.push({
+                            id: `${cc}-G${x/CELL_SIZE}-${y/CELL_SIZE}`,
+                            geom: cellIntersection,
+                            area: area,
+                            cx: x + CELL_SIZE/2, cy: y + CELL_SIZE/2
+                        });
+                    }
                 }
             }
         }
@@ -166,8 +189,9 @@ function generate() {
         // Merge small slivers (< 30% area)
         const validCells = [];
         const slivers = [];
+        const fullArea = CELL_SIZE * CELL_SIZE;
         cells.forEach(c => {
-            if (c.areaPct < 0.3) slivers.push(c);
+            if (c.area < fullArea * 0.3) slivers.push(c);
             else validCells.push(c);
         });
 
