@@ -100,28 +100,26 @@ class MapEngine {
             const mainComponentIds = components[0];
 
             let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+            let sumX = 0, sumY = 0;
             
             mainComponentIds.forEach(rid => {
-                const path = this.svg.querySelector(`#${rid}`);
-                if (path) {
-                    try {
-                        const bbox = path.getBBox();
-                        if (bbox.width > 0) {
-                            minX = Math.min(minX, bbox.x);
-                            maxX = Math.max(maxX, bbox.x + bbox.width);
-                            minY = Math.min(minY, bbox.y);
-                            maxY = Math.max(maxY, bbox.y + bbox.height);
-                        }
-                    } catch(e) {}
+                const dbInfo = window.RegionsDB ? window.RegionsDB[rid] : null;
+                if (dbInfo && dbInfo.cx !== undefined) {
+                    minX = Math.min(minX, dbInfo.cx);
+                    maxX = Math.max(maxX, dbInfo.cx);
+                    minY = Math.min(minY, dbInfo.cy);
+                    maxY = Math.max(maxY, dbInfo.cy);
+                    sumX += dbInfo.cx;
+                    sumY += dbInfo.cy;
                 }
             });
 
             if (minX === Infinity) return;
 
-            const centerX = (minX + maxX) / 2;
-            const centerY = (minY + maxY) / 2;
-            const clusterWidth = Math.max(maxX - minX, 10);
-            const clusterHeight = Math.max(maxY - minY, 10);
+            const centerX = sumX / mainComponentIds.length;
+            const centerY = sumY / mainComponentIds.length;
+            const clusterWidth = Math.max(maxX - minX + 25, 25); // +25 to account for cell size
+            const clusterHeight = Math.max(maxY - minY + 25, 25);
 
             // Динамический размер: пытаемся вписать текст в ширину и высоту кластера
             const letterCount = country.name.length;
@@ -133,8 +131,8 @@ class MapEngine {
                 calculatedFontSize = clusterHeight * 0.8;
             }
 
-            // Ограничиваем шрифты здравым смыслом (от 2 до 24 пикселей)
-            calculatedFontSize = Math.min(Math.max(calculatedFontSize, 2.0), 30.0);
+            // Ограничиваем шрифты здравым смыслом (от 4 до 100 пикселей)
+            calculatedFontSize = Math.min(Math.max(calculatedFontSize, 4.0), 100.0);
 
             // 5. Отрисовываем название
             const text = document.createElementNS("http://www.w3.org/2000/svg", "text");

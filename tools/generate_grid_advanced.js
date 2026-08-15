@@ -301,7 +301,7 @@ function generate() {
         const agro = Math.floor(10 + Math.random() * 60);
         const ind = Math.floor(5 + Math.random() * 30);
         
-        dbContent += `  '${id}': { name: '${name.replace(/'/g, "\\'")}', population: ${pop}, agro: ${agro}, industry: ${ind}, oil: 0, pathData: '${pathData}' },\n`;
+        dbContent += `  '${id}': { name: '${name.replace(/'/g, "\\'")}', population: ${pop}, agro: ${agro}, industry: ${ind}, oil: 0, cx: ${Math.round(r.cx)}, cy: ${Math.round(r.cy)}, pathData: '${pathData}' },\n`;
     });
     
     dbContent += `};\n`;
