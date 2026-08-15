@@ -99,7 +99,7 @@ class GameData {
             rect.setAttribute('width', cell);
             rect.setAttribute('height', cell);
             rect.setAttribute('data-country', countryCode);
-            rect.setAttribute('fill', country.color || '#888');
+            rect.setAttribute('fill', this.countries[countryCode].color || '#888');
             rect.setAttribute('fill-opacity', '0.001');
             rect.setAttribute('stroke', 'rgba(255,255,255,0.25)');
             rect.setAttribute('stroke-width', '0.5'); // Зробив сітку товщою, щоб її було видно!
