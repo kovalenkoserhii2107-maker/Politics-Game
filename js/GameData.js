@@ -81,7 +81,7 @@ class GameData {
         // 3. Будуємо регіони з RegionsDB
         Object.keys(RegionsDB).forEach(regionId => {
             const dbInfo = RegionsDB[regionId];
-            const countryCode = dbInfo.country;
+            const countryCode = regionId.split('-')[0];
 
             if (!this.countries[countryCode]) return;
 
