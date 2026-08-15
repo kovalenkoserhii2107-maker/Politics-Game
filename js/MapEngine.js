@@ -115,39 +115,31 @@ class MapEngine {
             const centerX = mainCluster.cx;
             const centerY = mainCluster.cy;
 
-            // Вычисляем "Ось империи" по значимым регионам
-            let maxDist = 0;
-            let furthestRegion = null;
-            
-            mainCluster.regions.forEach(stat => {
-                const dist = Math.hypot(stat.cx - centerX, stat.cy - centerY);
-                if (dist > maxDist) {
-                    maxDist = dist;
-                    furthestRegion = stat;
-                }
+            // Calculate bounding box of the main cluster to fit the text horizontally
+            let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+            mainCluster.regions.forEach(r => {
+                minX = Math.min(minX, r.cx);
+                maxX = Math.max(maxX, r.cx);
+                minY = Math.min(minY, r.cy);
+                maxY = Math.max(maxY, r.cy);
             });
+            // Assume each region contributes some width/height. Add a bit of padding.
+            const clusterWidth = Math.max(maxX - minX + 10, 10);
+            const clusterHeight = Math.max(maxY - minY + 10, 10);
 
-            let angle = 0;
-            let empireLength = Math.sqrt(mainCluster.area);
-
-            if (furthestRegion && maxDist > Math.sqrt(mainCluster.area) * 0.2) {
-                let dx = furthestRegion.cx - centerX;
-                let dy = furthestRegion.cy - centerY;
-                angle = Math.atan2(dy, dx) * (180 / Math.PI);
-                
-                if (angle > 90 || angle < -90) {
-                    angle += 180;
-                }
-                
-                empireLength = maxDist * 2.2;
+            // Динамический размер: пытаемся вписать текст в ширину и высоту кластера
+            const letterCount = country.name.length;
+            // Примерная ширина текста = fontSize * letterCount * 0.6
+            // fontSize = clusterWidth * 0.8 / (letterCount * 0.6)
+            let calculatedFontSize = (clusterWidth * 0.8) / (letterCount * 0.6);
+            
+            // Текст не должен превышать высоту кластера
+            if (calculatedFontSize > clusterHeight * 0.7) {
+                calculatedFontSize = clusterHeight * 0.7;
             }
 
-            // Динамический размер
-            const letterCount = country.name.length;
-            let calculatedFontSize = (empireLength * 1.5) / (letterCount * 0.6);
-            
-            calculatedFontSize = Math.min(calculatedFontSize, Math.max(Math.sqrt(mainCluster.area) * 0.8, 8.0), 24.0); 
-            calculatedFontSize = Math.max(calculatedFontSize, 1.5);
+            // Ограничиваем шрифты здравым смыслом (от 2 до 24 пикселей)
+            calculatedFontSize = Math.min(Math.max(calculatedFontSize, 2.5), 24.0);
 
             // 5. Отрисовываем название
             const text = document.createElementNS("http://www.w3.org/2000/svg", "text");
@@ -157,11 +149,10 @@ class MapEngine {
             text.setAttribute("dominant-baseline", "central"); 
             text.setAttribute("class", "country-label");
             text.style.fontSize = `${calculatedFontSize}px`; 
+            text.style.pointerEvents = "none";
+            text.style.userSelect = "none";
+            text.style.opacity = "0.8"; // Слегка прозрачный, чтобы не перекрывал всё
             text.textContent = country.name; 
-            
-            if (Math.abs(angle) > 5) {
-                text.setAttribute("transform", `rotate(${angle}, ${centerX}, ${centerY})`);
-            }
             
             this.svg.appendChild(text);
         });
