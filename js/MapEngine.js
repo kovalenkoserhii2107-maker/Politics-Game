@@ -66,7 +66,7 @@ class MapEngine {
         Object.keys(this.gameData.countries).forEach(countryId => {
             const country = this.gameData.countries[countryId];
             
-            const paths = Array.from(this.svg.querySelectorAll('path')).filter(path => {
+            const paths = Array.from(this.svg.querySelectorAll('.region')).filter(path => {
                 const regionData = this.gameData.getRegion(path.id);
                 return regionData && regionData.owner === countryId;
             });
@@ -80,17 +80,19 @@ class MapEngine {
             let weightedY = 0;
 
             paths.forEach(path => {
-                const bbox = path.getBBox();
-                if (bbox.x > 10 && bbox.width > 0 && bbox.height > 0) { 
-                    const area = bbox.width * bbox.height;
-                    const cx = bbox.x + bbox.width / 2;
-                    const cy = bbox.y + bbox.height / 2;
-                    
-                    regionsStats.push({ cx, cy, area });
-                    totalArea += area;
-                    weightedX += cx * area;
-                    weightedY += cy * area;
-                }
+                try {
+                    const bbox = path.getBBox();
+                    if (bbox.x > 10 && bbox.width > 0 && bbox.height > 0) { 
+                        const area = bbox.width * bbox.height;
+                        const cx = bbox.x + bbox.width / 2;
+                        const cy = bbox.y + bbox.height / 2;
+                        
+                        regionsStats.push({ cx, cy, area });
+                        totalArea += area;
+                        weightedX += cx * area;
+                        weightedY += cy * area;
+                    }
+                } catch(e) {}
             });
 
             if (regionsStats.length === 0) return;
@@ -132,12 +134,13 @@ class MapEngine {
 
             // 4. Динамический размер без жесткого потолка в 4px
             const letterCount = country.name.length;
-            // Делаем текст на 60% от длины империи
-            let calculatedFontSize = (empireLength * 0.6) / (letterCount * 0.6);
             
-            // Защита от переполнения: шрифт не больше 25% от квадратного корня площади. Верхний лимит подняли с 4 до 18!
-            calculatedFontSize = Math.min(calculatedFontSize, Math.sqrt(totalArea) * 0.25, 16.0); 
-            calculatedFontSize = Math.max(calculatedFontSize, 0.4);
+            // Если BBox дал очень малую площадь (потому что это сетка), мы принудительно делаем текст видимым!
+            // Увеличим базовый множитель для шрифта
+            let calculatedFontSize = (empireLength * 1.5) / (letterCount * 0.6);
+            
+            calculatedFontSize = Math.min(calculatedFontSize, Math.max(Math.sqrt(totalArea) * 0.8, 8.0), 24.0); 
+            calculatedFontSize = Math.max(calculatedFontSize, 1.5);
 
             // 5. Отрисовываем название
             const text = document.createElementNS("http://www.w3.org/2000/svg", "text");
@@ -163,22 +166,26 @@ class MapEngine {
         const screenHeight = window.innerHeight;
 
         let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-        const paths = Array.from(this.svg.querySelectorAll('path')).filter(path => {
+        const paths = Array.from(this.svg.querySelectorAll('.region')).filter(path => {
             const region = this.gameData.getRegion(path.id);
             return region && region.owner === this.gameData.playerCountry;
         });
 
         if (paths.length > 0) {
             paths.forEach(path => {
-                const bbox = path.getBBox(); 
-                if (bbox.width > 0 && bbox.height > 0) { 
-                    if (bbox.x < minX) minX = bbox.x;
-                    if (bbox.y < minY) minY = bbox.y;
-                    if (bbox.x + bbox.width > maxX) maxX = bbox.x + bbox.width;
-                    if (bbox.y + bbox.height > maxY) maxY = bbox.y + bbox.height;
-                }
+                try {
+                    const bbox = path.getBBox(); 
+                    if (bbox.width > 0 && bbox.height > 0) { 
+                        if (bbox.x < minX) minX = bbox.x;
+                        if (bbox.y < minY) minY = bbox.y;
+                        if (bbox.x + bbox.width > maxX) maxX = bbox.x + bbox.width;
+                        if (bbox.y + bbox.height > maxY) maxY = bbox.y + bbox.height;
+                    }
+                } catch(e) {}
             });
-        } else {
+        }
+
+        if (minX === Infinity) {
             minX = 500; minY = 300; maxX = 700; maxY = 500; // Резервный центр
         }
 

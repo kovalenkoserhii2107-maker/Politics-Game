@@ -1,0 +1,411 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<title>Map Gridifier Tool</title>
+<style>
+  body { margin: 0; background: #0b1121; color: #e2e8f0; font-family: 'Segoe UI', sans-serif; }
+  #controls { padding: 20px; background: rgba(20,25,35,0.95); border-bottom: 1px solid #3f4e63; display: flex; flex-wrap: wrap; gap: 15px; align-items: center; }
+  h1 { margin: 0; color: #fbbf24; font-size: 1.3em; }
+  label { font-size: 0.9em; color: #94a3b8; }
+  input[type=range] { accent-color: #3b82f6; }
+  button { background: #3b82f6; color: white; border: none; padding: 10px 20px; border-radius: 6px; font-weight: bold; cursor: pointer; font-size: 0.9em; }
+  button:hover { background: #2563eb; }
+  button:disabled { background: #334155; cursor: not-allowed; }
+  #status { padding: 15px 20px; font-size: 0.9em; color: #94a3b8; min-height: 40px; }
+  #progress-bar { height: 4px; background: #1e293b; }
+  #progress-fill { height: 100%; width: 0%; background: #3b82f6; transition: width 0.1s; }
+  canvas { display: none; }
+  #output-section { display: none; padding: 20px; }
+  .download-btn { background: #059669; margin-right: 10px; margin-bottom: 10px; }
+  .download-btn:hover { background: #047857; }
+  #stats { margin-top: 15px; padding: 15px; background: rgba(0,0,0,0.3); border-radius: 8px; border: 1px solid #3f4e63; font-size: 0.9em; }
+  .stat-row { display: flex; justify-content: space-between; margin-bottom: 6px; }
+  .stat-label { color: #94a3b8; }
+  .stat-val { color: #fff; font-weight: bold; }
+</style>
+</head>
+<body>
+
+<div id="controls">
+  <h1>Map Gridifier</h1>
+  <div>
+    <label>Розмір клітинки: <span id="cell-size-display">15</span> SVG-одиниць</label><br>
+    <input type="range" id="cell-size" min="8" max="30" value="15" step="1"
+      oninput="document.getElementById('cell-size-display').textContent = this.value">
+  </div>
+  <button id="generate-btn" onclick="startGeneration()">Згенерувати регіони</button>
+  <button id="dl-regions" class="download-btn" style="display:none" onclick="dlFile('RegionsDB_new.js', regionsOutput)">Завантажити RegionsDB_new.js</button>
+  <button id="dl-neighbors" class="download-btn" style="display:none" onclick="dlFile('NeighborsDB_new.js', neighborsOutput)">Завантажити NeighborsDB_new.js</button>
+  <button id="dl-patch" class="download-btn" style="display:none" onclick="dlFile('MapEngine_grid_patch.js', patchOutput)">Завантажити MapEngine_patch.js</button>
+</div>
+
+<div id="progress-bar"><div id="progress-fill"></div></div>
+<div id="status">Натисніть кнопку, щоб розпочати генерацію...</div>
+<div id="output-section"><div id="stats"></div></div>
+<canvas id="canvas"></canvas>
+
+<script>
+var regionsOutput = '';
+var neighborsOutput = '';
+var patchOutput = '';
+
+// Список країн
+var COUNTRY_IDS = [
+  'UA','PL','BY','RO','MD','SK','HU','RU','TR','BG','GE','DE','FR','IT','ES',
+  'CN','GB','IN','JP','KZ','IQ','IR','SA','AT','CZ','FI','SE','NO','CH','PT',
+  'GR','RS','HR','BA','ME','MK','AL','SI','EE','LV','LT','DK','NL','BE','IE',
+  'CY','IS','LU','AM','AZ','TJ','UZ','TM','KG','AF','PK','NP','BT','BD','MM',
+  'TH','LA','KH','VN','MY','SG','ID','PH','TW','KP','KR','MN','LK','KW','QA',
+  'BH','OM','YE','JO','SY','LB','IL',
+  'EG','LY','TN','DZ','MA','SD','ET','KE','NG','ZA','AO','CD','MZ','TZ','UG',
+  'ZM','ZW','BW','NA','MG','CM','GH','CI','SN','ML','NE','TD','SO',
+  'US','CA','MX','BR','AR','CO','VE','PE','CL','EC','BO','PY','UY','GY',
+  'CU','GT','HN','SV','NI','CR','PA','AU','NZ','PG'
+];
+
+// Унікальні кольори для кожної країни
+var COUNTRY_COLORS = {};
+var COLOR_TO_COUNTRY = {};
+COUNTRY_IDS.forEach(function(id, i) {
+  var r = Math.floor(i / 65536) % 256;
+  var g = Math.floor(i / 256) % 256;
+  var b = i % 256;
+  COUNTRY_COLORS[id] = 'rgb(' + r + ',' + g + ',' + b + ')';
+  COLOR_TO_COUNTRY[r + ',' + g + ',' + b] = id;
+});
+
+var DIRECTION_NAMES = {
+  NW: 'Пн.-Захід.', N: 'Північ.', NE: 'Пн.-Схід.',
+  W: 'Захід.', C: 'Центр.', E: 'Схід.',
+  SW: 'Пд.-Захід.', S: 'Південь.', SE: 'Пд.-Схід.'
+};
+
+var COUNTRY_ADJ = {
+  'UA':'Укр','PL':'Пол','BY':'Біл','RO':'Рум','MD':'Молд','SK':'Слов',
+  'HU':'Угор','RU':'Рос','TR':'Тур','BG':'Болг','GE':'Груз','DE':'Нім',
+  'FR':'Фр','IT':'Іт','ES':'Ісп','CN':'Кит','GB':'Бр','IN':'Інд',
+  'JP':'Яп','KZ':'Каз','IQ':'Ірак','IR':'Іран','SA':'Ар','AT':'Авс',
+  'CZ':'Чес','FI':'Фін','SE':'Шв','NO':'Норв','CH':'Швейц','PT':'Порт',
+  'GR':'Грец','RS':'Серб','HR':'Хорв','BA':'БіГ','ME':'Чор','MK':'МК',
+  'AL':'Алб','SI':'Сл','EE':'Ест','LV':'Лат','LT':'Лит','DK':'Дан',
+  'NL':'Нід','BE':'Бел','IE':'Ірл','AM':'Вірм','AZ':'Аз','TJ':'Тадж',
+  'UZ':'Узб','TM':'Туркм','KG':'Кирг','AF':'Афг','PK':'Пак','BD':'Банг',
+  'MM':'Мян','TH':'Тай','LA':'Лаос','KH':'Камб','VN':'Вєт','MY':'Мал',
+  'ID':'Інд','PH':'Філ','TW':'Тайв','KP':'СК','KR':'ПК','MN':'Монг',
+  'US':'Амер','CA':'Кан','MX':'Мекс','BR':'Браз','AR':'Арг','AU':'Авст',
+  'EG':'Єгип','NG':'Ніг','ZA':'ПАР','CD':'Конг'
+};
+
+var TERRAIN = ['рівнина','долина','нагір\'я','лісостеп','степ','поле','плато','узгір\'я','впадина','узбережжя'];
+var OIL_COUNTRIES = {'RU':3,'KZ':2,'IQ':4,'IR':4,'SA':5,'KW':4,'QA':4,'AZ':3,'NO':3,'OM':2};
+var INDUSTRIAL = ['DE','FR','GB','RU','CN','JP','KR','IT','PL','CZ','US','CA','AU'];
+
+function getRegionName(countryId, relCol, relRow, totalCols, totalRows) {
+  var adj = COUNTRY_ADJ[countryId] || countryId;
+  var relX = totalCols > 1 ? relCol / (totalCols - 1) : 0.5;
+  var relY = totalRows > 1 ? relRow / (totalRows - 1) : 0.5;
+  var dirH = relX < 0.35 ? 'W' : relX > 0.65 ? 'E' : 'C';
+  var dirV = relY < 0.35 ? 'N' : relY > 0.65 ? 'S' : 'C';
+  var dir;
+  if (dirV === 'N') dir = dirH === 'C' ? 'N' : (dirH === 'W' ? 'NW' : 'NE');
+  else if (dirV === 'S') dir = dirH === 'C' ? 'S' : (dirH === 'W' ? 'SW' : 'SE');
+  else dir = dirH === 'C' ? 'C' : (dirH === 'W' ? 'W' : 'E');
+  var terrain = TERRAIN[(relCol * 3 + relRow * 7) % TERRAIN.length];
+  var dirName = DIRECTION_NAMES[dir];
+  return dir === 'C' ? (adj + '. ' + terrain) : (dirName + ' ' + adj + '. ' + terrain);
+}
+
+function getResources(countryId, relCol, relRow, totalCols, totalRows) {
+  var relY = totalRows > 1 ? relRow / (totalRows - 1) : 0.5;
+  var baseOil = OIL_COUNTRIES[countryId] || 0;
+  var oil = (Math.random() < 0.12) ? Math.floor(baseOil * (0.5 + Math.random() * 1.5)) : 0;
+  var agro = Math.floor(15 + 65 * (0.4 + 0.4 * relY) * (0.3 + 0.7 * Math.abs(Math.sin(relCol + relRow))));
+  var baseInd = INDUSTRIAL.indexOf(countryId) >= 0 ? 55 : 18;
+  var industry = Math.floor(baseInd * (0.4 + Math.random() * 0.9));
+  var bigCountries = ['RU','CN','IN','US','BR','ID'];
+  var basePop = bigCountries.indexOf(countryId) >= 0 ? 1500000 : 450000;
+  var population = Math.floor(basePop * (0.3 + Math.random() * 1.4));
+  return {oil: oil, agro: agro, industry: industry, population: population};
+}
+
+async function startGeneration() {
+  var btn = document.getElementById('generate-btn');
+  btn.disabled = true;
+  var cellSize = parseInt(document.getElementById('cell-size').value);
+  setStatus('Завантажуємо SVG карту...');
+  setProgress(0);
+
+  try {
+    var resp = await fetch('../world-map.svg?v=' + Date.now());
+    if (!resp.ok) {
+      resp = await fetch('world-map.svg?v=' + Date.now());
+      if (!resp.ok) throw new Error('SVG не знайдено! Запускайте з папки tools/ поруч з world-map.svg');
+    }
+    var svgText = await resp.text();
+    setStatus('SVG завантажено. Парсимо шляхи...');
+
+    var tempDiv = document.createElement('div');
+    tempDiv.style.cssText = 'position:absolute;left:-9999px;width:1200px;height:800px;overflow:hidden;';
+    tempDiv.innerHTML = svgText;
+    document.body.appendChild(tempDiv);
+    var svgEl = tempDiv.querySelector('svg');
+    if (!svgEl) throw new Error('SVG елемент не знайдено');
+    svgEl.setAttribute('width', '1200');
+    svgEl.setAttribute('height', '800');
+    svgEl.setAttribute('viewBox', '0 0 1200 800');
+
+    // Фарбуємо кожен path унікальним кольором країни
+    var paths = tempDiv.querySelectorAll('path[id]');
+    paths.forEach(function(path) {
+      var id = path.id;
+      if (!id) return;
+      var cc = id.split('-')[0];
+      var color = COUNTRY_COLORS[cc];
+      if (color) {
+        path.style.fill = color;
+        path.style.stroke = color;
+        path.style.strokeWidth = '0.2';
+        path.removeAttribute('display');
+        path.style.display = '';
+      } else {
+        path.style.display = 'none';
+      }
+    });
+
+    setStatus('Рендеримо карту на canvas...');
+    setProgress(10);
+    await sleep(100);
+
+    var W = 1200, H = 800;
+    var canvas = document.getElementById('canvas');
+    canvas.width = W;
+    canvas.height = H;
+    var ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#000000';
+    ctx.fillRect(0, 0, W, H);
+
+    // Конвертуємо SVG в Image через blob
+    var serializer = new XMLSerializer();
+    var svgStr = serializer.serializeToString(svgEl);
+    var svgBlob = new Blob([svgStr], {type: 'image/svg+xml;charset=utf-8'});
+    var url = URL.createObjectURL(svgBlob);
+
+    await new Promise(function(resolve, reject) {
+      var img = new Image();
+      img.onload = function() {
+        ctx.drawImage(img, 0, 0, W, H);
+        URL.revokeObjectURL(url);
+        resolve();
+      };
+      img.onerror = function(e) {
+        URL.revokeObjectURL(url);
+        reject(new Error('Помилка рендерингу SVG: ' + e));
+      };
+      img.src = url;
+    });
+
+    document.body.removeChild(tempDiv);
+    setStatus('Аналізуємо пікселі...');
+    setProgress(25);
+    await sleep(50);
+
+    var imageData = ctx.getImageData(0, 0, W, H);
+    var pixels = imageData.data;
+
+    var cols = Math.ceil(W / cellSize);
+    var rows = Math.ceil(H / cellSize);
+    setStatus('Обробляємо ' + cols + 'x' + rows + ' = ' + (cols * rows) + ' клітинок...');
+
+    var gridCells = {};
+    var countryBounds = {};
+    var processed = 0;
+    var total = cols * rows;
+
+    // Точки семплювання всередині клітинки (5 точок)
+    var samplePts = [[0.2,0.2],[0.8,0.2],[0.5,0.5],[0.2,0.8],[0.8,0.8]];
+
+    for (var col = 0; col < cols; col++) {
+      for (var row = 0; row < rows; row++) {
+        var votes = {};
+        for (var s = 0; s < samplePts.length; s++) {
+          var px = Math.min(W-1, Math.floor(col * cellSize + samplePts[s][0] * cellSize));
+          var py = Math.min(H-1, Math.floor(row * cellSize + samplePts[s][1] * cellSize));
+          var idx = (py * W + px) * 4;
+          var r = pixels[idx], g = pixels[idx+1], b = pixels[idx+2];
+          var ckey = r + ',' + g + ',' + b;
+          var country = COLOR_TO_COUNTRY[ckey];
+          if (country) {
+            votes[country] = (votes[country] || 0) + 1;
+          }
+        }
+        var winner = null, maxV = 1;
+        for (var cid in votes) {
+          if (votes[cid] > maxV) { maxV = votes[cid]; winner = cid; }
+        }
+        if (winner) {
+          var cellKey = col + '_' + row;
+          gridCells[cellKey] = winner;
+          if (!countryBounds[winner]) {
+            countryBounds[winner] = {minCol:col, maxCol:col, minRow:row, maxRow:row};
+          } else {
+            var bd = countryBounds[winner];
+            if (col < bd.minCol) bd.minCol = col;
+            if (col > bd.maxCol) bd.maxCol = col;
+            if (row < bd.minRow) bd.minRow = row;
+            if (row > bd.maxRow) bd.maxRow = row;
+          }
+        }
+        processed++;
+        if (processed % 1000 === 0) {
+          setProgress(25 + (processed / total) * 45);
+          setStatus('Оброблено ' + processed + ' / ' + total + ' клітинок...');
+          await sleep(0);
+        }
+      }
+    }
+
+    setStatus('Генеруємо RegionsDB...');
+    setProgress(72);
+    await sleep(50);
+
+    var regionIdMap = {};
+    var regionData = {};
+    var countryRegionCount = {};
+
+    for (var cellKey in gridCells) {
+      var parts = cellKey.split('_');
+      var c = parseInt(parts[0]);
+      var ro = parseInt(parts[1]);
+      var cId = gridCells[cellKey];
+      var bounds = countryBounds[cId];
+      var totalCols2 = bounds.maxCol - bounds.minCol + 1;
+      var totalRows2 = bounds.maxRow - bounds.minRow + 1;
+      var relC = c - bounds.minCol;
+      var relR = ro - bounds.minRow;
+      var regionId = cId + '-G' + c + '-' + ro;
+      regionIdMap[cellKey] = regionId;
+      var name = getRegionName(cId, relC, relR, totalCols2, totalRows2);
+      var res = getResources(cId, relC, relR, totalCols2, totalRows2);
+      regionData[regionId] = {name: name, population: res.population, oil: res.oil, agro: res.agro, industry: res.industry, cId: cId};
+      countryRegionCount[cId] = (countryRegionCount[cId] || 0) + 1;
+    }
+
+    setStatus('Генеруємо NeighborsDB...');
+    setProgress(82);
+    await sleep(50);
+
+    var neighborsMap = {};
+    var dirs = [[-1,0],[1,0],[0,-1],[0,1]];
+    for (var cellKey in gridCells) {
+      var parts = cellKey.split('_');
+      var c = parseInt(parts[0]);
+      var ro = parseInt(parts[1]);
+      var rId = regionIdMap[cellKey];
+      if (!rId) continue;
+      neighborsMap[rId] = [];
+      for (var d = 0; d < dirs.length; d++) {
+        var nKey = (c + dirs[d][0]) + '_' + (ro + dirs[d][1]);
+        if (regionIdMap[nKey]) neighborsMap[rId].push(regionIdMap[nKey]);
+      }
+    }
+
+    setStatus('Формуємо файли...');
+    setProgress(90);
+    await sleep(50);
+
+    // RegionsDB.js
+    var regJs = '// =================================================\n';
+    regJs += '// БАЗА ПРОВІНЦІЙ (Сіткова, ' + cellSize + 'x' + cellSize + ' SVG-одиниць)\n';
+    regJs += '// Згенеровано Map Gridifier\n';
+    regJs += '// =================================================\n';
+    regJs += 'const RegionsDB = {\n';
+    for (var rId in regionData) {
+      var d = regionData[rId];
+      regJs += "    '" + rId + "': { name: '" + d.name + "', population: " + d.population + ', oil: ' + d.oil + ', agro: ' + d.agro + ', industry: ' + d.industry + ' },\n';
+    }
+    regJs += '};\n';
+
+    // NeighborsDB.js
+    var nbJs = '// СГЕНЕРОВАНО АВТОМАТИЧНО (Сіткові сусіди)\nconst GeneratedNeighbors = {\n';
+    for (var rId in neighborsMap) {
+      var nbList = neighborsMap[rId].map(function(n) { return '"' + n + '"'; }).join(', ');
+      nbJs += '    "' + rId + '": [' + nbList + '],\n';
+    }
+    nbJs += '};\n';
+
+    // MapEngine patch
+    var patch = '// === GRID OVERLAY PATCH ===\n';
+    patch += '// Додайте цей метод в клас MapEngine:\n\n';
+    patch += 'MapEngine.prototype.drawGrid = function() {\n';
+    patch += '    this.svg.querySelectorAll(".grid-line").forEach(el => el.remove());\n';
+    patch += '    var CELL = ' + cellSize + ', W = 1200, H = 800;\n';
+    patch += '    for (var x = CELL; x < W; x += CELL) {\n';
+    patch += '        var line = document.createElementNS("http://www.w3.org/2000/svg","line");\n';
+    patch += '        line.setAttribute("x1",x); line.setAttribute("y1",0);\n';
+    patch += '        line.setAttribute("x2",x); line.setAttribute("y2",H);\n';
+    patch += '        line.setAttribute("stroke","rgba(255,255,255,0.07)");\n';
+    patch += '        line.setAttribute("stroke-width","0.12");\n';
+    patch += '        line.setAttribute("class","grid-line");\n';
+    patch += '        line.setAttribute("pointer-events","none");\n';
+    patch += '        this.svg.appendChild(line);\n';
+    patch += '    }\n';
+    patch += '    for (var y = CELL; y < H; y += CELL) {\n';
+    patch += '        var line2 = document.createElementNS("http://www.w3.org/2000/svg","line");\n';
+    patch += '        line2.setAttribute("x1",0); line2.setAttribute("y1",y);\n';
+    patch += '        line2.setAttribute("x2",W); line2.setAttribute("y2",y);\n';
+    patch += '        line2.setAttribute("stroke","rgba(255,255,255,0.07)");\n';
+    patch += '        line2.setAttribute("stroke-width","0.12");\n';
+    patch += '        line2.setAttribute("class","grid-line");\n';
+    patch += '        line2.setAttribute("pointer-events","none");\n';
+    patch += '        this.svg.appendChild(line2);\n';
+    patch += '    }\n';
+    patch += '};\n\n';
+    patch += '// Виклик в MapEngine.constructor() (після this.drawCities()):\n';
+    patch += '// this.drawGrid();\n';
+
+    regionsOutput = regJs;
+    neighborsOutput = nbJs;
+    patchOutput = patch;
+
+    var totalRegions = Object.keys(regionData).length;
+    var totalCountries = Object.keys(countryRegionCount).length;
+
+    var topC = Object.entries(countryRegionCount).sort(function(a,b){return b[1]-a[1];}).slice(0,10);
+
+    setProgress(100);
+    setStatus('Готово! Згенеровано ' + totalRegions + ' регіонів для ' + totalCountries + ' країн.');
+
+    document.getElementById('output-section').style.display = 'block';
+    document.getElementById('stats').innerHTML = '<h3 style="margin:0 0 10px;color:#fbbf24">Статистика</h3>'
+      + '<div class="stat-row"><span class="stat-label">Всього регіонів:</span><span class="stat-val">' + totalRegions + '</span></div>'
+      + '<div class="stat-row"><span class="stat-label">Країн:</span><span class="stat-val">' + totalCountries + '</span></div>'
+      + '<div class="stat-row"><span class="stat-label">Клітинка:</span><span class="stat-val">' + cellSize + 'x' + cellSize + '</span></div>'
+      + '<div class="stat-row"><span class="stat-label">RegionsDB розмір:</span><span class="stat-val">' + (regJs.length/1024).toFixed(0) + ' КБ</span></div>'
+      + '<hr style="border-color:#3f4e63;margin:10px 0"><b style="color:#94a3b8">Топ-10 країн:</b><br><br>'
+      + topC.map(function(x){return '<div class="stat-row"><span class="stat-label">'+x[0]+'</span><span class="stat-val">'+x[1]+'</span></div>';}).join('');
+
+    document.getElementById('dl-regions').style.display = 'inline-block';
+    document.getElementById('dl-neighbors').style.display = 'inline-block';
+    document.getElementById('dl-patch').style.display = 'inline-block';
+
+  } catch(err) {
+    setStatus('Помилка: ' + err.message);
+    console.error(err);
+  }
+  btn.disabled = false;
+}
+
+function setStatus(msg) { document.getElementById('status').textContent = msg; }
+function setProgress(p) { document.getElementById('progress-fill').style.width = p + '%'; }
+function sleep(ms) { return new Promise(function(r){setTimeout(r,ms);}); }
+function dlFile(name, content) {
+  var blob = new Blob([content], {type:'text/javascript;charset=utf-8'});
+  var a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = name;
+  a.click();
+}
+</script>
+</body>
+</html>

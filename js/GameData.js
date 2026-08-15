@@ -39,70 +39,106 @@ class GameData {
     }
 
     buildDatabaseFromSVG() {
-        const paths = document.querySelectorAll('#world-map path');
-        paths.forEach(path => {
-            const regionId = path.id; 
-            if (!regionId) return;
+        // === СИСТЕМА СІТКИ: регіони будуються з RegionsDB ===
+        // Оригінальні SVG country paths залишаються для відображення меж/кольорів країн
+        // Клікабельні елементи — rect-клітинки сітки
 
-            path.classList.add('region');
-            const countryCode = regionId.split('-')[0]; 
-
-            if (this.countries[countryCode]) {
-                
-                // --- УМНЫЙ БАЛАНСИР ДЛЯ РЕГИОНОВ БЕЗ ЯВНОЙ БАЗЫ ---
-                let defaultPop = 500000;
-                let defaultInd = 20;
-                let defaultAgro = 40;
-                
-                if (countryCode === 'MD' || countryCode === 'GE') {
-                    defaultPop = 75000; 
-                    defaultInd = 10;
-                    defaultAgro = 50;
-                } else if (countryCode === 'RU' || countryCode === 'TR' || countryCode === 'IT') {
-                    defaultPop = 1200000; 
-                    defaultInd = 45;
-                } else if (countryCode === 'RO' || countryCode === 'BG' || countryCode === 'SK' || countryCode === 'HU') {
-                    defaultPop = 350000; 
+        // 1. Налаштовуємо оригінальні country paths (тільки для відображення, не для кліків)
+        const countryPaths = document.querySelectorAll('#world-map path');
+        countryPaths.forEach(path => {
+            if (!path.id) return;
+            const cc = path.id.split('-')[0];
+            if (this.countries[cc]) {
+                path.setAttribute('data-country', cc);
+                const country = this.countries[cc];
+                if (country && country.color) {
+                    path.style.fill = country.color;
+                    path.style.fillOpacity = '1';
                 }
-
-                // === НОВАЯ ЛОГИКА: УМНЫЕ РЕГИОНЫ НА ОСНОВЕ ГОРОДОВ ===
-                let regionName = `Провинция ${regionId}`;
-                let finalPop = defaultPop;
-                let finalInd = defaultInd;
-
-                // Ищем, есть ли в этом квадрате крупный город из базы
-                const city = typeof CitiesDB !== 'undefined' ? CitiesDB.find(c => c.regionId === regionId) : null;
-                
-                if (city) {
-                    regionName = `Округ ${city.name}`; // Например: "Округ Токио"
-                    // Даем бонус к экономике и населению за город
-                    finalPop = city.isCapital ? defaultPop * 4 : defaultPop * 2;
-                    finalInd = city.isCapital ? defaultInd * 3 : Math.floor(defaultInd * 1.5);
-                }
-
-                const dbInfo = RegionsDB[regionId] || { 
-                    name: regionName, 
-                    population: finalPop, 
-                    oil: 0, 
-                    agro: defaultAgro, 
-                    industry: finalInd 
-                };
-
-                this.regions[regionId] = {
-                    id: regionId,
-                    name: dbInfo.name,
-                    owner: countryCode,
-                    population: dbInfo.population,
-                    loyalty: 1.0, 
-                    army: this.generateEmptyArmy(),
-                    resources: { oil: dbInfo.oil, agro: dbInfo.agro, industry: dbInfo.industry }
-                };
+                path.style.stroke = 'rgba(0,0,0,0.35)';
+                path.style.strokeWidth = '0.2';
+                path.style.pointerEvents = 'none'; // Клік йде на rect нижче
             } else {
-                path.setAttribute('display', 'none'); 
+                path.setAttribute('display', 'none');
             }
         });
-        
+
+        // 2. Створюємо SVG group для сіткових клітинок
+        const svgEl = document.getElementById('world-map');
+        let gridGroup = document.getElementById('grid-regions');
+        if (!gridGroup) {
+            gridGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+            gridGroup.setAttribute('id', 'grid-regions');
+            // Вставляємо ПЕРЕД country paths щоб clicks проходили через прозорі rects
+            svgEl.insertBefore(gridGroup, svgEl.firstChild);
+        }
+
+        // 3. Будуємо регіони з RegionsDB
+        Object.keys(RegionsDB).forEach(regionId => {
+            const dbInfo = RegionsDB[regionId];
+            const countryCode = regionId.split('-')[0];
+
+            if (!this.countries[countryCode]) return;
+
+            // Парсимо координати з ID: CC-GCol-Row
+            const parts = regionId.match(/^(\w+)-G(\d+)-(\d+)$/);
+            if (!parts) return;
+
+            const col = parseInt(parts[2]);
+            const row = parseInt(parts[3]);
+            const cell = this._getAdaptiveCellSize(countryCode);
+
+            const x = col * cell;
+            const y = row * cell;
+
+            // Створюємо SVG rect — клікабельна клітинка сітки
+            const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+            rect.setAttribute('id', regionId);
+            rect.setAttribute('x', x);
+            rect.setAttribute('y', y);
+            rect.setAttribute('width', cell);
+            rect.setAttribute('height', cell);
+            rect.setAttribute('data-country', countryCode);
+            rect.setAttribute('fill', country.color || '#888');
+            rect.setAttribute('fill-opacity', '0.001');
+            rect.setAttribute('stroke', 'rgba(255,255,255,0.25)');
+            rect.setAttribute('stroke-width', '0.5'); // Зробив сітку товщою, щоб її було видно!
+            rect.classList.add('region');
+
+            gridGroup.appendChild(rect);
+
+            // Додаємо в базу регіонів
+            this.regions[regionId] = {
+                id: regionId,
+                name: dbInfo.name,
+                owner: countryCode,
+                population: dbInfo.population,
+                loyalty: 1.0,
+                army: this.generateEmptyArmy(),
+                resources: { oil: dbInfo.oil, agro: dbInfo.agro, industry: dbInfo.industry }
+            };
+        });
+
+        console.log(`Grid: ${Object.keys(this.regions).length} регіонів завантажено`);
         this.distributeArmiesToBorders();
+    }
+
+    // Визначає розмір клітинки для країни (синхронно з generate_grid.js)
+    _getAdaptiveCellSize(countryCode) {
+        const CELL_MAP = {
+            'BH':1,'CY':1,'LU':1,'SG':1,'QA':1,'KW':1,'LB':1,
+            'MD':2,'ME':2,'MK':2,'AL':2,'SI':2,'EE':2,'LV':2,'LT':2,
+            'DK':2,'NL':2,'BE':2,'IE':2,'BT':2,'LK':2,'JO':2,'IL':2,
+            'SY':2,'NP':2,'GE':2,'AM':2,'AZ':2,'KH':2,'LA':2,'TW':2,
+            'KP':2,'KR':2,'SK':2,'BA':2,'HR':2,'HU':2,'AT':2,'CH':2,
+            'CZ':2,'RS':2,'BG':2,'RO':2,'BY':2,'YE':2,'OM':2,
+            'UA':3,'PL':3,'DE':3,'TR':3,'GB':3,'IT':3,'ES':3,'FR':3,
+            'PT':3,'GR':3,'NO':3,'FI':3,'SE':3,'IS':3,'IQ':3,'AF':3,
+            'PK':3,'MM':3,'TH':3,'VN':3,'MY':3,'PH':3,'JP':3,'BD':3,
+            'UZ':3,'TM':3,'TJ':3,'KG':3,'IR':4,'SA':4,'IN':4,'ID':4,
+            'MN':4,'CN':6,'RU':6,'KZ':6
+        };
+        return CELL_MAP[countryCode] || 3;
     }
 
     getCountry(id) { return this.countries[id]; }
