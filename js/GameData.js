@@ -64,6 +64,7 @@ class GameData {
         });
 
         // 1.5 Создаем clipPath для каждой страны
+        const svgEl = document.getElementById('world-map');
         let defs = svgEl.querySelector('defs');
         if (!defs) {
             defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
