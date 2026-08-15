@@ -123,7 +123,7 @@ class MapEngine {
                 minY = Math.min(minY, r.cy);
                 maxY = Math.max(maxY, r.cy);
             });
-            // Assume each region contributes some width/height. Add a bit of padding.
+            // Add approximate cell size (CELL_SIZE=9) to get true width/height
             const clusterWidth = Math.max(maxX - minX + 10, 10);
             const clusterHeight = Math.max(maxY - minY + 10, 10);
 

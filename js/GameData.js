@@ -53,11 +53,12 @@ class GameData {
                 const country = this.countries[cc];
                 if (country && country.color) {
                     path.style.fill = country.color;
-                    path.style.fillOpacity = '1';
+                    // We don't need fillOpacity here because we hide it
                 }
                 path.style.stroke = 'rgba(0,0,0,0.35)';
                 path.style.strokeWidth = '0.2';
                 path.style.pointerEvents = 'none'; // Клік йде на rect нижче
+                path.style.display = 'none'; // HIDE ORIGINAL PATHS, USE GRID INSTEAD
             } else {
                 path.style.display = 'none';
             }
@@ -73,12 +74,14 @@ class GameData {
             gridGroup.setAttribute('id', 'grid-regions');
             // Вставляємо ПІСЛЯ country paths щоб сітку було видно ПОВЕРХ країн!
             svgEl.appendChild(gridGroup);
+        } else {
+            gridGroup.innerHTML = ''; 
         }
 
         // 3. Будуємо регіони з RegionsDB
         Object.keys(RegionsDB).forEach(regionId => {
             const dbInfo = RegionsDB[regionId];
-            const countryCode = regionId.split('-')[0];
+            const countryCode = dbInfo.country;
 
             if (!this.countries[countryCode]) return;
 
@@ -88,7 +91,7 @@ class GameData {
             path.setAttribute('d', dbInfo.pathData);
             path.setAttribute('data-country', countryCode);
             path.setAttribute('fill', this.countries[countryCode].color || '#888');
-            path.setAttribute('fill-opacity', '0.001'); // Invisible normally
+            path.setAttribute('fill-opacity', '1'); // FULLY VISIBLE
             path.setAttribute('stroke-opacity', '0'); // No white lines by default
             path.classList.add('region');
 
