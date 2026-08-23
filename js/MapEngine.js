@@ -20,13 +20,19 @@ class MapEngine {
         this.camY = 0;
         this.isDragging = false;
         this.wasDragging = false;
-        this.zoomThreshold = 6;
-        this.detailThreshold = 15;   // с этого масштаба показываем города
-        this.minScale = 1.5;
-        this.maxScale = 60;
+        // Ступени детализации задаются шириной обзора в единицах карты, а не
+        // кратностью зума: одна и та же кратность на телефоне показывает втрое
+        // больше карты, чем на десктопе, поэтому по кратности пороги «плывут».
+        // Для справки: Украина ~28 единиц в ширину, Германия ~13, Молдова ~4.
+        this.globalMaxView = 55;   // шире этого — глобальный вид, подписи стран
+        this.detailMaxView = 22;   // уже этого — показываем города
+        this.minView = 6;          // предел приближения
+        this.maxView = 900;        // предел отдаления (мир ~833 единицы)
 
         this.paths = new Map();       // regionId -> <path>
         this.selection = new Set();
+        this.regionLabels = [];
+        this.countryLabels = [];
         // Что можно не рисовать, когда оно за краем экрана
         this.cullRegions = [];
         this.cullLabels = [];
@@ -43,12 +49,19 @@ class MapEngine {
         this.updateLOD();
     }
 
-    get isRegionalZoom() { return this.scale >= this.zoomThreshold; }
+    // Сколько единиц карты укладывается по ширине экрана.
+    get viewWidth() {
+        if (!this.rect) return 1200;
+        return this.rect.width / this.pxPerUnit;
+    }
+
+    get isRegionalZoom() { return this.viewWidth <= this.globalMaxView; }
 
     // Три ступени детализации: страны -> области -> города.
     get detailLevel() {
-        if (this.scale < this.zoomThreshold) return 0;
-        return this.scale < this.detailThreshold ? 1 : 2;
+        const w = this.viewWidth;
+        if (w > this.globalMaxView) return 0;
+        return w > this.detailMaxView ? 1 : 2;
     }
 
     // --- построение слоёв -------------------------------------------
@@ -175,12 +188,13 @@ class MapEngine {
         }
         if (minX === Infinity) { minX = 560; minY = 200; maxX = 640; maxY = 260; }
 
-        const spanX = Math.max(maxX - minX, 5);
-        const spanY = Math.max(maxY - minY, 5);
-        const fit = Math.min(
-            (this.rect.width * 0.62) / (spanX * this.baseScale),
-            (this.rect.height * 0.55) / (spanY * this.baseScale));
-        this.scale = Math.min(Math.max(fit, 2.5), 30);
+        // Страна должна занять примерно 80% экрана по узкой стороне.
+        const spanX = Math.max(maxX - minX, 4);
+        const spanY = Math.max(maxY - minY, 4);
+        const aspect = this.rect.height / this.rect.width;
+        const wantView = Math.max(spanX / 0.8, (spanY / 0.8) / aspect);
+        const view = Math.min(Math.max(wantView, this.minView), this.maxView);
+        this.scale = this.rect.width / (view * this.baseScale);
         this.centerOn((minX + maxX) / 2, (minY + maxY) / 2);
     }
 
@@ -226,7 +240,9 @@ class MapEngine {
 
     // Меняем масштаб, удерживая точку под курсором на месте.
     zoomAt(newScale, pivotX, pivotY) {
-        const clamped = Math.min(Math.max(newScale, this.minScale), this.maxScale);
+        const minScale = this.rect.width / (this.maxView * this.baseScale);
+        const maxScale = this.rect.width / (this.minView * this.baseScale);
+        const clamped = Math.min(Math.max(newScale, minScale), maxScale);
         if (clamped === this.scale) return;
         const wasRegional = this.isRegionalZoom;
         const anchor = this.clientToMap(pivotX, pivotY);
@@ -368,6 +384,7 @@ class MapEngine {
     // --- подписи стран ---------------------------------------------------
     createCountryLabels() {
         this.labelLayer.innerHTML = '';
+        this.countryLabels = [];
         const fragment = document.createDocumentFragment();
 
         for (const countryId of Object.keys(this.data.countries)) {
@@ -387,19 +404,23 @@ class MapEngine {
             const name = this.data.getCountry(countryId).name;
             const width = Math.max(maxX - minX, 4);
             const height = Math.max(maxY - minY, 4);
-            let size = (width * 1.1) / Math.max(name.length * 0.55, 1);
-            size = Math.min(size, height * 0.7);
-            size = Math.min(Math.max(size, 1.2), 26);
+            // Размер подписи по размеру страны, но не больше 40 экранных
+            // пикселей: иначе у России или Казахстана на телефоне на весь
+            // экран растягивается одна буква.
+            let fit = (width * 1.1) / Math.max(name.length * 0.55, 1);
+            fit = Math.min(fit, height * 0.7);
 
             const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
             text.setAttribute('x', (sumX / component.length).toFixed(2));
             text.setAttribute('y', (sumY / component.length).toFixed(2));
             text.setAttribute('class', 'country-label');
-            text.setAttribute('font-size', size.toFixed(2));
+            text.style.fontSize = `min(${fit.toFixed(3)}px, calc(var(--sw) * 40))`;
             text.textContent = name;
             fragment.appendChild(text);
+            this.countryLabels.push({ el: text, fit });
         }
         this.labelLayer.appendChild(fragment);
+        this.updateLabelVisibility();
     }
 
     // Крупнейший связный кусок владений — чтобы подпись не улетала в океан
@@ -452,11 +473,16 @@ class MapEngine {
 
     // Слишком мелкую подпись читать нельзя — прячем её, пока не приблизят.
     updateLabelVisibility() {
-        if (!this.regionLabels) return;
-        for (const label of this.regionLabels) {
-            const rendered = Math.min(14, label.fit * this.scale);
-            label.el.classList.toggle('too-small', rendered < 8);
-        }
+        const k = this.pxPerUnit;
+        const hide = (list, cap, minPx) => {
+            if (!list) return;
+            for (const label of list) {
+                const rendered = Math.min(cap, label.fit * k);
+                label.el.classList.toggle('too-small', rendered < minPx);
+            }
+        };
+        hide(this.regionLabels, 14, 8);
+        hide(this.countryLabels, 40, 10);
     }
 
     scheduleLabelUpdate() {
