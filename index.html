@@ -36,7 +36,7 @@ button { font-family: inherit; }
     background-size: 64px 64px, 64px 64px, 100% 100%;
 }
 #map-container:active { cursor: grabbing; }
-#world-map { display: block; width: 100%; height: 100%; will-change: transform; }
+#world-map { display: block; width: 100%; height: 100%; }
 
 .region {
     stroke-linejoin: round;
@@ -71,7 +71,6 @@ button { font-family: inherit; }
     fill: rgba(255,255,255,0.92); font-weight: 700; text-anchor: middle;
     dominant-baseline: middle; pointer-events: none;
     paint-order: stroke; stroke: rgba(0,0,0,0.55); stroke-width: 0.35;
-    transition: opacity 0.25s ease;
 }
 
 .city-marker { fill: #e2e8f0; r: calc(var(--sw) * 2.6); }
@@ -98,17 +97,16 @@ button { font-family: inherit; }
 }
 
 #layer-cities, #layer-armies, #layer-region-labels, #layer-labels { pointer-events: none; }
-#layer-cities, #layer-armies, #layer-region-labels { transition: opacity 0.2s ease; }
-
-/* Ступени детализации: страны -> области -> города */
+/* Ступени детализации: страны -> области -> города.
+   Скрытое именно display:none, а не opacity — иначе браузер продолжает
+   рисовать невидимые слои на каждом кадре панорамирования. */
 #world-map.lod-0 #layer-cities,
 #world-map.lod-0 #layer-region-labels,
-#world-map.lod-0 #layer-armies { opacity: 0; }
+#world-map.lod-0 #layer-armies { display: none; }
 #world-map.lod-1 #layer-cities .city { display: none; }
 #world-map.lod-1 #layer-cities .capital.major { display: none; }
-#world-map.lod-2 .country-label { opacity: 0; }
-#world-map.lod-0 .country-label { opacity: 0.95; }
-#world-map.lod-1 .country-label { opacity: 0; }
+#world-map.lod-1 .country-label,
+#world-map.lod-2 .country-label { display: none; }
 
 /* ================= ОБЩИЙ UI ================= */
 #ui-layer { position: fixed; inset: 0; pointer-events: none; z-index: 10; }
@@ -407,10 +405,15 @@ input[type=range] { width: 100%; cursor: pointer; accent-color: var(--ui-accent)
 }
 #toast.visible { opacity: 1; transform: translateX(-50%) translateY(0); }
 
+@media (max-width: 480px) {
+    #top-bar { font-size: 11px; }
+    .stat-item > span:first-child { font-size: 0.9em; }
+}
 @media (max-width: 768px) {
-    #top-bar { flex-wrap: wrap; padding: 6px 10px; font-size: 12px; gap: 8px; justify-content: center; }
-    .stat-group { flex: 1 1 40%; justify-content: center; }
-    .top-btn { padding: 6px 11px; font-size: 12px; }
+    #top-bar { flex-wrap: wrap; padding: 6px 8px; font-size: 12px; gap: 6px; justify-content: center; }
+    .stat-group { flex: 1 1 100%; justify-content: space-between; gap: 8px; }
+    .stat-item { white-space: nowrap; }
+    .top-btn { padding: 6px 10px; font-size: 12px; }
     .start-layout { grid-template-columns: 1fr; }
     .country-list { max-height: 190px; }
     #side-panel {
