@@ -24,8 +24,12 @@ class MapEngine {
         // кратностью зума: одна и та же кратность на телефоне показывает втрое
         // больше карты, чем на десктопе, поэтому по кратности пороги «плывут».
         // Для справки: Украина ~28 единиц в ширину, Германия ~13, Молдова ~4.
-        this.globalMaxView = 55;   // шире этого — глобальный вид, подписи стран
-        this.detailMaxView = 22;   // уже этого — показываем города
+        // Подписи и игровое взаимодействие разведены: названия стран уступают
+        // место названиям областей рано, но клик по области и маркеры войск
+        // работают с гораздо более дальнего плана.
+        this.countryLabelView = 30;  // шире этого — подписи стран
+        this.cityLabelView = 13;     // уже этого — подписи городов
+        this.interactiveView = 55;   // уже этого — клик выбирает область, а не страну
         this.minView = 6;          // предел приближения
         this.maxView = 900;        // предел отдаления (мир ~833 единицы)
 
@@ -55,13 +59,13 @@ class MapEngine {
         return this.rect.width / this.pxPerUnit;
     }
 
-    get isRegionalZoom() { return this.viewWidth <= this.globalMaxView; }
+    get isRegionalZoom() { return this.viewWidth <= this.interactiveView; }
 
-    // Три ступени детализации: страны -> области -> города.
+    // Ступень подписей: страны -> области -> города.
     get detailLevel() {
         const w = this.viewWidth;
-        if (w > this.globalMaxView) return 0;
-        return w > this.detailMaxView ? 1 : 2;
+        if (w > this.countryLabelView) return 0;
+        return w > this.cityLabelView ? 1 : 2;
     }
 
     // --- построение слоёв -------------------------------------------

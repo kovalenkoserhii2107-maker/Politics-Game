@@ -166,6 +166,9 @@ function russianName(cc, meta) {
     return (meta && meta.name.common) || cc;
 }
 
+// Основной источник — оценки ООН на 2024 год (tools/data/population_2024.json).
+// Данные Всемирного банка из country-json (2018) остаются запасным вариантом
+// для стран, которых нет в таблице.
 function countryPopulations() {
     const m = new Map();
     try {
@@ -176,7 +179,11 @@ function countryPopulations() {
             const cc = byName.get(rec.country);
             if (cc && rec.population) m.set(cc, rec.population);
         }
-    } catch (e) { /* населения нет — оценим по городам */ }
+    } catch (e) { /* запасного источника нет */ }
+    try {
+        const table = require('../data/population_2024.json').population;
+        for (const cc of Object.keys(table)) m.set(cc, table[cc]);
+    } catch (e) { /* таблицы нет — остаёмся на запасном источнике */ }
     return m;
 }
 

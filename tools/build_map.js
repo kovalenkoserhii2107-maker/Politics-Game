@@ -41,17 +41,34 @@ function targetRegionCount(country) {
 }
 
 // --- нарезка страны сеткой -------------------------------------------
-function gridPieces(mp, cell) {
+// Меркатор растягивает высокие широты, поэтому клетка постоянного размера в
+// пикселях на севере покрывает в разы меньше земли. Чтобы области выходили
+// равными по настоящей площади, высота полосы подбирается под широту:
+// h_px = сторона_км * K / (R * cos(широта)). Меркатор конформен, значит
+// клетка, квадратная в пикселях, остаётся квадратной и на местности.
+function bandHeightPx(y, sideKm) {
+    const heightAt = at => {
+        const phi = Math.abs(G.yToLat(at)) * Math.PI / 180;
+        return (sideKm * G.K) / (G.R_EARTH * Math.max(Math.cos(phi), 0.08));
+    };
+    const first = heightAt(y);
+    return heightAt(y + first / 2);   // уточняем по середине полосы
+}
+
+function gridPieces(mp, sideKm) {
     const [x1, y1, x2, y2] = G.bboxOf(mp);
     const out = [];
-    const i1 = Math.floor(x1 / cell), i2 = Math.ceil(x2 / cell);
-    const j1 = Math.floor(y1 / cell), j2 = Math.ceil(y2 / cell);
-    for (let i = i1; i < i2; i++) {
-        for (let j = j1; j < j2; j++) {
+    const maxBand = Math.max(y2 - y1, 1) * 1.5;
+
+    let y = y1;
+    for (let guard = 0; y < y2 && guard < 5000; guard++) {
+        const h = Math.min(bandHeightPx(y, sideKm), maxBand);
+        const yEnd = y + h;
+        const i1 = Math.floor(x1 / h), i2 = Math.ceil(x2 / h);
+        for (let i = i1; i < i2; i++) {
             const rect = [[
-                [i * cell, j * cell], [(i + 1) * cell, j * cell],
-                [(i + 1) * cell, (j + 1) * cell], [i * cell, (j + 1) * cell],
-                [i * cell, j * cell],
+                [i * h, y], [(i + 1) * h, y],
+                [(i + 1) * h, yEnd], [i * h, yEnd], [i * h, y],
             ]];
             let res;
             try { res = pc.intersection(mp, [rect]); } catch (e) { continue; }
@@ -60,18 +77,18 @@ function gridPieces(mp, cell) {
                 if (G.polyAreaPx(piece) > 1e-7) out.push(piece);
             }
         }
+        y = yEnd;
     }
     return out;
 }
 
-function partition(mp, n) {
-    const areaPx = G.polyAreaPx(mp);
+function partition(mp, n, areaKm2) {
     if (n <= 1) return [mp];
-    let cell = Math.sqrt(areaPx / n);
-    let pieces = gridPieces(mp, cell);
+    let side = Math.sqrt(areaKm2 / n);
+    let pieces = gridPieces(mp, side);
     for (let guard = 0; pieces.length < n && guard < 16; guard++) {
-        cell *= 0.85;
-        pieces = gridPieces(mp, cell);
+        side *= 0.85;
+        pieces = gridPieces(mp, side);
     }
     return pieces;
 }
@@ -107,7 +124,7 @@ function sharedCells(a, b) {
 function mergePieces(pieces, targetN, avgAreaPx) {
     const items = pieces.map(mp => ({
         mp,
-        area: G.polyAreaPx(mp),
+        area: G.areaKm2(mp, 48),
         cells: boundaryCells(mp),
         centroid: G.centroidOf(mp),
     }));
@@ -142,7 +159,7 @@ function mergePieces(pieces, targetN, avgAreaPx) {
         let merged;
         try { merged = pc.union(dst.mp, src.mp); } catch (e) { merged = dst.mp.concat(src.mp); }
         dst.mp = merged;
-        dst.area = G.polyAreaPx(merged);
+        dst.area = G.areaKm2(merged, 48);
         for (const k of src.cells) dst.cells.add(k);
         dst.centroid = G.centroidOf(merged);
         items.splice(smallest, 1);
@@ -283,9 +300,9 @@ function main() {
     console.log('Делим страны на области…');
     for (const country of countries) {
         const n = targetRegionCount(country);
-        const areaPx = G.polyAreaPx(country.mp);
-        const pieces = partition(country.mp, n);
-        const items = mergePieces(pieces, n, areaPx / n);
+        const area = country.drawnAreaKm2 || country.areaKm2;
+        const pieces = partition(country.mp, n, area);
+        const items = mergePieces(pieces, n, area / n);
 
         // крупные области первыми — стабильная и осмысленная нумерация
         items.sort((a, b) => b.area - a.area);
@@ -298,12 +315,12 @@ function main() {
                 cc: country.cc,
                 mp: it.mp,
                 areaPx: it.area,
-                areaKm2: G.areaKm2(it.mp, 120),
+                areaKm2: it.area,
                 cx: anchor[0],
                 cy: anchor[1],
                 cells: it.cells,
                 bbox: G.bboxOf(it.mp),
-                labelRadius: Math.sqrt(it.area / Math.PI),
+                labelRadius: Math.sqrt(G.polyAreaPx(it.mp) / Math.PI),
             });
         });
         perCountry[country.cc] = list;
@@ -315,8 +332,12 @@ function main() {
     console.log('Присваиваем названия по городам…');
     nameRegions(countries, perCountry, cityIndex);
 
+    console.log('Раскладываем города по областям…');
+    const placement = collectCityPopulation(perCountry);
+    console.log(`  ${placement.placed} городов внутри областей, ${placement.nearest} отнесены к ближайшей`);
+
     console.log('Считаем население и ресурсы…');
-    distributeStats(countries, perCountry, cityIndex);
+    distributeStats(countries, perCountry);
 
     console.log('Ищем соседей…');
     const neighbors = buildNeighbors(regions, perCountry);
@@ -434,28 +455,64 @@ function sectorName(countryName, slot) {
     return `${stem}${adjEnding(countryName)} ${countryName}`;
 }
 
-function distributeStats(countries, perCountry, cityIndex) {
-    for (const country of countries) {
-        const list = perCountry[country.cc] || [];
-        if (!list.length) continue;
-        const cities = cityIndex[country.cc] || [];
+// Раскладываем ВСЕ города страны (all-the-cities, от 1000 жителей) по областям.
+// Раньше в расчёт шли только города с известным русским названием — около
+// тысячи на весь мир, поэтому плотность населения выходила случайной.
+function collectCityPopulation(perCountry) {
+    const byCc = {};
+    for (const city of allCities) (byCc[city.country] = byCc[city.country] || []).push(city);
 
-        for (const region of list) {
-            region.cityPop = 0;
-            for (const c of cities) {
-                if (c.x < region.bbox[0] || c.x > region.bbox[2] || c.y < region.bbox[1] || c.y > region.bbox[3]) continue;
-                if (G.pointInMulti([c.x, c.y], region.mp)) region.cityPop += c.population;
+    let placed = 0, nearest = 0;
+    for (const cc of Object.keys(perCountry)) {
+        const regions = perCountry[cc];
+        for (const region of regions) { region.cityPop = 0; region.cityCount = 0; }
+        if (!regions.length) continue;
+
+        for (const city of (byCc[cc] || [])) {
+            const x = G.lonToX(city.loc.coordinates[0]);
+            const y = G.latToY(city.loc.coordinates[1]);
+
+            let target = null;
+            for (const region of regions) {
+                if (x < region.bbox[0] || x > region.bbox[2] || y < region.bbox[1] || y > region.bbox[3]) continue;
+                if (G.pointInMulti([x, y], region.mp)) { target = region; break; }
             }
+            if (target) placed++;
+            else {
+                // приморские города иногда выпадают из полигона на пиксель —
+                // отдаём такой город ближайшей области страны
+                let bestDist = Infinity;
+                for (const region of regions) {
+                    const d = Math.hypot(x - region.cx, y - region.cy);
+                    if (d < bestDist) { bestDist = d; target = region; }
+                }
+                nearest++;
+            }
+            target.cityPop += city.population;
+            target.cityCount++;
         }
-        const totalCity = list.reduce((s, r) => s + r.cityPop, 0);
-        const totalArea = list.reduce((s, r) => s + r.areaKm2, 0) || 1;
-        const countryPop = country.population || Math.round(totalCity * 1.6) || list.length * 50000;
+    }
+    return { placed, nearest };
+}
 
-        for (const region of list) {
-            const urban = totalCity > 0 ? region.cityPop / totalCity : 0;
-            const rural = region.areaKm2 / totalArea;
-            const share = totalCity > 0 ? 0.72 * urban + 0.28 * rural : rural;
-            region.population = Math.max(1000, Math.round(countryPop * share));
+function distributeStats(countries, perCountry) {
+    for (const country of countries) {
+        const regions = perCountry[country.cc] || [];
+        if (!regions.length) continue;
+
+        const totalArea = regions.reduce((sum, r) => sum + r.areaKm2, 0) || 1;
+        const cityTotal = regions.reduce((sum, r) => sum + r.cityPop, 0);
+        const countryPop = country.population || Math.round(cityTotal * 1.5) || regions.length * 20000;
+
+        // Городское население стоит там, где стоят города; остальное
+        // размазываем по площади с постоянной сельской плотностью.
+        const ruralDensity = Math.max(0, countryPop - cityTotal) / totalArea;
+        const weights = regions.map(r => r.cityPop + ruralDensity * r.areaKm2);
+        const weightSum = weights.reduce((a, b) => a + b, 0);
+
+        regions.forEach((region, i) => {
+            const share = weightSum > 0 ? weights[i] / weightSum : region.areaKm2 / totalArea;
+            region.population = Math.max(200, Math.round(countryPop * share));
 
             const density = region.population / Math.max(1, region.areaKm2);
             const noise = hash01(region.id);
@@ -463,6 +520,13 @@ function distributeStats(countries, perCountry, cityIndex) {
             region.industry = Math.max(1, Math.round(indBase * (0.5 + noise) * Math.min(3, 0.4 + Math.sqrt(density) / 6)));
             region.agro = Math.max(1, Math.round((12 + 55 * hash01(region.id + 'a')) * Math.min(1.6, 0.5 + region.areaKm2 / 200000)));
             region.oil = OIL[country.cc] ? Math.round(OIL[country.cc] * (0.4 + 1.2 * hash01(region.id + 'o'))) : 0;
+        });
+
+        // округление не должно менять итог по стране
+        const diff = countryPop - regions.reduce((s, r) => s + r.population, 0);
+        if (diff !== 0) {
+            const biggest = regions.reduce((a, b) => (a.population >= b.population ? a : b));
+            biggest.population = Math.max(200, biggest.population + diff);
         }
     }
 }
@@ -705,14 +769,17 @@ function q(s) { return "'" + String(s).replace(/\\/g, '\\\\').replace(/'/g, "\\'
 // от уже занятых её соседями.
 function buildPalette(countries, adjacency) {
     const swatches = [];
-    for (let hue = 0; hue < 360; hue += 24) {
+    for (let hue = 0; hue < 360; hue += 18) {
         swatches.push({ h: hue, s: 62, l: 52 });
-        swatches.push({ h: hue + 12, s: 44, l: 38 });
-        swatches.push({ h: hue + 6, s: 72, l: 66 });
+        swatches.push({ h: hue + 9, s: 44, l: 38 });
+        swatches.push({ h: hue + 4, s: 72, l: 66 });
     }
 
+    // Крупные страны выбирают цвет первыми: у них больше ограничений и они
+    // заметнее на карте, мелким островам достаточно остатков.
+    const degree = cc => (adjacency[cc] ? adjacency[cc].size : 0);
     const order = countries.slice().sort((a, b) =>
-        (adjacency[b.cc] ? adjacency[b.cc].size : 0) - (adjacency[a.cc] ? adjacency[a.cc].size : 0));
+        degree(b.cc) - degree(a.cc) || (b.population || 0) - (a.population || 0));
 
     const chosen = {};
     for (const country of order) {
@@ -741,17 +808,31 @@ function swatchDistance(a, b) {
     return Math.min(dh, 360 - dh) + Math.abs(a.l - b.l) * 1.5;
 }
 
-// Граф соседства стран выводим из соседства областей.
+// Граф «не давать одинаковый цвет» строим из соседства областей и из
+// визуальной близости: страны по разные стороны узкого моря соседями не
+// считаются, но на экране лежат рядом и сливаться не должны.
+const COLOR_PROXIMITY_PX = 16;   // ~500 км у экватора
+
 function countryAdjacency(regions, neighbors) {
     const ccOf = new Map(regions.map(r => [r.id, r.cc]));
     const adjacency = {};
+    const link = (a, b) => {
+        if (!a || !b || a === b) return;
+        (adjacency[a] = adjacency[a] || new Set()).add(b);
+        (adjacency[b] = adjacency[b] || new Set()).add(a);
+    };
+
     for (const [id, list] of Object.entries(neighbors)) {
-        const a = ccOf.get(id);
-        if (!a) continue;
-        adjacency[a] = adjacency[a] || new Set();
-        for (const other of list) {
-            const b = ccOf.get(other);
-            if (b && b !== a) adjacency[a].add(b);
+        for (const other of list) link(ccOf.get(id), ccOf.get(other));
+    }
+
+    for (let i = 0; i < regions.length; i++) {
+        for (let j = i + 1; j < regions.length; j++) {
+            const a = regions[i], b = regions[j];
+            if (a.cc === b.cc) continue;
+            if (Math.abs(a.cx - b.cx) > COLOR_PROXIMITY_PX) continue;
+            if (Math.abs(a.cy - b.cy) > COLOR_PROXIMITY_PX) continue;
+            if (Math.hypot(a.cx - b.cx, a.cy - b.cy) <= COLOR_PROXIMITY_PX) link(a.cc, b.cc);
         }
     }
     return adjacency;

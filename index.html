@@ -101,13 +101,14 @@ button { font-family: inherit; }
    Скрытое именно display:none, а не opacity — иначе браузер продолжает
    рисовать невидимые слои на каждом кадре панорамирования. */
 #world-map.lod-0 #layer-cities,
+#world-map.lod-1 #layer-cities { display: none; }
 #world-map.lod-0 #layer-region-labels,
-#world-map.lod-0 #layer-armies { display: none; }
-#world-map.lod-1 #layer-cities .city { display: none; }
-#world-map.lod-1 #layer-cities .capital.major { display: none; }
+#world-map.lod-2 #layer-region-labels { display: none; }
 #world-map.lod-1 .country-label,
 #world-map.lod-2 .country-label { display: none; }
-#world-map.lod-2 #layer-region-labels { display: none; }
+/* Маркеры войск привязаны к уровню взаимодействия, а не к подписям:
+   пропадать вместе с названиями областей они не должны. */
+#world-map.global-view #layer-armies { display: none; }
 
 /* ================= ОБЩИЙ UI ================= */
 #ui-layer { position: fixed; inset: 0; pointer-events: none; z-index: 10; }
