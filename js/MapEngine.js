@@ -1,646 +1,493 @@
+// =====================================================================
+// КАРТА: отрисовка областей, камера, подписи, маркеры
+//
+// Вся геометрия приходит из RegionsDB (готовые path и центры cx/cy),
+// поэтому getBBox не вызывается ни разу — нет принудительных пересчётов
+// раскладки и рывков при перерисовке.
+// =====================================================================
 class MapEngine {
-    constructor(gameData, onRegionClickCallback) {
+    constructor(gameData, onRegionClick) {
         this.container = document.getElementById('map-container');
         this.svg = document.getElementById('world-map');
-        this.gameData = gameData;
-        this.onRegionClick = onRegionClickCallback;
-        
-        // НОВЫЕ НАСТРОЙКИ: Географический масштаб
-        this.scale = 3; // Стартовый зум (нормальный вид мира)
+        this.data = gameData;
+        this.onRegionClick = onRegionClick;
+
+        this.scale = 3;
         this.translateX = 0;
         this.translateY = 0;
         this.isDragging = false;
-        
-        this.zoomThreshold = 3.5; // Снизил порог для регионального уровня
-        
+        this.wasDragging = false;
+        this.zoomThreshold = 6;
+        this.detailThreshold = 15;   // с этого масштаба показываем города
+        this.minScale = 1.5;
+        this.maxScale = 60;
+
+        this.paths = new Map();       // regionId -> <path>
+        this.selection = new Set();
+
+        this.buildLayers();
         this.initEvents();
-        this.centerMap();
-        this.colorRegions();
-        
+        this.centerOnPlayer();
+        this.refreshColors();
+        this.createRegionLabels();
         this.createCountryLabels();
         this.drawCities();
-        this.drawArmyMarkers(); // <--- НОВАЯ СТРОКА
+        this.drawArmyMarkers();
         this.updateLOD();
     }
 
     get isRegionalZoom() { return this.scale >= this.zoomThreshold; }
 
-    updateLOD() {
-        this.svg.querySelectorAll('.country-hover').forEach(el => el.classList.remove('country-hover'));
+    // Три ступени детализации: страны -> области -> города.
+    get detailLevel() {
+        if (this.scale < this.zoomThreshold) return 0;
+        return this.scale < this.detailThreshold ? 1 : 2;
+    }
 
-        if (this.isRegionalZoom) {
-            this.svg.classList.remove('global-view');
-            this.svg.classList.add('regional-view');
-        } else {
-            this.svg.classList.remove('regional-view');
-            this.svg.classList.add('global-view');
+    // --- построение слоёв -------------------------------------------
+    buildLayers() {
+        this.svg.innerHTML = '';
+        const g = tag => {
+            const el = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+            el.setAttribute('id', tag);
+            this.svg.appendChild(el);
+            return el;
+        };
+        this.regionLayer = g('layer-regions');
+        this.cityLayer = g('layer-cities');
+        this.regionLabelLayer = g('layer-region-labels');
+        this.labelLayer = g('layer-labels');
+        this.armyLayer = g('layer-armies');
+
+        const fragment = document.createDocumentFragment();
+        for (const id of Object.keys(RegionsDB)) {
+            const region = this.data.getRegion(id);
+            if (!region) continue;
+            const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+            path.setAttribute('d', RegionsDB[id].path);
+            path.setAttribute('class', 'region');
+            path.dataset.region = id;
+            fragment.appendChild(path);
+            this.paths.set(id, path);
         }
+        this.regionLayer.appendChild(fragment);
+    }
+
+    // --- выделение ---------------------------------------------------
+    clearSelection() {
+        for (const id of this.selection) {
+            const path = this.paths.get(id);
+            if (path) path.classList.remove('selected-region', 'selected-country');
+        }
+        this.selection.clear();
     }
 
     selectRegion(regionId) {
         this.clearSelection();
-        const el = document.getElementById(regionId);
-        if (el) {
-            el.classList.add('selected-region');
-            // Мы убрали перемещение слоев (insertBefore), так как из-за него браузер
-            // "терял" значки войск при перерисовке SVG. Тонкая рамка будет видна и так!
-        }
+        const path = this.paths.get(regionId);
+        if (!path) return;
+        path.classList.add('selected-region');
+        this.selection.add(regionId);
     }
 
     selectCountry(countryId) {
         this.clearSelection();
-        this.svg.querySelectorAll(`.region[data-country="${countryId}"]`).forEach(el => {
-            if (el) el.classList.add('selected-country');
-        });
-    }
-
-    clearSelection() {
-        this.svg.querySelectorAll('.selected-region, .selected-country').forEach(el => {
-            el.classList.remove('selected-region', 'selected-country');
-        });
-    }
-
-    createCountryLabels() {
-        this.svg.querySelectorAll('.country-label').forEach(el => el.remove());
-
-        Object.keys(this.gameData.countries).forEach(countryId => {
-            const country = this.gameData.countries[countryId];
-            
-            const gridCells = Object.values(this.gameData.regions).filter(r => r.owner === countryId);
-            if (gridCells.length === 0) return;
-
-            // 2. Будуємо граф сусідів тільки для ЦІЄЇ країни
-            const graph = {};
-            const cellSet = new Set(gridCells.map(c => c.id));
-            
-            gridCells.forEach(cell => {
-                const id = cell.id;
-                graph[id] = [];
-                const neighbors = typeof GeneratedNeighbors !== 'undefined' ? GeneratedNeighbors[id] : [];
-                if (neighbors) {
-                    neighbors.forEach(nId => {
-                        if (cellSet.has(nId)) {
-                            graph[id].push(nId);
-                        }
-                    });
-                }
-            });
-
-            // 3. Знаходимо всі компоненти зв'язності (DFS/BFS)
-            const visited = new Set();
-            const components = [];
-            
-            Object.keys(graph).forEach(startNode => {
-                if (!visited.has(startNode)) {
-                    const component = [];
-                    const queue = [startNode];
-                    visited.add(startNode);
-                    
-                    while (queue.length > 0) {
-                        const curr = queue.shift();
-                        component.push(curr);
-                        const nList = graph[curr] || [];
-                        nList.forEach(neighbor => {
-                            if (!visited.has(neighbor)) {
-                                visited.add(neighbor);
-                                queue.push(neighbor);
-                            }
-                        });
-                    }
-                    components.push(component);
-                }
-            });
-
-            // Find the largest component by area (or number of regions)
-            components.sort((a, b) => b.length - a.length);
-            const mainComponentIds = components[0];
-
-            let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
-            let sumX = 0, sumY = 0;
-            
-            mainComponentIds.forEach(rid => {
-                const dbInfo = typeof RegionsDB !== 'undefined' ? RegionsDB[rid] : null;
-                if (dbInfo && dbInfo.cx !== undefined) {
-                    minX = Math.min(minX, dbInfo.cx);
-                    maxX = Math.max(maxX, dbInfo.cx);
-                    minY = Math.min(minY, dbInfo.cy);
-                    maxY = Math.max(maxY, dbInfo.cy);
-                    sumX += dbInfo.cx;
-                    sumY += dbInfo.cy;
-                }
-            });
-
-            if (minX === Infinity) return;
-
-            const centerX = sumX / mainComponentIds.length;
-            const centerY = sumY / mainComponentIds.length;
-            const clusterWidth = Math.max(maxX - minX + 25, 25); // +25 to account for cell size
-            const clusterHeight = Math.max(maxY - minY + 25, 25);
-
-            // Динамический размер: пытаемся вписать текст в ширину и высоту кластера
-            const letterCount = country.name.length;
-            // Примерная ширина текста = fontSize * letterCount * 0.6
-            let calculatedFontSize = (clusterWidth * 0.8) / (letterCount * 0.6);
-            
-            // Текст не должен превышать высоту кластера
-            if (calculatedFontSize > clusterHeight * 0.8) {
-                calculatedFontSize = clusterHeight * 0.8;
-            }
-
-            // Ограничиваем шрифты здравым смыслом (от 4 до 100 пикселей)
-            calculatedFontSize = Math.min(Math.max(calculatedFontSize, 4.0), 100.0);
-
-            // 5. Отрисовываем название
-            const text = document.createElementNS("http://www.w3.org/2000/svg", "text");
-            text.setAttribute("x", centerX);
-            text.setAttribute("y", centerY);
-            text.setAttribute("text-anchor", "middle"); 
-            text.setAttribute("dominant-baseline", "central"); 
-            text.setAttribute("class", "country-label");
-            text.style.fontSize = `${calculatedFontSize}px`; 
-            text.style.pointerEvents = "none";
-            text.style.userSelect = "none";
-            text.style.opacity = "0.8"; // Слегка прозрачный, чтобы не перекрывал всё
-            text.textContent = country.name; 
-            
-            this.svg.appendChild(text);
-        });
-    }
-
-    // 2. ИСПРАВЛЕННОЕ ЦЕНТРИРОВАНИЕ КАМЕРЫ НА СТРАНЕ
-    centerMap() {
-        const screenWidth = window.innerWidth;
-        const screenHeight = window.innerHeight;
-
-        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-        const paths = Array.from(this.svg.querySelectorAll('.region')).filter(path => {
-            const region = this.gameData.getRegion(path.id);
-            return region && region.owner === this.gameData.playerCountry;
-        });
-
-        if (paths.length > 0) {
-            paths.forEach(path => {
-                try {
-                    const bbox = path.getBBox(); 
-                    if (bbox.width > 0 && bbox.height > 0) { 
-                        if (bbox.x < minX) minX = bbox.x;
-                        if (bbox.y < minY) minY = bbox.y;
-                        if (bbox.x + bbox.width > maxX) maxX = bbox.x + bbox.width;
-                        if (bbox.y + bbox.height > maxY) maxY = bbox.y + bbox.height;
-                    }
-                } catch(e) {}
-            });
+        for (const region of this.data.getCountryRegions(countryId)) {
+            const path = this.paths.get(region.id);
+            if (!path) continue;
+            path.classList.add('selected-country');
+            this.selection.add(region.id);
         }
-
-        if (minX === Infinity) {
-            minX = 500; minY = 300; maxX = 700; maxY = 500; // Резервный центр
-        }
-
-        const targetX = minX + (maxX - minX) / 2;
-        const targetY = minY + (maxY - minY) / 2;
-
-        const svgAspect = 1200 / 800;
-        const screenAspect = screenWidth / screenHeight;
-        let baseScale, offsetX = 0, offsetY = 0;
-
-        if (screenAspect > svgAspect) {
-            baseScale = screenHeight / 800;
-            offsetX = (screenWidth - 1200 * baseScale) / 2;
-        } else {
-            baseScale = screenWidth / 1200;
-            offsetY = (screenHeight - 800 * baseScale) / 2;
-        }
-
-        const physicalX = offsetX + targetX * baseScale;
-        const physicalY = offsetY + targetY * baseScale;
-
-        const maxDim = Math.max(maxX - minX, maxY - minY) * baseScale;
-        const desiredSize = Math.min(screenWidth, screenHeight) * 0.45;
-        this.scale = maxDim > 0 ? Math.min(Math.max(desiredSize / maxDim, 2.5), 18.0) : 4;
-
-        this.translateX = (screenWidth / 2) - (physicalX * this.scale);
-        this.translateY = (screenHeight / 2) - (physicalY * this.scale); 
-
-        this.updateTransform();
-        this.updateLOD(); 
     }
 
-    // 1. ЖЕСТКО ФИКСИРУЕМ ТОЧКУ ЗУМА
-    updateTransform() {
-        this.svg.style.transformOrigin = '0px 0px'; // <--- ЭТО ИСПРАВИТ УЛЕТАНИЕ КАРТЫ ВБОК
-        this.svg.style.transform = `translate(${this.translateX}px, ${this.translateY}px) scale(${this.scale})`;
+    updateLOD() {
+        this.svg.classList.toggle('regional-view', this.isRegionalZoom);
+        this.svg.classList.toggle('global-view', !this.isRegionalZoom);
+        this.applyDetail();
+        this.clearHover();
     }
 
-    colorRegions() {
-        const paths = document.querySelectorAll('.region');
-        
-        // Флаг для определения сенсорных устройств
-        const isTouchDevice = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
-    
-        paths.forEach(path => {
-            path.addEventListener('click', (e) => {
-                // Игнорируем клик, если мы тащили карту
-                if (this.wasDragging) {
-                    e.stopPropagation();
-                    e.preventDefault();
-                    return;
-                }
-                this.onRegionClick(path.id);
-            });
-    
-            // На мобилках hover часто "залипает", поэтому мы его отключаем 
-            // или делаем менее навязчивым. 
-            if (!isTouchDevice) {
-                path.addEventListener('mouseenter', () => {
-                    if (this.isDragging || this.wasDragging) return; // Не подсвечивать при скролле
-    
-                    if (!this.isRegionalZoom) {
-                        // Подсвечиваем всю страну на глобальном уровне
-                        const countryId = path.getAttribute('data-country');
-                        this.svg.querySelectorAll(`.region[data-country="${countryId}"]`)
-                            .forEach(p => p.classList.add('country-hover'));
-                    } else {
-                        // На региональном уровне подсвечивается только CSS (:hover), 
-                        // JS тут не нужен, но если хотите JS-контроль:
-                        path.classList.add('region-hover');
-                    }
-                });
-    
-                path.addEventListener('mouseleave', () => {
-                    if (!this.isRegionalZoom) {
-                        const countryId = path.getAttribute('data-country');
-                        this.svg.querySelectorAll(`.region[data-country="${countryId}"]`)
-                            .forEach(p => p.classList.remove('country-hover'));
-                    } else {
-                        path.classList.remove('region-hover');
-                    }
-                });
-            }
-        });
-        
-        this.refreshColors();
+    applyDetail() {
+        const level = this.detailLevel;
+        if (this.lastDetail === level) return;
+        this.lastDetail = level;
+        this.svg.classList.remove('lod-0', 'lod-1', 'lod-2');
+        this.svg.classList.add('lod-' + level);
     }
 
-    // Этот метод безопасно вызывать сколько угодно раз (например, после каждого хода)
+    clearHover() {
+        if (!this.hovered) return;
+        for (const path of this.hovered) path.classList.remove('country-hover');
+        this.hovered = null;
+    }
+
+    // --- раскраска ----------------------------------------------------
     refreshColors() {
-        const paths = document.querySelectorAll('.region');
-        paths.forEach(path => {
-            const regionData = this.gameData.getRegion(path.id);
-            if (regionData) {
-                const countryId = regionData.owner;
-                const country = this.gameData.getCountry(countryId);
-                // ЗАЩИТА: Красим только если страна реально существует в базе
-                if (country && country.color) {
-                    path.style.fill = country.color;
-                }
-                path.setAttribute('data-country', countryId);
+        for (const [id, path] of this.paths) {
+            const region = this.data.getRegion(id);
+            if (!region) continue;
+            const country = this.data.getCountry(region.owner);
+            if (!country) continue;
+            if (path.dataset.country !== region.owner) {
+                path.dataset.country = region.owner;
+                path.style.fill = country.color;
+                path.style.stroke = country.color;
+            }
+        }
+        this.drawArmyMarkers();
+    }
+
+    // --- камера --------------------------------------------------------
+    centerOnPlayer() {
+        const regions = this.data.getCountryRegions(this.data.playerCountry);
+        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+        for (const region of regions) {
+            minX = Math.min(minX, region.cx); maxX = Math.max(maxX, region.cx);
+            minY = Math.min(minY, region.cy); maxY = Math.max(maxY, region.cy);
+        }
+        if (minX === Infinity) { minX = 560; minY = 200; maxX = 640; maxY = 260; }
+
+        const w = window.innerWidth, h = window.innerHeight;
+        const base = Math.min(w / 1200, h / 800);
+        const offsetX = (w - 1200 * base) / 2;
+        const offsetY = (h - 800 * base) / 2;
+
+        const spanX = Math.max(maxX - minX, 6) * base;
+        const spanY = Math.max(maxY - minY, 6) * base;
+        const desired = Math.min((w * 0.55) / spanX, (h * 0.55) / spanY);
+        this.scale = Math.min(Math.max(desired, 2.5), 30);
+
+        const cx = offsetX + ((minX + maxX) / 2) * base;
+        const cy = offsetY + ((minY + maxY) / 2) * base;
+        this.translateX = w / 2 - cx * this.scale;
+        this.translateY = h / 2 - cy * this.scale;
+        this.applyTransform();
+    }
+
+    applyTransform() {
+        this.svg.style.transformOrigin = '0 0';
+        this.svg.style.transform =
+            `translate3d(${this.translateX}px, ${this.translateY}px, 0) scale(${this.scale})`;
+        // Толщина линий и подписи городов задаются в единицах карты, а карта
+        // масштабируется целиком. Держим их постоянными на экране.
+        this.svg.style.setProperty('--sw', (1 / this.scale).toFixed(4) + 'px');
+    }
+
+    // Один общий путь для колеса, щипка и жестов: меняем масштаб,
+    // удерживая точку под курсором на месте.
+    zoomAt(newScale, pivotX, pivotY) {
+        const clamped = Math.min(Math.max(newScale, this.minScale), this.maxScale);
+        if (clamped === this.scale) return;
+        const wasRegional = this.isRegionalZoom;
+        const ratio = clamped / this.scale;
+        this.translateX = pivotX - (pivotX - this.translateX) * ratio;
+        this.translateY = pivotY - (pivotY - this.translateY) * ratio;
+        this.scale = clamped;
+        this.applyTransform();
+        this.applyDetail();
+        this.scheduleLabelUpdate();
+        if (wasRegional !== this.isRegionalZoom) {
+            this.updateLOD();
+            document.dispatchEvent(new CustomEvent('zoomLevelChanged', {
+                detail: { isRegional: this.isRegionalZoom },
+            }));
+        }
+    }
+
+    // --- события -------------------------------------------------------
+    initEvents() {
+        // Один слушатель на весь слой вместо тысячи: клики приходят
+        // всплытием, поэтому добавление и удаление областей ничего не ломает.
+        this.regionLayer.addEventListener('click', e => {
+            if (this.wasDragging) return;
+            const path = e.target.closest('.region');
+            if (!path || path.classList.contains('dimmed')) return;
+            this.onRegionClick(path.dataset.region);
+        });
+
+        this.regionLayer.addEventListener('mouseover', e => {
+            if (this.isRegionalZoom || this.isDragging) return;
+            const path = e.target.closest('.region');
+            if (!path) return;
+            const cc = path.dataset.country;
+            if (this.hoveredCountry === cc) return;
+            this.clearHover();
+            this.hoveredCountry = cc;
+            this.hovered = [];
+            for (const region of this.data.getCountryRegions(cc)) {
+                const el = this.paths.get(region.id);
+                if (el) { el.classList.add('country-hover'); this.hovered.push(el); }
             }
         });
-        // Обновляем маркеры армий вместе с покраской карты
-        this.drawArmyMarkers(); // <--- НОВАЯ СТРОКА
-    }
-    
-    // 3. ИДЕАЛЬНЫЙ ЗУМ ДЛЯ ПК, ANDROID И iPHONE
-    initEvents() {
-        this.lastTouchTime = 0; 
+        this.regionLayer.addEventListener('mouseleave', () => {
+            this.hoveredCountry = null;
+            this.clearHover();
+        });
 
-        // === ГЛОБАЛЬНЫЙ ПЕРЕХВАТЧИК КЛИКОВ ===
-        this.svg.addEventListener('click', (e) => {
-            if (this.wasDragging) {
-                e.stopPropagation();
-                e.preventDefault();
-                return;
-            } 
-
-            if (e.target.tagName.toLowerCase() === 'svg') {
+        this.svg.addEventListener('click', e => {
+            if (this.wasDragging) return;
+            if (e.target === this.svg) {
                 this.clearSelection();
                 document.dispatchEvent(new Event('panelClosed'));
             }
-        }, false);
+        });
 
-        // --- ПК (МЫШЬ И КОЛЕСИКО) ---
-        this.container.addEventListener('wheel', (e) => {
+        this.container.addEventListener('wheel', e => {
             e.preventDefault();
-            const oldZoomLevel = this.isRegionalZoom;
-            const oldScale = this.scale;
-            
-            const delta = e.deltaY < 0 ? 1 : -1; 
-            this.scale += delta * 0.15 * this.scale;
-            
-            // УВЕЛИЧИЛИ ЛИМИТ ЗУМА ДО 25
-            this.scale = Math.min(Math.max(2, this.scale), 25); 
-            
-            const mouseX = e.clientX, mouseY = e.clientY;
-            this.translateX = mouseX - (mouseX - this.translateX) * (this.scale / oldScale);
-            this.translateY = mouseY - (mouseY - this.translateY) * (this.scale / oldScale);
-            this.updateTransform();
-
-            if (oldZoomLevel !== this.isRegionalZoom) {
-                this.updateLOD();
-                document.dispatchEvent(new CustomEvent('zoomLevelChanged', { detail: { isRegional: this.isRegionalZoom }}));
-            }
+            const factor = Math.exp(-e.deltaY * 0.0016);
+            this.zoomAt(this.scale * factor, e.clientX, e.clientY);
         }, { passive: false });
 
-        this.container.addEventListener('mousedown', (e) => {
-            if (Date.now() - this.lastTouchTime < 500) return; 
-            if (e.button !== 0) return;
-            this.isDragging = true;
-            this.wasDragging = false; 
-            this.mouseStartX = e.clientX;
-            this.mouseStartY = e.clientY;
-            this.startX = e.clientX - this.translateX;
-            this.startY = e.clientY - this.translateY;
-        });
-
-        this.container.addEventListener('mousemove', (e) => {
-            if (!this.isDragging) return;
-            const dx = e.clientX - this.mouseStartX;
-            const dy = e.clientY - this.mouseStartY;
-            if (Math.abs(dx) > 3 || Math.abs(dy) > 3) {
-                this.wasDragging = true;
-            }
-            this.translateX = e.clientX - this.startX;
-            this.translateY = e.clientY - this.startY;
-            this.updateTransform();
-        });
-
-        this.container.addEventListener('mouseup', () => this.isDragging = false);
-        this.container.addEventListener('mouseleave', () => this.isDragging = false);
-
-        // --- ANDROID & iOS (ТАЧСКРИН) ---
-        let initialPinchDist = null;
-
-        this.container.addEventListener('touchstart', (e) => {
-            this.wasDragging = false; 
-            if (e.touches.length === 1) {
+        // Указатели покрывают мышь, тач и перо одним кодом.
+        this.pointers = new Map();
+        this.container.addEventListener('pointerdown', e => {
+            if (e.pointerType === 'mouse' && e.button !== 0) return;
+            this.container.setPointerCapture(e.pointerId);
+            this.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+            if (this.pointers.size === 1) {
                 this.isDragging = true;
-                this.touchStartX = e.touches[0].clientX;
-                this.touchStartY = e.touches[0].clientY;
-                this.startX = e.touches[0].clientX - this.translateX;
-                this.startY = e.touches[0].clientY - this.translateY;
-            } else if (e.touches.length === 2) {
-                this.isDragging = false;
-                this.wasDragging = true; 
-                initialPinchDist = Math.hypot(
-                    e.touches[0].clientX - e.touches[1].clientX,
-                    e.touches[0].clientY - e.touches[1].clientY
-                );
-            }
-        }, { passive: false });
-
-        this.container.addEventListener('touchmove', (e) => {
-            e.preventDefault(); 
-            if (e.touches.length === 1 && this.isDragging) {
-                const dx = e.touches[0].clientX - this.touchStartX;
-                const dy = e.touches[0].clientY - this.touchStartY;
-                if (Math.abs(dx) > 4 || Math.abs(dy) > 4) {
-                    this.wasDragging = true; 
-                }
-                this.translateX = e.touches[0].clientX - this.startX;
-                this.translateY = e.touches[0].clientY - this.startY;
-                this.updateTransform();
-            } else if (e.touches.length === 2 && initialPinchDist) {
-                this.wasDragging = true;
-                const currentDist = Math.hypot(
-                    e.touches[0].clientX - e.touches[1].clientX,
-                    e.touches[0].clientY - e.touches[1].clientY
-                );
-                const oldZoomLevel = this.isRegionalZoom;
-                const oldScale = this.scale;
-                const factor = currentDist / initialPinchDist;
-                
-                // УВЕЛИЧИЛИ ЛИМИТ ЗУМА ДО 25
-                this.scale = Math.min(Math.max(2, this.scale * factor), 25);
-
-                const pinchX = (e.touches[0].clientX + e.touches[1].clientX) / 2;
-                const pinchY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
-                this.translateX = pinchX - (pinchX - this.translateX) * (this.scale / oldScale);
-                this.translateY = pinchY - (pinchY - this.translateY) * (this.scale / oldScale);
-                this.updateTransform();
-
-                if (oldZoomLevel !== this.isRegionalZoom) {
-                    this.updateLOD();
-                    document.dispatchEvent(new CustomEvent('zoomLevelChanged', { detail: { isRegional: this.isRegionalZoom }}));
-                }
-                initialPinchDist = currentDist; 
-            }
-        }, { passive: false });
-
-        this.container.addEventListener('touchend', (e) => {
-            this.lastTouchTime = Date.now(); 
-            if (e.touches.length === 1) {
-                this.isDragging = true;
-                this.touchStartX = e.touches[0].clientX;
-                this.touchStartY = e.touches[0].clientY;
-                this.startX = e.touches[0].clientX - this.translateX;
-                this.startY = e.touches[0].clientY - this.translateY;
-                initialPinchDist = null;
-            } else if (e.touches.length === 0) {
-                this.isDragging = false;
-                initialPinchDist = null;
-            }
-        });
-
-        // --- iPHONE / iPAD (Safari Gestures) ---
-        let iosInitialScale = 1;
-
-        this.container.addEventListener('gesturestart', (e) => {
-            e.preventDefault();
-            this.isDragging = false;
-            this.wasDragging = true;
-            iosInitialScale = this.scale;
-        });
-
-        this.container.addEventListener('gesturechange', (e) => {
-            e.preventDefault();
-            this.wasDragging = true;
-            const oldZoomLevel = this.isRegionalZoom;
-            const oldScale = this.scale;
-            
-            // УВЕЛИЧИЛИ ЛИМИТ ЗУМА ДО 25
-            this.scale = Math.min(Math.max(2, iosInitialScale * e.scale), 25);
-            
-            const pinchX = window.innerWidth / 2;
-            const pinchY = window.innerHeight / 2;
-            this.translateX = pinchX - (pinchX - this.translateX) * (this.scale / oldScale);
-            this.translateY = pinchY - (pinchY - this.translateY) * (this.scale / oldScale);
-            this.updateTransform();
-
-            if (oldZoomLevel !== this.isRegionalZoom) {
-                this.updateLOD();
-                document.dispatchEvent(new CustomEvent('zoomLevelChanged', { detail: { isRegional: this.isRegionalZoom }}));
-            }
-        });
-
-        this.container.addEventListener('gestureend', (e) => {
-            e.preventDefault();
-            this.lastTouchTime = Date.now(); 
-        });
-    }
-
-    drawCities() {
-        this.svg.querySelectorAll('.city-marker, .capital-marker, .city-label, .capital-label').forEach(el => el.remove());
-
-        CitiesDB.forEach(city => {
-            const regionPath = document.getElementById(city.regionId);
-            if (!regionPath) return; 
-
-            const bbox = regionPath.getBBox();
-            const centerX = bbox.x + bbox.width / 2 + (city.offsetX || 0);
-            const centerY = bbox.y + bbox.height / 2 + (city.offsetY || 0);
-
-            const circle = document.createElementNS("http://www.w3.org/2000/svg", "circle");
-            circle.setAttribute("cx", centerX);
-            circle.setAttribute("cy", centerY);
-            circle.setAttribute("r", city.isCapital ? "0.18" : "0.10"); 
-            circle.setAttribute("class", city.isCapital ? "capital-marker" : "city-marker");
-            
-            const text = document.createElementNS("http://www.w3.org/2000/svg", "text");
-            text.setAttribute("x", centerX + 0.3); 
-            text.setAttribute("y", centerY + 0.05);
-            text.setAttribute("class", city.isCapital ? "capital-label" : "city-label");
-            text.textContent = city.name;
-
-            this.svg.appendChild(circle);
-            this.svg.appendChild(text);
-        });
-    }
-
-    enableTargetSelection(validRegionIds, targetClass = 'move-target') {
-        document.querySelectorAll('.region').forEach(path => {
-            if (validRegionIds.includes(path.id)) {
-                path.classList.add(targetClass);
+                this.wasDragging = false;
+                this.dragStartX = e.clientX - this.translateX;
+                this.dragStartY = e.clientY - this.translateY;
+                this.downX = e.clientX;
+                this.downY = e.clientY;
             } else {
-                path.classList.add('dimmed');
+                this.isDragging = false;
+                this.pinchStart = this.pinchState();
             }
         });
+
+        this.container.addEventListener('pointermove', e => {
+            if (!this.pointers.has(e.pointerId)) return;
+            this.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+
+            if (this.pointers.size >= 2 && this.pinchStart) {
+                const now = this.pinchState();
+                if (now.dist > 0 && this.pinchStart.dist > 0) {
+                    this.wasDragging = true;
+                    this.zoomAt(this.scale * (now.dist / this.pinchStart.dist), now.x, now.y);
+                    this.pinchStart = now;
+                }
+                return;
+            }
+            if (!this.isDragging) return;
+            if (Math.abs(e.clientX - this.downX) > 4 || Math.abs(e.clientY - this.downY) > 4) {
+                this.wasDragging = true;
+            }
+            this.translateX = e.clientX - this.dragStartX;
+            this.translateY = e.clientY - this.dragStartY;
+            this.applyTransform();
+        });
+
+        const release = e => {
+            this.pointers.delete(e.pointerId);
+            if (this.pointers.size < 2) this.pinchStart = null;
+            if (this.pointers.size === 0) {
+                this.isDragging = false;
+                // сбрасываем флаг после текущего клика, чтобы перетаскивание не считалось кликом
+                setTimeout(() => { this.wasDragging = false; }, 0);
+            }
+        };
+        this.container.addEventListener('pointerup', release);
+        this.container.addEventListener('pointercancel', release);
+
+        window.addEventListener('resize', () => this.applyTransform());
+    }
+
+    pinchState() {
+        const pts = [...this.pointers.values()];
+        const [a, b] = pts;
+        return {
+            dist: Math.hypot(a.x - b.x, a.y - b.y),
+            x: (a.x + b.x) / 2,
+            y: (a.y + b.y) / 2,
+        };
+    }
+
+    // --- подписи стран ---------------------------------------------------
+    createCountryLabels() {
+        this.labelLayer.innerHTML = '';
+        const fragment = document.createDocumentFragment();
+
+        for (const countryId of Object.keys(this.data.countries)) {
+            const regions = Object.values(this.data.regions).filter(r => r.owner === countryId);
+            if (!regions.length) continue;
+
+            const component = this.largestComponent(regions, countryId);
+            if (!component.length) continue;
+
+            let sumX = 0, sumY = 0;
+            let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+            for (const region of component) {
+                sumX += region.cx; sumY += region.cy;
+                minX = Math.min(minX, region.cx); maxX = Math.max(maxX, region.cx);
+                minY = Math.min(minY, region.cy); maxY = Math.max(maxY, region.cy);
+            }
+            const name = this.data.getCountry(countryId).name;
+            const width = Math.max(maxX - minX, 4);
+            const height = Math.max(maxY - minY, 4);
+            let size = (width * 1.1) / Math.max(name.length * 0.55, 1);
+            size = Math.min(size, height * 0.7);
+            size = Math.min(Math.max(size, 1.2), 26);
+
+            const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+            text.setAttribute('x', (sumX / component.length).toFixed(2));
+            text.setAttribute('y', (sumY / component.length).toFixed(2));
+            text.setAttribute('class', 'country-label');
+            text.setAttribute('font-size', size.toFixed(2));
+            text.textContent = name;
+            fragment.appendChild(text);
+        }
+        this.labelLayer.appendChild(fragment);
+    }
+
+    // Крупнейший связный кусок владений — чтобы подпись не улетала в океан
+    // между материковой частью и далёкими островами.
+    largestComponent(regions, countryId) {
+        const own = new Set(regions.map(r => r.id));
+        const seen = new Set();
+        let best = [];
+        for (const region of regions) {
+            if (seen.has(region.id)) continue;
+            const component = [];
+            const queue = [region.id];
+            seen.add(region.id);
+            while (queue.length) {
+                const id = queue.pop();
+                component.push(this.data.regions[id]);
+                for (const nextId of this.data.getNeighbors(id)) {
+                    if (own.has(nextId) && !seen.has(nextId)) { seen.add(nextId); queue.push(nextId); }
+                }
+            }
+            if (component.length > best.length) best = component;
+        }
+        return best;
+    }
+
+    createRegionLabels() {
+        this.regionLabelLayer.innerHTML = '';
+        this.regionLabels = [];
+        const fragment = document.createDocumentFragment();
+
+        for (const region of Object.values(this.data.regions)) {
+            const info = RegionsDB[region.id];
+            // Подпись не должна вылезать за пределы своей области, поэтому
+            // её размер ограничен шириной области (в единицах карты).
+            const fitByWidth = (info.r * 1.7) / Math.max(region.name.length * 0.5, 1);
+            const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+            text.setAttribute('x', region.cx);
+            text.setAttribute('y', region.cy);
+            text.setAttribute('class', 'region-label');
+            text.style.fontSize = `min(calc(var(--sw) * 14), ${fitByWidth.toFixed(3)}px)`;
+            text.textContent = region.name;
+            fragment.appendChild(text);
+            this.regionLabels.push({ el: text, fit: fitByWidth });
+        }
+        this.regionLabelLayer.appendChild(fragment);
+        this.updateLabelVisibility();
+    }
+
+    // Слишком мелкую подпись читать нельзя — прячем её, пока не приблизят.
+    updateLabelVisibility() {
+        if (!this.regionLabels) return;
+        for (const label of this.regionLabels) {
+            const rendered = Math.min(14, label.fit * this.scale);
+            label.el.classList.toggle('too-small', rendered < 8);
+        }
+    }
+
+    scheduleLabelUpdate() {
+        if (this.labelFrame) return;
+        this.labelFrame = requestAnimationFrame(() => {
+            this.labelFrame = null;
+            this.updateLabelVisibility();
+        });
+    }
+
+    // --- города ------------------------------------------------------------
+    drawCities() {
+        this.cityLayer.innerHTML = '';
+        const fragment = document.createDocumentFragment();
+        for (const city of CitiesDB) {
+            const group = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+            const major = city.isCapital || city.population >= 700000;
+            group.setAttribute('class', (city.isCapital ? 'capital' : 'city') + (major ? ' major' : ''));
+            group.setAttribute('transform', `translate(${city.x},${city.y})`);
+
+            const dot = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+            dot.setAttribute('r', city.isCapital ? 0.45 : 0.28);
+            dot.setAttribute('class', city.isCapital ? 'capital-marker' : 'city-marker');
+
+            group.appendChild(dot);
+
+            // Область уже подписана именем этого города — второй раз не пишем.
+            const region = this.data.getRegion(city.regionId);
+            if (!region || region.name !== city.name) {
+                const label = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+                label.setAttribute('x', 0.8);
+                label.setAttribute('y', 0.35);
+                label.setAttribute('class', city.isCapital ? 'capital-label' : 'city-label');
+                label.textContent = city.name;
+                group.appendChild(label);
+            }
+            fragment.appendChild(group);
+        }
+        this.cityLayer.appendChild(fragment);
+    }
+
+    // --- выбор цели ---------------------------------------------------------
+    enableTargetSelection(validIds, targetClass = 'move-target') {
+        const valid = new Set(validIds);
+        for (const [id, path] of this.paths) {
+            if (valid.has(id)) path.classList.add(targetClass);
+            else path.classList.add('dimmed');
+        }
     }
 
     disableTargetSelection() {
-        document.querySelectorAll('.region').forEach(path => {
+        for (const path of this.paths.values()) {
             path.classList.remove('move-target', 'attack-target', 'dimmed');
-        });
-    }
-
-    getRegionCenter(path) {
-        const id = path.id;
-        const bbox = path.getBBox();
-        let cx = bbox.x + bbox.width / 2;
-        let cy = bbox.y + bbox.height / 2;
-
-        // РУЧНАЯ КОРРЕКТИРОВКА ДЛЯ СЛОЖНЫХ РЕГИОНОВ (Форма полумесяца и т.д.)
-        const offsets = {
-            'UA-51': { dx: 3.5, dy: -3 }, // Одесская область (Сдвигаем севернее и правее от Молдовы)
-            // Если заметите еще кривой регион, добавьте его сюда. Формат: 'ID': { dx: X, dy: Y }
-        };
-
-        if (offsets[id]) {
-            cx += offsets[id].dx;
-            cy += offsets[id].dy;
         }
-
-        return { x: cx, y: cy };
     }
 
-    // Метод для красивого сокращения больших цифр (1500 -> 1.5K)
     formatPower(num) {
         if (num >= 1000000) return (num / 1000000).toFixed(1) + 'M';
         if (num >= 1000) return (num / 1000).toFixed(1) + 'K';
-        return Math.floor(num);
+        return String(Math.floor(num));
     }
-    
+
+    // --- маркеры войск --------------------------------------------------------
     drawArmyMarkers() {
-        try {
-            // Удаляем старые маркеры
-            this.svg.querySelectorAll('.army-marker').forEach(el => el.remove());
+        this.armyLayer.innerHTML = '';
+        const player = this.data.playerCountry;
+        const fragment = document.createDocumentFragment();
 
-            const playerCountryId = this.gameData.playerCountry;
+        for (const region of Object.values(this.data.regions)) {
+            const power = this.data.calculateRegionMilitaryPower(region.id);
+            if (power <= 0) continue;
 
-            document.querySelectorAll('.region').forEach(path => {
-                const region = this.gameData.getRegion(path.id);
-                if (!region) return;
+            const isOwner = region.owner === player;
+            const reconActive = region.reconActiveUntil && region.reconActiveUntil >= this.data.currentDate;
+            let icon, label, color;
 
-                // === КРИТИЧЕСКИЙ ФИКС: Создаем пустую армию, если её нет ===
-                if (!region.army) region.army = {};
+            if (isOwner) {
+                icon = '🛡️'; label = ' ' + this.formatPower(power); color = '#4ade80';
+            } else if (reconActive) {
+                icon = '⚔️'; label = ' ' + this.formatPower(power); color = '#f87171';
+            } else if (this.data.isNeighborToPlayer(region.id)) {
+                icon = '⚔️'; label = ''; color = '#fca5a5';
+            } else {
+                continue;
+            }
 
-                const isOwner = region.owner === playerCountryId;
-                
-                // Безопасная проверка на соседа
-                const isNeighbor = typeof this.gameData.isNeighborToPlayer === 'function' 
-                    ? this.gameData.isNeighborToPlayer(region.id) 
-                    : false;
-                
-                const isReconActive = region.reconActiveUntil && region.reconActiveUntil >= this.gameData.currentDate;
-                
-                // Безопасный подсчет мощи
-                let power = 0;
-                try {
-                    power = this.gameData.calculateRegionMilitaryPower(region.id) || 0;
-                } catch(e) { power = 0; }
-
-                let shouldDraw = false;
-                let icon = '';
-                let textVal = '';
-                let color = '';
-
-                // === ПРАВИЛА ОТОБРАЖЕНИЯ ===
-                if (isOwner) {
-                    if (power > 0) {
-                        shouldDraw = true;
-                        icon = '🛡️';
-                        textVal = ` ${this.formatPower(power)}`;
-                        color = '#4ade80'; // Зеленый
-                    }
-                } else {
-                    if (power > 0) {
-                        if (isReconActive) {
-                            shouldDraw = true;
-                            icon = '⚔️';
-                            textVal = ` ${this.formatPower(power)}`;
-                            color = '#f87171'; // Красный
-                        } else if (isNeighbor) {
-                            shouldDraw = true;
-                            icon = '⚔️';
-                            textVal = ''; // Пусто, если разведки не было
-                            color = '#fca5a5'; // Бледно-красный
-                        }
-                    }
-                }
-
-                if (shouldDraw) {
-                    const center = this.getRegionCenter(path);
-
-                    const group = document.createElementNS("http://www.w3.org/2000/svg", "g");
-                    group.setAttribute("class", "army-marker");
-                    group.setAttribute("pointer-events", "none");
-                    
-                    // === ХАК ПРОТИВ БАГА БРАУЗЕРОВ ===
-                    // Смещаем маркер в центр и сжимаем его в 40 раз (scale(0.025)),
-                    // чтобы обойти принудительную блокировку мелких шрифтов.
-                    group.setAttribute("transform", `translate(${center.x}, ${center.y + 0.4}) scale(0.025)`);
-
-                    const text = document.createElementNS("http://www.w3.org/2000/svg", "text");
-                    text.setAttribute("text-anchor", "middle");
-                    text.setAttribute("dominant-baseline", "central");
-                    
-                    // Ставим "большой" шрифт, который сожмется масштабированием группы
-                    text.setAttribute("font-size", "10px"); 
-                    text.setAttribute("font-family", "Arial, sans-serif");
-                    text.setAttribute("font-weight", "bold");
-                    text.setAttribute("fill", color);
-                    
-                    // Делаем красивую черную обводку
-                    text.setAttribute("stroke", "rgba(0,0,0,0.8)");
-                    text.setAttribute("stroke-width", "1.5px"); 
-                    text.setAttribute("paint-order", "stroke");
-
-                    text.textContent = icon + textVal;
-                    group.appendChild(text);
-                    this.svg.appendChild(group);
-                }
-            });
-        } catch(e) {
-            console.error("Ошибка при отрисовке маркеров войск:", e);
+            const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+            text.setAttribute('x', region.cx);
+            text.setAttribute('y', region.cy);
+            text.setAttribute('class', 'army-marker');
+            text.setAttribute('fill', color);
+            text.textContent = icon + label;
+            fragment.appendChild(text);
         }
+        this.armyLayer.appendChild(fragment);
     }
 }

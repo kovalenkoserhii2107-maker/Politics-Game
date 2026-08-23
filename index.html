@@ -1,664 +1,587 @@
 <!DOCTYPE html>
 <html lang="ru">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Grand Strategy - Engine V4 (Detailed Map)</title>
-    <style>
-        :root {
-            --ui-bg: rgba(20, 25, 35, 0.95);
-            --ui-border: #3f4e63;
-            --ui-text: #e2e8f0;
-            --ui-accent: #3b82f6;
-            --ui-accent-country: #fbbf24;
-        }
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Grand Strategy</title>
+<style>
+:root {
+    --ui-bg: rgba(17, 24, 39, 0.96);
+    --ui-border: #334155;
+    --ui-text: #e2e8f0;
+    --ui-muted: #94a3b8;
+    --ui-accent: #3b82f6;
+    --ui-accent-country: #fbbf24;
+    --ui-danger: #ef4444;
+    --ui-good: #4ade80;
+    --sw: 0.3;
+}
 
-	html, body { 
-            width: 100%; 
-            height: 100%; 
-            margin: 0; 
-            padding: 0; 
-            overflow: hidden; /* Жестко запрещаем любые скроллбары окну браузера */
-            background-color: #0b1121; 
-            color: var(--ui-text); 
-            font-family: 'Segoe UI', sans-serif; 
-            user-select: none; 
-        }
-        
-        /* Улучшенный океан (Глубокий синий с сеткой) */
-		#map-container { 
-            width: 100%; 
-            height: 100%; 
-            cursor: grab; 
-            touch-action: none; 
-            -webkit-touch-callout: none; /* Отключаем меню iPhone */
-            -webkit-user-select: none;   /* Отключаем выделение iPhone */
-            user-select: none;
-            background: 
-                linear-gradient(rgba(255, 255, 255, 0.03) 1px, transparent 1px), 
-                linear-gradient(90deg, rgba(255, 255, 255, 0.03) 1px, transparent 1px),
-                radial-gradient(circle at 50% 50%, #172554 0%, #080f1e 100%);
-            background-size: 60px 60px, 60px 60px, 100% 100%;
-        }
-        
-		/* Базовые стили региона */
-        .region { 
-            stroke-linejoin: round; 
-            /* Убрали filter из transition, добавили fill-opacity */
-            transition: fill 0.2s, fill-opacity 0.2s, stroke 0.2s, stroke-width 0.2s; 
-        }
+html, body {
+    width: 100%; height: 100%; margin: 0; padding: 0; overflow: hidden;
+    background: #060d1c; color: var(--ui-text);
+    font-family: 'Segoe UI', system-ui, sans-serif;
+    user-select: none; -webkit-user-select: none;
+}
+button { font-family: inherit; }
 
-		/* UI Интерфейс */
-        #ui-layer { 
-            position: fixed; /* Защита от сдвигов при случайном масштабировании */
-            top: 0; 
-            left: 0; 
-            width: 100%; /* Заменили 100vw на 100% */
-            height: 100%; /* Заменили 100vh на 100% */
-            pointer-events: none; 
-            z-index: 10; 
-        }
-        .ui-element { pointer-events: auto; }
+/* ================= КАРТА ================= */
+#map-container {
+    width: 100%; height: 100%; cursor: grab; touch-action: none;
+    -webkit-touch-callout: none;
+    background:
+        linear-gradient(rgba(255,255,255,0.025) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255,255,255,0.025) 1px, transparent 1px),
+        radial-gradient(circle at 50% 45%, #14274d 0%, #060d1c 100%);
+    background-size: 64px 64px, 64px 64px, 100% 100%;
+}
+#map-container:active { cursor: grabbing; }
+#world-map { display: block; width: 100%; height: 100%; will-change: transform; }
 
-		/* ================= ВЕРХНЯЯ ПАНЕЛЬ ================= */
-        #top-bar { 
-            background: var(--ui-bg); 
-            border-bottom: 1px solid var(--ui-border); 
-            display: flex; 
-            justify-content: space-between; 
-            align-items: center; 
-            padding: 12px 24px; 
-            box-shadow: 0 4px 15px rgba(0,0,0,0.5); 
-            font-weight: 600; 
-            font-size: 14px;
-            width: 100%; 
-            box-sizing: border-box;
-        }
-        .stat-group { display: flex; gap: 25px; align-items: center; }
-        .stat-item span { color: #94a3b8; font-weight: normal; margin-right: 5px; }
-        
-        /* Кнопки верхней панели */
-        .top-btn {
-            background: rgba(255,255,255,0.1); color: #fff; border: 1px solid rgba(255,255,255,0.2);
-            padding: 8px 16px; border-radius: 6px; cursor: pointer; font-weight: bold; transition: 0.2s;
-        }
-        .top-btn:hover { background: rgba(255,255,255,0.2); }
-        .top-btn.warning { background: var(--ui-accent-country); color: #000; border: none; }
-        .top-btn.primary { background: var(--ui-accent); border: none; }
+.region {
+    stroke-linejoin: round;
+    stroke-width: var(--sw);
+    transition: filter 0.15s ease;
+}
+/* На глобальном уровне обводка совпадает с заливкой — видны только границы стран */
+#world-map.global-view .region { stroke-opacity: 1; }
+#world-map.regional-view .region { stroke: rgba(0, 0, 0, 0.45) !important; stroke-opacity: 1; }
 
-		/* ================= СТАРТОВЫЙ ЭКРАН ================= */
-        #start-screen {
-            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
-            background: rgba(11, 17, 33, 0.85); 
-            backdrop-filter: blur(8px); 
-            z-index: 2000; display: flex; justify-content: center; align-items: center;
-        }
-        .start-window {
-            background: var(--ui-bg); border: 1px solid var(--ui-border);
-            border-radius: 12px; width: 850px; max-width: 95%; 
-            padding: 30px; /* Уменьшен отступ для экономии высоты */
-            box-shadow: 0 15px 50px rgba(0,0,0,0.9);
-            display: flex; flex-direction: column;
-            max-height: 95vh; /* Защита от вылезания за края экрана */
-        }
-        .start-window h1 { 
-            text-align: center; margin: 0 0 20px 0; color: var(--ui-accent-country); 
-            letter-spacing: 3px; font-size: 2em; flex-shrink: 0;
-        }
-        .start-layout { 
-            display: grid; 
-            grid-template-columns: 1fr 1.6fr; /* Асимметричная сетка: левая колонка уже правой */
-            gap: 30px; overflow: hidden;
-        }
-        
-        /* --- Список стран --- */
-        .country-list { 
-            border: 1px solid rgba(255,255,255,0.1); border-radius: 8px; 
-            overflow-y: auto; max-height: 460px; background: rgba(0,0,0,0.3);
-        }
-        .country-list-item { 
-            padding: 14px 18px; border-bottom: 1px solid rgba(255,255,255,0.05); 
-            cursor: pointer; transition: 0.2s; font-size: 1.1em; color: #e2e8f0;
-        }
-        .country-list-item:last-child { border-bottom: none; }
-        .country-list-item:hover { background: rgba(59, 130, 246, 0.15); padding-left: 22px;}
-        .country-list-item.selected { 
-            background: rgba(59, 130, 246, 0.3); font-weight: bold; 
-            border-left: 4px solid var(--ui-accent); color: #fff; padding-left: 18px;
-        }
-        
-        /* --- Характеристики --- */
-        .country-info { 
-            display: flex; flex-direction: column; overflow-y: auto; padding-right: 5px;
-        }
-        .country-info h2 { 
-            margin: 0 0 15px 0; color: #fff; border-bottom: 1px solid rgba(255,255,255,0.1); 
-            padding-bottom: 10px; font-size: 1.5em; flex-shrink: 0;
-        }
-        
-        /* --- Флаг и Мини-карта --- */
-        .visual-header {
-            display: flex; gap: 20px; align-items: center; margin-bottom: 15px;
-            background: rgba(0,0,0,0.2); padding: 12px; border-radius: 8px; 
-            border: 1px solid rgba(255,255,255,0.05); height: 85px; flex-shrink: 0;
-            visibility: hidden; 
-        }
-        .country-flag {
-            width: 105px; height: auto; border-radius: 4px; 
-            box-shadow: 0 4px 10px rgba(0,0,0,0.5);
-            border: 1px solid rgba(255,255,255,0.2);
-            background: #000;
-        }
-        .country-minimap {
-            flex: 1; height: 100%; 
-            filter: drop-shadow(0 3px 5px rgba(0,0,0,0.6));
-        }
+#world-map .region.selected-region {
+    stroke: #fff !important; stroke-width: calc(var(--sw) * 2.5) !important;
+    filter: brightness(1.22) saturate(1.1);
+}
+#world-map .region.selected-country {
+    stroke: #fff !important; stroke-width: calc(var(--sw) * 1.5) !important;
+    filter: brightness(1.2);
+}
+@media (hover: hover) {
+    #world-map.regional-view .region:not(.selected-region):hover {
+        stroke: #fff !important; stroke-width: calc(var(--sw) * 2) !important;
+        filter: brightness(1.2); cursor: pointer;
+    }
+    #world-map.global-view .region.country-hover { filter: brightness(1.18); cursor: pointer; }
+}
+.region.move-target { stroke: var(--ui-good) !important; stroke-width: calc(var(--sw) * 3) !important; cursor: crosshair; }
+.region.attack-target { stroke: var(--ui-danger) !important; stroke-width: calc(var(--sw) * 3) !important; cursor: crosshair; }
+.region.move-target:hover, .region.attack-target:hover { filter: brightness(1.5) saturate(1.4); }
+.region.dimmed { opacity: 0.25; pointer-events: none; }
 
-        .country-info-row {
-            display: flex; justify-content: space-between; align-items: center;
-            margin-bottom: 8px; font-size: 1em; color: #cbd5e1;
-            border-bottom: 1px dashed rgba(255,255,255,0.05); padding-bottom: 6px;
-        }
-        .country-info-row:last-of-type { border-bottom: none; }
-        .country-info-row strong { color: #fff; font-weight: 600; }
-        .country-info-row span { text-align: right; }
-        
-        #info-wiki {
-            display: inline-block; color: var(--ui-accent); margin-top: 5px; margin-bottom: 15px;
-            text-decoration: none; font-weight: bold; transition: color 0.2s; font-size: 0.95em;
-        }
-        #info-wiki:hover { color: #60a5fa; text-decoration: underline; }
-        
-        /* --- Блок чит-кода --- */
-        .cheat-box {
-            margin-top: auto; margin-bottom: 15px; flex-shrink: 0;
-            padding: 12px 15px; background: rgba(239, 68, 68, 0.05); 
-            border: 1px solid rgba(239, 68, 68, 0.2); border-radius: 8px;
-            transition: background 0.2s, border-color 0.2s;
-        }
-        .cheat-box:hover { background: rgba(239, 68, 68, 0.1); border-color: rgba(239, 68, 68, 0.4); }
-        
-        .cheat-label {
-            cursor: pointer; display: flex; align-items: center; gap: 15px; 
-            color: #fca5a5; font-size: 0.9em; line-height: 1.3; margin: 0;
-        }
-        .cheat-label input[type="checkbox"] {
-            width: 18px; height: 18px; cursor: pointer; flex-shrink: 0;
-            accent-color: #ef4444; margin: 0;
-        }
-        .cheat-text-wrap { display: flex; flex-direction: column; gap: 2px; }
-        .cheat-text-wrap b { color: #f87171; font-size: 1.05em; letter-spacing: 0.5px; text-transform: uppercase;}
-        .cheat-text-wrap span { font-size: 0.9em; opacity: 0.9; }
+.country-label {
+    fill: rgba(255,255,255,0.92); font-weight: 700; text-anchor: middle;
+    dominant-baseline: middle; pointer-events: none;
+    paint-order: stroke; stroke: rgba(0,0,0,0.55); stroke-width: 0.35;
+    transition: opacity 0.25s ease;
+}
 
-        /* --- Кнопка старта --- */
-        #start-game-btn { 
-            width: 100%; padding: 15px; font-size: 1.1em; font-weight: bold; 
-            background: var(--ui-accent); color: white; border: none; border-radius: 8px; 
-            cursor: pointer; transition: all 0.2s ease; 
-            text-transform: uppercase; letter-spacing: 1px; flex-shrink: 0;
-        }
-        #start-game-btn:disabled { background: #334155; cursor: not-allowed; color: #64748b; }
-        #start-game-btn:not(:disabled):hover { 
-            background: #2563eb; transform: translateY(-2px); box-shadow: 0 4px 15px rgba(59, 130, 246, 0.4);
-        }
+.city-marker { fill: #e2e8f0; r: calc(var(--sw) * 2.6); }
+.capital-marker { fill: #f87171; stroke: #fff; stroke-width: var(--sw); r: calc(var(--sw) * 4); }
+.city-label, .capital-label {
+    fill: #dbe4f0; pointer-events: none; dominant-baseline: middle;
+    font-size: calc(var(--sw) * 11);
+    paint-order: stroke; stroke: rgba(0,0,0,0.8); stroke-width: calc(var(--sw) * 2.6);
+}
+.capital-label { fill: var(--ui-accent-country); font-weight: 700; font-size: calc(var(--sw) * 13); }
 
-	    #side-panel { 
-            position: absolute; top: 70px; left: -380px; width: 320px; 
-            max-height: calc(100vh - 70px); /* Ограничиваем высоту экраном */
-            box-sizing: border-box; /* КРИТИЧЕСКИ ВАЖНО для правильного скролла */
-            padding-bottom: 40px; /* Запас снизу, чтобы кнопки не прилипали к краю */
-            overflow-y: auto; /* Включаем прокрутку */
-            scrollbar-width: thin; scrollbar-color: #475569 transparent; /* Для Firefox */
-            background: var(--ui-bg); border: 1px solid var(--ui-border); border-left: none; 
-            border-radius: 0 12px 12px 0; padding: 20px; 
-            transition: left 0.3s cubic-bezier(0.4, 0, 0.2, 1); box-shadow: 5px 5px 20px rgba(0,0,0,0.6); 
-        }
+.region-label {
+    fill: rgba(255,255,255,0.94); font-weight: 600; text-anchor: middle;
+    dominant-baseline: middle; pointer-events: none;
+    paint-order: stroke; stroke: rgba(0,0,0,0.65); stroke-width: calc(var(--sw) * 3);
+}
+.region-label.too-small { display: none; }
+.army-marker {
+    font-family: 'Segoe UI', sans-serif; font-weight: 700; text-anchor: middle;
+    dominant-baseline: central; pointer-events: none;
+    font-size: calc(var(--sw) * 13);
+    paint-order: stroke; stroke: rgba(0,0,0,0.85); stroke-width: calc(var(--sw) * 3);
+    transform: translateY(calc(var(--sw) * 15));
+}
 
-	    /* ВАЖНО! ИМЕННО ЭТА СТРОКА ВОЗВРАЩАЕТ ПАНЕЛЬ НА ЭКРАН */
-        #side-panel.active { left: 0; }
+#layer-cities, #layer-armies, #layer-region-labels, #layer-labels { pointer-events: none; }
+#layer-cities, #layer-armies, #layer-region-labels { transition: opacity 0.2s ease; }
 
-        /* Стили скроллбара для Chrome/Edge/Safari */
-        #side-panel::-webkit-scrollbar { width: 6px; }
-        #side-panel::-webkit-scrollbar-thumb { background-color: #475569; border-radius: 3px; }
-        
-        #side-panel h2 { margin: 0 0 10px 0; font-size: 1.6em; color: #fff; letter-spacing: 0.5px; }
-        
-        /* Новый компактный список для войск */
-        .army-list { display: flex; flex-direction: column; gap: 5px; margin-top: 10px; }
-        .army-list-item { display: flex; justify-content: space-between; background: rgba(0,0,0,0.3); padding: 8px 12px; border-radius: 6px; border-left: 3px solid var(--ui-accent); font-size: 0.9em; }
-        
-        #side-panel h2 { margin: 0 0 10px 0; font-size: 1.6em; color: #fff; letter-spacing: 0.5px; }
-        .badge { display: inline-block; padding: 4px 8px; border-radius: 4px; font-size: 0.75em; margin-bottom: 12px; font-weight: bold; text-transform: uppercase; letter-spacing: 1px;}
-        .badge.country { background: var(--ui-accent-country); color: #000; }
-        .badge.region { background: var(--ui-accent); color: #fff; }
-        .owner-flag { display: inline-block; width: 14px; height: 14px; border-radius: 3px; margin-right: 8px; vertical-align: middle; border: 1px solid rgba(255,255,255,0.2);}
-        
-        .info-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 20px; padding-top: 20px; border-top: 1px solid rgba(255,255,255,0.1); }
-        .info-box { background: rgba(0,0,0,0.4); padding: 12px; border-radius: 8px; text-align: center; border: 1px solid rgba(255,255,255,0.05); }
-        .info-box .label { font-size: 0.85em; color: #94a3b8; }
-        .info-box .val { font-size: 1.3em; font-weight: bold; color: #fff; margin-top: 5px; }
+/* Ступени детализации: страны -> области -> города */
+#world-map.lod-0 #layer-cities,
+#world-map.lod-0 #layer-region-labels,
+#world-map.lod-0 #layer-armies { opacity: 0; }
+#world-map.lod-1 #layer-cities .city { display: none; }
+#world-map.lod-1 #layer-cities .capital.major { display: none; }
+#world-map.lod-2 .country-label { opacity: 0; }
+#world-map.lod-0 .country-label { opacity: 0.95; }
+#world-map.lod-1 .country-label { opacity: 0; }
 
-        .close-btn { position: absolute; top: 15px; right: 15px; background: rgba(255,255,255,0.1); color: white; border: none; border-radius: 6px; cursor: pointer; width: 30px; height: 30px; font-weight: bold; transition: background 0.2s;}
-        .close-btn:hover { background: #ef4444; }
+/* ================= ОБЩИЙ UI ================= */
+#ui-layer { position: fixed; inset: 0; pointer-events: none; z-index: 10; }
+.ui-element { pointer-events: auto; }
+.muted { color: #64748b; font-size: 0.88em; }
+.center { text-align: center; padding: 18px 0; }
+.pos { color: var(--ui-good); }
+.neg { color: #f87171; }
+.section-title {
+    font-size: 0.82em; color: var(--ui-muted); margin: 16px 0 6px;
+    text-transform: uppercase; letter-spacing: 0.06em;
+}
 
-        /* Делаем панель невидимой по умолчанию и прозрачной для нажатий */
-        #zoom-indicator { 
-            position: absolute; 
-            bottom: 25px; 
-            right: 25px; 
-            background: var(--ui-bg); 
-            padding: 12px 20px; 
-            border-radius: 8px; 
-            border: 1px solid var(--ui-border); 
-            font-size: 0.9em; 
-            box-shadow: 0 4px 10px rgba(0,0,0,0.5); 
-            opacity: 0; /* Скрыто изначально */
-            pointer-events: none; /* Пропускает клики сквозь себя! */
-            transition: opacity 0.4s ease; /* Плавное затухание */
-            z-index: 1000;
-        }
-		
-		/* Класс, который будет показывать панель */
-        #zoom-indicator.visible { 
-            opacity: 1; 
-        }
-		
-        /* Модальное окно Правительства */
-        #gov-modal { position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(0,0,0,0.7); display: none; justify-content: center; align-items: center; z-index: 100; backdrop-filter: blur(3px); }
-        #gov-modal.active { display: flex; }
-        
-        .modal-content { background: var(--ui-bg); border: 1px solid var(--ui-border); border-radius: 12px; width: 400px; padding: 25px; box-shadow: 0 10px 30px rgba(0,0,0,0.8); }
-        .modal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 10px; }
-        .modal-header h2 { margin: 0; font-size: 1.4em; color: var(--ui-accent-country); }
-        
-        .gov-section { background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.05); padding: 15px; border-radius: 8px; margin-bottom: 15px; }
-        .gov-section h3 { margin: 0 0 10px 0; font-size: 1em; color: #94a3b8; text-transform: uppercase; }
-        
-        /* Ползунок */
-        input[type=range] { width: 100%; cursor: pointer; accent-color: var(--ui-accent); margin-top: 10px; }
-        
-        /* Строки армии */
-        .army-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; font-weight: bold;}
-        .army-controls { display: flex; align-items: center; gap: 15px; }
-        .army-btn { background: var(--ui-border); color: white; border: none; width: 28px; height: 28px; border-radius: 4px; cursor: pointer; font-size: 1.2em; font-weight: bold; transition: 0.2s;}
-        .army-btn:hover { background: var(--ui-accent); }
-        
-        .gov-summary { margin-top: 20px; font-size: 1.2em; font-weight: bold; text-align: center; padding: 15px; background: rgba(0,0,0,0.5); border-radius: 8px; }
-        
-		/* --- ИДЕАЛЬНОЕ ВЫДЕЛЕНИЕ (SVG-координаты) --- */
-        #world-map .region.selected-region,
-        #world-map .region.selected-region:hover {
-            stroke: #ffffff !important;
-            stroke-width: 0.1 !important; /* Тонкая и четкая белая рамка */
-            stroke-opacity: 1 !important;
-            filter: brightness(1.5) saturate(1.2) !important; /* Жестко фиксируем яркое свечение */
-        }
-        
-        #world-map .region.selected-country,
-        #world-map .region.selected-country:hover {
-            stroke: #ffffff !important;
-            stroke-width: 0.015 !important; 
-            filter: brightness(1.2) !important;
-        }
+#top-bar {
+    background: var(--ui-bg); border-bottom: 1px solid var(--ui-border);
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 10px 20px; box-shadow: 0 4px 15px rgba(0,0,0,0.5);
+    font-weight: 600; font-size: 14px; width: 100%; box-sizing: border-box;
+}
+.stat-group { display: flex; gap: 22px; align-items: center; }
+.stat-item > span:first-child { color: var(--ui-muted); font-weight: 400; margin-right: 4px; }
+.top-btn {
+    background: rgba(255,255,255,0.08); color: #fff; border: 1px solid rgba(255,255,255,0.18);
+    padding: 8px 15px; border-radius: 6px; cursor: pointer; font-weight: 700; transition: 0.15s;
+}
+.top-btn:hover { background: rgba(255,255,255,0.18); }
+.top-btn.warning { background: var(--ui-accent-country); color: #111; border-color: transparent; }
+.top-btn.primary { background: var(--ui-accent); border-color: transparent; }
+.top-btn:disabled { opacity: 0.5; cursor: progress; }
 
-        /* --- ЛЕЙБЛЫ --- */
-        #world-map.regional-view .country-label {
-            display: none !important;
-        }
-        
-        #world-map.global-view .region-label {
-            display: none !important;
-        }
+/* ================= СТАРТОВЫЙ ЭКРАН ================= */
+#start-screen {
+    position: fixed; inset: 0; background: rgba(6, 13, 28, 0.9);
+    backdrop-filter: blur(8px); z-index: 2000;
+    display: flex; justify-content: center; align-items: center;
+}
+.start-window {
+    background: var(--ui-bg); border: 1px solid var(--ui-border); border-radius: 14px;
+    width: 900px; max-width: 95%; padding: 26px; max-height: 94vh;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.85); display: flex; flex-direction: column;
+}
+.start-window h1 {
+    text-align: center; margin: 0 0 18px; color: var(--ui-accent-country);
+    letter-spacing: 3px; font-size: 1.9em;
+}
+.start-layout { display: grid; grid-template-columns: 1fr 1.5fr; gap: 26px; overflow: hidden; }
+.country-column { display: flex; flex-direction: column; gap: 10px; min-height: 0; }
+#start-search {
+    background: rgba(0,0,0,0.4); border: 1px solid var(--ui-border); color: var(--ui-text);
+    border-radius: 8px; padding: 10px 12px; font-size: 0.95em; outline: none;
+}
+#start-search:focus { border-color: var(--ui-accent); }
+.country-list {
+    border: 1px solid rgba(255,255,255,0.09); border-radius: 8px;
+    overflow-y: auto; max-height: 430px; background: rgba(0,0,0,0.3);
+    scrollbar-width: thin; scrollbar-color: #475569 transparent;
+}
+.country-list::-webkit-scrollbar { width: 6px; }
+.country-list::-webkit-scrollbar-thumb { background: #475569; border-radius: 3px; }
+.country-list-item {
+    padding: 11px 15px; border-bottom: 1px solid rgba(255,255,255,0.05);
+    cursor: pointer; transition: 0.12s; display: flex; justify-content: space-between; gap: 10px;
+}
+.country-list-item:hover { background: rgba(59,130,246,0.14); }
+.country-list-item.selected {
+    background: rgba(59,130,246,0.28); font-weight: 700;
+    box-shadow: inset 3px 0 0 var(--ui-accent);
+}
+.list-regions { color: var(--ui-muted); font-size: 0.85em; font-weight: 400; }
+.country-list-empty { padding: 20px; text-align: center; color: var(--ui-muted); }
 
-        #world-map.regional-view .region-label {
-            display: block;
-            fill: #ffffff;
-            opacity: 0.5;
-            font-size: 1.5px;
-            pointer-events: none;
-            user-select: none;
-            font-weight: bold;
-        }
+.country-info { display: flex; flex-direction: column; overflow-y: auto; padding-right: 6px; }
+.country-info h2 {
+    margin: 0 0 14px; color: #fff; font-size: 1.45em;
+    border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 10px;
+}
+.visual-header {
+    display: flex; gap: 18px; align-items: center; margin-bottom: 14px;
+    background: rgba(0,0,0,0.25); padding: 12px; border-radius: 8px;
+    border: 1px solid rgba(255,255,255,0.05); height: 88px; visibility: hidden;
+}
+.country-flag { width: 108px; border-radius: 4px; border: 1px solid rgba(255,255,255,0.2); background: #000; }
+.country-minimap { flex: 1; height: 100%; filter: drop-shadow(0 3px 6px rgba(0,0,0,0.6)); }
+.country-info-row {
+    display: flex; justify-content: space-between; margin-bottom: 8px;
+    color: #cbd5e1; border-bottom: 1px dashed rgba(255,255,255,0.06); padding-bottom: 6px;
+}
+.country-info-row strong { color: #fff; }
+.cheat-box {
+    margin-top: auto; margin-bottom: 14px; padding: 12px 15px;
+    background: rgba(239,68,68,0.06); border: 1px solid rgba(239,68,68,0.22); border-radius: 8px;
+}
+.cheat-label { cursor: pointer; display: flex; align-items: center; gap: 14px; color: #fca5a5; }
+.cheat-label input { width: 18px; height: 18px; accent-color: var(--ui-danger); cursor: pointer; }
+.cheat-text-wrap { display: flex; flex-direction: column; gap: 2px; }
+.cheat-text-wrap b { color: #f87171; text-transform: uppercase; letter-spacing: 0.5px; }
+.cheat-text-wrap span { font-size: 0.88em; opacity: 0.9; }
+#start-game-btn {
+    width: 100%; padding: 14px; font-size: 1.05em; font-weight: 700;
+    background: var(--ui-accent); color: #fff; border: none; border-radius: 8px;
+    cursor: pointer; text-transform: uppercase; letter-spacing: 1px; transition: 0.15s;
+}
+#start-game-btn:disabled { background: #334155; color: #64748b; cursor: not-allowed; }
+#start-game-btn:not(:disabled):hover { background: #2563eb; transform: translateY(-1px); }
 
-        /* --- УМНЫЙ ХОВЕР --- */
-        @media (hover: hover) {
-            #world-map.regional-view .region:not(.selected-region):hover {
-                stroke: #ffffff !important;
-                stroke-opacity: 0.7 !important;
-                stroke-width: 0.08 !important; 
-                filter: brightness(1.2) !important; 
-                cursor: pointer;
-            }
-            #world-map.global-view .region:not(.selected-country):hover,
-            #world-map.global-view .region.country-hover:not(.selected-country) {
-                stroke: rgba(255, 255, 255, 0.8) !important;
-                stroke-width: 0.015 !important; 
-                filter: brightness(1.15) !important;
-                cursor: pointer;
-            }
-        }
+/* ================= БОКОВАЯ ПАНЕЛЬ ================= */
+#side-panel {
+    position: absolute; top: 62px; left: -400px; width: 330px;
+    max-height: calc(100vh - 78px); box-sizing: border-box;
+    overflow-y: auto; padding: 20px 20px 32px;
+    background: var(--ui-bg); border: 1px solid var(--ui-border); border-left: none;
+    border-radius: 0 12px 12px 0; box-shadow: 6px 6px 24px rgba(0,0,0,0.6);
+    transition: left 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+    scrollbar-width: thin; scrollbar-color: #475569 transparent;
+}
+#side-panel.active { left: 0; }
+#side-panel::-webkit-scrollbar { width: 6px; }
+#side-panel::-webkit-scrollbar-thumb { background: #475569; border-radius: 3px; }
+#side-panel h2 { margin: 0 0 6px; font-size: 1.5em; color: #fff; }
+.badge {
+    display: inline-block; padding: 4px 8px; border-radius: 4px; font-size: 0.7em;
+    margin-bottom: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px;
+}
+.badge.country { background: var(--ui-accent-country); color: #111; }
+.badge.region { background: var(--ui-accent); color: #fff; }
+.owner-flag {
+    display: inline-block; width: 14px; height: 14px; border-radius: 3px;
+    margin-right: 7px; vertical-align: middle; border: 1px solid rgba(255,255,255,0.25);
+}
+#panel-owner-wrap { color: var(--ui-muted); font-size: 0.9em; margin-bottom: 14px; }
+.info-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.power-grid { margin-top: 14px; padding-top: 14px; border-top: 1px solid rgba(255,255,255,0.1); }
+.info-box {
+    background: rgba(0,0,0,0.4); padding: 11px; border-radius: 8px; text-align: center;
+    border: 1px solid rgba(255,255,255,0.05);
+}
+.info-box .label { font-size: 0.8em; color: var(--ui-muted); }
+.info-box .val { font-size: 1.25em; font-weight: 700; color: #fff; margin-top: 4px; }
+.power-box { grid-column: span 2; border-color: rgba(239,68,68,0.5); background: rgba(239,68,68,0.1); }
+.power-box .label { color: #fca5a5; }
+.power-box .val { color: #ef4444; font-size: 1.45em; }
+.army-list { display: flex; flex-direction: column; gap: 5px; }
+.army-list-item {
+    display: flex; justify-content: space-between; background: rgba(0,0,0,0.3);
+    padding: 8px 12px; border-radius: 6px; border-left: 3px solid var(--ui-accent); font-size: 0.9em;
+}
+.unit-name { color: #cbd5e1; display: flex; align-items: center; gap: 8px; }
+.unit-icon { font-size: 1.15em; }
+.unit-count { font-weight: 700; color: #fff; }
+.close-btn {
+    position: absolute; top: 14px; right: 14px; background: rgba(255,255,255,0.1);
+    color: #fff; border: none; border-radius: 6px; cursor: pointer;
+    width: 30px; height: 30px; font-weight: 700; transition: background 0.15s;
+}
+.close-btn:hover { background: var(--ui-danger); }
 
-        /* --- Текстовые метки стран --- */
-        .country-label {
-            font-size: 1.5px; /* Исправлено */
-            fill: rgba(255, 255, 255, 0.9);
-            font-family: 'Segoe UI', sans-serif;
-            font-weight: bold;
-            text-anchor: middle;
-            dominant-baseline: middle;
-            pointer-events: none; 
-            text-shadow: none; /* Убрано, так как тени ломаются при сильном зуме SVG */
-            transition: opacity 0.3s ease-in-out;
-        }
-        #world-map.global-view .country-label { opacity: 1; }
-        #world-map.regional-view .country-label { opacity: 0; }
+.fog-box {
+    background: rgba(0,0,0,0.4); padding: 15px; border-radius: 8px; text-align: center;
+    border: 1px dashed #475569;
+}
+.fog-icon { font-size: 1.9em; margin-bottom: 4px; }
+.fog-text { color: var(--ui-muted); font-size: 0.9em; margin-bottom: 8px; }
+.fog-chance { color: #fca5a5; font-size: 0.85em; font-weight: 700; margin-bottom: 10px; }
+#spy-btn {
+    background: #8b5cf6; color: #fff; border: none; padding: 10px;
+    border-radius: 6px; cursor: pointer; font-weight: 700; width: 100%;
+}
+#spy-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
-        /* Стили для городов */
-        .city-marker { fill: #e2e8f0; stroke: #0f172a; stroke-width: 0.01px; pointer-events: none; transition: opacity 0.3s; }
-        .capital-marker { fill: #ef4444; stroke: #fff; stroke-width: 0.02px; pointer-events: none; transition: opacity 0.3s; }
+#action-buttons-container { margin-top: 14px; padding-top: 14px; border-top: 1px solid rgba(255,255,255,0.1); }
+.action-btn {
+    display: none; width: 100%; margin-bottom: 9px; color: #fff; border: none;
+    padding: 10px; border-radius: 6px; font-weight: 700; cursor: pointer; transition: 0.15s;
+}
+#recruit-btn { background: var(--ui-accent); }
+#init-move-btn { background: #8b5cf6; }
+#init-attack-btn { background: var(--ui-danger); }
+.action-btn:hover { filter: brightness(1.12); }
 
-        .city-label { font-size: 0.4px; fill: #cbd5e1; font-family: sans-serif; pointer-events: none; transition: opacity 0.3s; }
-        .capital-label { font-size: 0.6px; font-weight: bold; fill: #fbbf24; pointer-events: none; transition: opacity 0.3s; }
+#army-action-panel { display: none; margin-top: 10px; padding-top: 14px; border-top: 1px solid rgba(255,255,255,0.1); }
+.force-row { flex-direction: column; align-items: stretch; gap: 8px; margin-bottom: 14px; }
+.force-head { display: flex; justify-content: space-between; align-items: center; }
+.force-avail { color: var(--ui-muted); font-size: 0.85em; }
+.force-controls { display: flex; gap: 6px; align-items: center; }
+.force-max { padding: 2px 6px; font-size: 10px; }
+.force-controls input[type=number] {
+    width: 54px; background: rgba(0,0,0,0.5); color: #fff; border: 1px solid var(--ui-border);
+    border-radius: 4px; padding: 4px; text-align: center;
+}
+#confirm-action-btn {
+    width: 100%; margin-top: 12px; background: var(--ui-accent); color: #fff;
+    border: none; padding: 10px; border-radius: 6px; font-weight: 700; cursor: pointer;
+}
+#confirm-action-btn.danger { background: var(--ui-danger); }
+#cancel-action-btn {
+    width: 100%; margin-top: 6px; background: transparent; color: var(--ui-muted);
+    border: 1px solid var(--ui-muted); padding: 8px; border-radius: 6px; cursor: pointer;
+}
+input[type=range] { width: 100%; cursor: pointer; accent-color: var(--ui-accent); }
 
-        /* Скрываем/показываем в зависимости от зума */
-        #world-map.global-view .city-marker, 
-        #world-map.global-view .capital-marker, 
-        #world-map.global-view .city-label, 
-        #world-map.global-view .capital-label { opacity: 0; }
+/* ================= МОДАЛЬНЫЕ ОКНА ================= */
+.modal {
+    position: fixed; inset: 0; background: rgba(0,0,0,0.78);
+    display: none; justify-content: center; align-items: center;
+    z-index: 150; backdrop-filter: blur(4px);
+}
+.modal.active { display: flex; }
+.modal-content {
+    background: var(--ui-bg); border: 1px solid var(--ui-border); border-radius: 12px;
+    width: 460px; max-width: 94vw; max-height: 86vh; padding: 22px;
+    box-shadow: 0 20px 50px rgba(0,0,0,0.8); display: flex; flex-direction: column;
+}
+.modal-content.wide { width: 600px; }
+.modal-header {
+    display: flex; justify-content: space-between; align-items: center;
+    margin-bottom: 16px; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 10px;
+}
+.modal-header h2 { margin: 0; font-size: 1.3em; color: var(--ui-accent-country); }
+.modal-header .close-btn { position: static; border-radius: 50%; }
+.modal-body { overflow-y: auto; display: flex; flex-direction: column; gap: 10px; padding-right: 5px; }
+.gov-section {
+    background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.05);
+    padding: 14px; border-radius: 8px; margin-bottom: 14px;
+}
+.gov-section h3 { margin: 0 0 10px; font-size: 0.9em; color: var(--ui-muted); text-transform: uppercase; }
+.gov-unit { font-size: 0.88em; color: #cbd5e1; }
+.gov-unit small { color: #64748b; display: block; }
+.army-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; font-weight: 600; }
+.army-controls { display: flex; align-items: center; gap: 14px; }
+.army-btn {
+    background: var(--ui-border); color: #fff; border: none; width: 28px; height: 28px;
+    border-radius: 4px; cursor: pointer; font-size: 1.1em; font-weight: 700;
+}
+.army-btn:hover { background: var(--ui-accent); }
+.gov-summary {
+    margin-top: 16px; font-size: 1.15em; font-weight: 700; text-align: center;
+    padding: 14px; background: rgba(0,0,0,0.5); border-radius: 8px;
+}
+#summary-financial {
+    margin-bottom: 14px; padding: 12px; background: rgba(0,0,0,0.4);
+    border-radius: 8px; border: 1px solid rgba(255,255,255,0.05);
+}
+.summary-total { margin-top: 6px; font-weight: 700; border-top: 1px solid rgba(255,255,255,0.1); padding-top: 6px; }
+.log-entry { background: rgba(255,255,255,0.05); padding: 10px; border-radius: 6px; border-left: 3px solid var(--ui-good); }
+.log-entry.fail { border-left-color: var(--ui-danger); }
+.log-entry.ok .log-message { color: var(--ui-good); }
+.log-entry.fail .log-message { color: #f87171; }
+.log-message { font-weight: 700; }
+.log-losses {
+    font-size: 0.84em; color: #cbd5e1; margin-top: 6px;
+    display: grid; grid-template-columns: 1fr 1fr; gap: 6px;
+}
+.log-losses > div { background: rgba(0,0,0,0.3); padding: 6px; border-radius: 4px; }
+.history-block { background: rgba(0,0,0,0.3); border: 1px solid var(--ui-border); border-radius: 8px; padding: 14px; }
+.history-head {
+    display: flex; justify-content: space-between; font-weight: 700;
+    border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 8px; margin-bottom: 10px;
+}
+.history-head strong { color: var(--ui-accent-country); }
+.history-line { font-size: 0.9em; margin-bottom: 4px; }
 
-        #world-map.regional-view .city-marker, 
-        #world-map.regional-view .capital-marker, 
-        #world-map.regional-view .city-label, 
-        #world-map.regional-view .capital-label { opacity: 1; }
-	
-		/* --- РЕЖИМ ВЫБОРА ЦЕЛИ --- */
-        .region.move-target {
-            stroke: #4ade80 !important; stroke-width: 0.1 !important; fill-opacity: 0.8 !important; cursor: crosshair !important;
-        }
-        .region.attack-target {
-            stroke: #ef4444 !important; stroke-width: 0.1 !important; fill-opacity: 0.8 !important; cursor: crosshair !important;
-        }
-        .region.move-target:hover, .region.attack-target:hover {
-            filter: brightness(1.5) saturate(1.5) !important;
-        }
-        .region.dimmed {
-            fill-opacity: 0.2 !important; pointer-events: none;
-        }
+/* ================= ПЛАН ХОДА ================= */
+#orders-panel {
+    position: absolute; right: 18px; top: 74px; width: 290px;
+    background: rgba(15,23,42,0.97); border: 1px solid var(--ui-border);
+    border-radius: 8px; padding: 14px; display: none;
+    box-shadow: 0 8px 22px rgba(0,0,0,0.7); z-index: 20;
+}
+#orders-panel h3 {
+    margin: 0 0 10px; font-size: 13px; color: var(--ui-muted);
+    border-bottom: 1px solid var(--ui-border); padding-bottom: 6px; text-transform: uppercase;
+}
+#orders-list { list-style: none; padding: 0; margin: 0; font-size: 13px; display: flex; flex-direction: column; gap: 7px; }
+.order { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.order-recruit { color: #60a5fa; }
+.order-recon { color: #a855f7; }
+.order-move { color: #c084fc; }
+.order-attack { color: #f87171; }
+.cancel-order-btn {
+    background: none; border: none; color: var(--ui-danger); font-size: 1.4em;
+    font-weight: 700; cursor: pointer; padding: 0 4px; line-height: 0.8;
+}
+.cancel-order-btn:hover { color: #fff; }
 
-        /* --- УМНЫЙ ХОВЕР --- */
-        @media (hover: hover) {
-            #world-map.regional-view .region:not(.selected-region):hover {
-                stroke: #ffffff !important;
-                stroke-width: 0.025 !important; /* В 4 раза тоньше */
-                filter: brightness(1.2) !important; /* Жестко меняем яркость */
-                cursor: pointer;
-            }
-            #world-map.global-view .region:not(.selected-country):hover,
-            #world-map.global-view .region.country-hover:not(.selected-country) {
-                stroke: rgba(255, 255, 255, 0.8) !important;
-                stroke-width: 0.015 !important; 
-                filter: brightness(1.15) !important;
-                cursor: pointer;
-            }
-        }
+#zoom-indicator {
+    position: absolute; bottom: 22px; right: 22px; background: var(--ui-bg);
+    padding: 10px 18px; border-radius: 8px; border: 1px solid var(--ui-border);
+    font-size: 0.88em; opacity: 0; pointer-events: none; transition: opacity 0.35s ease;
+}
+#zoom-indicator.visible { opacity: 1; }
+#toast {
+    position: absolute; bottom: 26px; left: 50%; transform: translateX(-50%) translateY(10px);
+    background: rgba(15,23,42,0.97); border: 1px solid var(--ui-accent);
+    color: #fff; padding: 11px 22px; border-radius: 8px; font-weight: 600;
+    opacity: 0; pointer-events: none; transition: opacity 0.2s ease, transform 0.2s ease;
+}
+#toast.visible { opacity: 1; transform: translateX(-50%) translateY(0); }
 
-		/* --- ФИКС ПРОКЛИКИВАНИЯ ПЛАНА НА НЕДЕЛЮ --- */
-        #orders-panel {
-            pointer-events: auto !important; /* Блокируем клики сквозь панель! */
-            background: rgba(15, 23, 42, 0.98) !important; /* Плотный темный фон */
-            border: 1px solid var(--ui-border);
-            box-shadow: 0 8px 20px rgba(0,0,0,0.8);
-            z-index: 1000;
-        }
-
-	    /* --- АДАПТАЦИЯ ДЛЯ МОБИЛЬНЫХ ТЕЛЕФОНОВ --- */
-	    @media (max-width: 768px) {
-	        /* Верхняя панель: элементы переносятся на новую строку, если не влезают */
-	        #top-bar {
-	            flex-wrap: wrap;
-	            padding: 5px 10px;
-	            font-size: 12px; /* Уменьшаем шрифт на телефоне */
-	            gap: 8px;
-	            justify-content: center;
-	        }
-	        
-	        /* Блоки с казной, датой и влиянием */
-	        .stat-group {
-	            flex: 1 1 30%;
-	            justify-content: center;
-	            text-align: center;
-	        }
-	
-	        /* Уменьшаем кнопки, чтобы они не занимали пол-экрана */
-	        button {
-	            font-size: 12px;
-	            padding: 6px 12px;
-	        }
-	
-	        /* Исправленная панель - жестко фиксируем внизу */
-	        #side-panel {
-	            width: 100% !important;
-	            max-width: none !important;
-	            height: 50vh !important;
-	            left: 0 !important;
-	            top: auto !important;
-	            bottom: -60vh !important; /* Прячем вниз за экран */
-	            border-radius: 15px 15px 0 0;
-	            transition: bottom 0.3s ease !important;
-	        }
-	        #side-panel.active {
-	            bottom: 0 !important; /* Выезжает снизу вверх */
-	            left: 0 !important;
-	        }
-	    }
-		
-		/* --- МАРКЕРЫ АРМИЙ НА КАРТЕ --- */
-        .army-marker {
-            font-family: 'Segoe UI', sans-serif;
-            pointer-events: none;
-            transition: opacity 0.3s;
-        }
-        /* Прячем значки войск при глобальном виде (отдалении) */
-        #world-map.global-view .army-marker { opacity: 0; }
-        #world-map.regional-view .army-marker { opacity: 1; }
-    </style>
+@media (max-width: 768px) {
+    #top-bar { flex-wrap: wrap; padding: 6px 10px; font-size: 12px; gap: 8px; justify-content: center; }
+    .stat-group { flex: 1 1 40%; justify-content: center; }
+    .top-btn { padding: 6px 11px; font-size: 12px; }
+    .start-layout { grid-template-columns: 1fr; }
+    .country-list { max-height: 190px; }
+    #side-panel {
+        width: 100%; height: 56vh; left: 0; top: auto; bottom: -70vh;
+        border-radius: 14px 14px 0 0; border-left: 1px solid var(--ui-border);
+        transition: bottom 0.25s ease;
+    }
+    #side-panel.active { bottom: 0; }
+    #orders-panel { right: 10px; top: auto; bottom: 10px; width: 240px; max-height: 34vh; overflow-y: auto; }
+    #zoom-indicator { display: none; }
+}
+</style>
 </head>
 <body>
-    <!-- СТАРТОВЫЙ ЭКРАН -->
-    <div id="start-screen">
-        <div class="start-window">
-            <h1>GRAND STRATEGY</h1>
-            <div class="start-layout">
-                <!-- Левая колонка -->
-                <div class="country-list" id="start-country-list">
-                    <!-- Заполняется из JS -->
+
+<!-- СТАРТОВЫЙ ЭКРАН -->
+<div id="start-screen">
+    <div class="start-window">
+        <h1>GRAND STRATEGY</h1>
+        <div class="start-layout">
+            <div class="country-column">
+                <input id="start-search" type="search" placeholder="Поиск страны…" autocomplete="off">
+                <div class="country-list" id="start-country-list"></div>
+            </div>
+            <div class="country-info">
+                <h2 id="info-name">Выберите страну</h2>
+                <div class="visual-header" id="info-visuals">
+                    <img id="info-flag" src="" alt="Флаг" class="country-flag">
+                    <svg id="info-minimap" class="country-minimap"></svg>
                 </div>
-                
-                <!-- Правая колонка -->
-                <div class="country-info">
-                    <h2 id="info-name">Выберите страну</h2>
-
-                    <!-- НОВЫЙ БЛОК: Флаг и силуэт -->
-                    <div class="visual-header" id="info-visuals">
-                        <img id="info-flag" src="" alt="Флаг" class="country-flag">
-                        <svg id="info-minimap" class="country-minimap"></svg>
-                    </div>
-
-                    <!-- Выровнено таблицей -->
-                    <div class="country-info-row" id="info-capital"><strong>Столица:</strong> <span>-</span></div>
-                    <div class="country-info-row" id="info-pop"><strong>Население:</strong> <span>-</span></div>
-                    <div class="country-info-row" id="info-area"><strong>Площадь:</strong> <span>-</span></div>
-                    <div class="country-info-row" id="info-gdp"><strong>ВВП:</strong> <span>-</span></div>
-                    <div class="country-info-row" id="info-army"><strong>Армия:</strong> <span>-</span></div>
-                    
-                    <a id="info-wiki" href="#" target="_blank" style="display:none;">📖 Читать на Wikipedia</a>
-                    
-                    <!-- Обновленный блок Чит-кода -->
-                    <div class="cheat-box">
-                        <label class="cheat-label">
-                            <input type="checkbox" id="cheat-toggle">
-                            <div class="cheat-text-wrap">
-                                <b>ЧИТ-КОД: Режим Бога</b>
-                                <span>Гарантированная победа без потерь</span>
-                            </div>
-                        </label>
-                    </div>
-
-                    <button id="start-game-btn" disabled>НАЧАТЬ ИГРУ</button>
+                <div class="country-info-row" id="info-capital"><strong>Столица области:</strong> <span>—</span></div>
+                <div class="country-info-row" id="info-pop"><strong>Население:</strong> <span>—</span></div>
+                <div class="country-info-row" id="info-area"><strong>Площадь:</strong> <span>—</span></div>
+                <div class="country-info-row" id="info-regions"><strong>Областей:</strong> <span>—</span></div>
+                <div class="cheat-box">
+                    <label class="cheat-label">
+                        <input type="checkbox" id="cheat-toggle">
+                        <span class="cheat-text-wrap">
+                            <b>Чит-код: режим бога</b>
+                            <span>Гарантированная победа без потерь</span>
+                        </span>
+                    </label>
                 </div>
+                <button id="start-game-btn" disabled>Начать игру</button>
             </div>
         </div>
     </div>
-    
-    <div id="map-container">
-        <!-- Сюда карта загрузится автоматически -->
-        <svg id="world-map" width="100%" height="100%" viewBox="0 0 1200 800"></svg>
+</div>
+
+<div id="map-container">
+    <svg id="world-map" viewBox="0 0 1200 800" class="global-view"></svg>
+</div>
+
+<div id="ui-layer">
+    <div id="top-bar" class="ui-element">
+        <div class="stat-group">
+            <div class="stat-item"><span>Казна:</span> $<span id="glob-money">0</span>
+                <span id="glob-net" style="font-size:0.85em;font-weight:700;margin-left:4px;"></span></div>
+            <div class="stat-item"><span>Влияние:</span> <span id="glob-influence">0</span></div>
+            <div class="stat-item"><span>Дата:</span> <span id="glob-date" style="color:#fff;">1 Января 2024</span></div>
+        </div>
+        <div class="stat-group">
+            <button id="log-btn" class="top-btn">Журнал</button>
+            <button id="gov-btn" class="top-btn warning">Правительство</button>
+            <button id="end-turn-btn" class="top-btn primary">Конец хода</button>
+        </div>
     </div>
 
-    <div id="ui-layer">
-
-        <!-- TOP BAR -->
-        <div id="top-bar" class="ui-element">
-            <div class="stat-group">
-                <div class="stat-item">
-                    <span>КАЗНА:</span> $<span id="glob-money">0</span> 
-                    <span id="glob-net" style="font-size: 0.85em; font-weight: bold; margin-left: 5px;"></span>
-                </div>
-                <div class="stat-item"><span>ВЛИЯНИЕ:</span> <span id="glob-influence">100</span></div>
-                <div class="stat-item"><span>ДАТА:</span> <span id="glob-date" style="color: #fff;">1 Января 2024</span></div>
+    <div id="gov-modal" class="modal ui-element">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Управление государством</h2>
+                <button class="close-btn" id="close-gov-btn">✕</button>
             </div>
-
-            <!-- Вторая часть Top Bar -->
-            <div class="stat-group">
-                <button id="log-btn" class="ui-element" style="background: transparent; color: #cbd5e1; border: 1px solid #cbd5e1; padding: 8px 15px; border-radius: 6px; font-weight: bold; cursor: pointer; margin-right: 15px; transition: 0.2s;">ЖУРНАЛ</button>
-                <button id="gov-btn" class="ui-element" style="background: var(--ui-accent-country); color: black; border: none; padding: 8px 15px; border-radius: 6px; font-weight: bold; cursor: pointer; margin-right: 15px; transition: 0.2s;">ПРАВИТЕЛЬСТВО</button>
-                <button id="end-turn-btn" class="ui-element" style="background: var(--ui-accent); color: white; border: none; padding: 8px 20px; border-radius: 6px; font-weight: bold; cursor: pointer; transition: 0.2s;">КОНЕЦ ХОДА</button>
-            </div>
-        </div> <!-- Конец #top-bar -->
-
-        <!-- НОВОЕ: МОДАЛЬНОЕ ОКНО ПРАВИТЕЛЬСТВА -->
-        <div id="gov-modal" class="ui-element">
-            <div class="modal-content">
-                <div class="modal-header">
-                    <h2>Управление Государством</h2>
-                    <button class="close-btn" id="close-gov-btn" style="position: static; border-radius: 50%;">✕</button>
-                </div>
-                
+            <div class="modal-body">
                 <div class="gov-section">
                     <h3>Экономика</h3>
-                    <div style="display: flex; justify-content: space-between;">
+                    <div style="display:flex;justify-content:space-between;">
                         <span>Налоговая ставка:</span>
-                        <span id="gov-tax-val" style="color: var(--ui-accent-country); font-weight: bold;">5%</span>
+                        <span id="gov-tax-val" style="color:var(--ui-accent-country);font-weight:700;">5%</span>
                     </div>
-                    
-		    <!-- Ползунок от 1% до 20% -->
                     <input type="range" id="gov-tax-slider" min="0.01" max="0.20" step="0.01" value="0.05">
                 </div>
-
                 <div class="gov-section">
-                    <h3>Вооруженные силы</h3>
-		    <!-- КОНТЕЙНЕР ДЛЯ НАЙМА АРМИИ -->
+                    <h3>Вооружённые силы (резерв)</h3>
                     <div id="gov-army-container"></div>
                 </div>
-
-                <div class="gov-summary">
-                    Прогноз бюджета: <br>
-                    <span id="gov-proj-net" style="font-size: 1.3em; margin-top: 5px; display: block;">$0</span>
+                <div class="gov-summary">Прогноз бюджета:<br>
+                    <span id="gov-proj-net" style="font-size:1.25em;display:block;margin-top:4px;">$0</span>
                 </div>
             </div>
-        </div>
-
-	<!-- НОВОЕ: ОКНО ИТОГОВ ХОДА -->
-        <div id="summary-modal" class="ui-element" style="position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(0,0,0,0.85); display: none; justify-content: center; align-items: center; z-index: 150; backdrop-filter: blur(4px);">
-            <div class="modal-content" style="width: 500px; max-height: 85vh; display: flex; flex-direction: column;">
-                <div class="modal-header" style="flex-shrink: 0;">
-                    <h2 id="summary-title" style="color: #fff;">Отчет за неделю</h2>
-                    <button class="close-btn" id="close-summary-btn" style="position: static; border-radius: 50%;">✕</button>
-                </div>
-                <div id="summary-financial" style="margin-bottom: 15px; padding: 12px; background: rgba(0,0,0,0.4); border-radius: 8px; font-size: 1.1em; border: 1px solid rgba(255,255,255,0.05); flex-shrink: 0;">
-                    <!-- Финансовая сводка будет здесь -->
-                </div>
-                <div id="summary-content" style="display: flex; flex-direction: column; gap: 10px; overflow-y: auto; padding-right: 5px;">
-                    <!-- Логи боев и маршей будут здесь -->
-                </div>
-            </div>
-        </div>
-
-        <!-- НОВОЕ: ЖУРНАЛ СОБЫТИЙ -->
-        <div id="history-modal" class="ui-element" style="position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(0,0,0,0.85); display: none; justify-content: center; align-items: center; z-index: 150; backdrop-filter: blur(4px);">
-            <div class="modal-content" style="width: 600px; max-height: 85vh; display: flex; flex-direction: column;">
-                <div class="modal-header" style="flex-shrink: 0;">
-                    <h2 style="color: var(--ui-accent-country);">Журнал событий</h2>
-                    <button class="close-btn" id="close-history-btn" style="position: static; border-radius: 50%;">✕</button>
-                </div>
-                <div id="history-content" style="display: flex; flex-direction: column; gap: 15px; overflow-y: auto; padding-right: 5px;">
-                    <!-- Блоки истории будут здесь -->
-                </div>
-            </div>
-        </div>
-
-	<!-- SIDE PANEL -->
-        <div id="side-panel" class="ui-element">
-            <button class="close-btn" id="close-panel-btn">✕</button>
-            <div id="panel-badge" class="badge">Уровень</div>
-            <h2 id="panel-title" style="margin-bottom: 5px;">Название</h2>
-            <div style="color: #94a3b8; font-size: 0.9em; margin-bottom: 15px;" id="panel-owner-wrap">
-                <span id="panel-color" class="owner-flag"></span>
-                Владелец: <span id="panel-owner" style="color: white; font-weight: bold;">Страна</span>
-            </div>
-            
-            <h3 style="font-size: 0.9em; color: #94a3b8; margin: 0 0 10px 0; text-transform: uppercase;">Экономика:</h3>
-            <div class="info-grid" style="margin-top: 0; padding-top: 0; border-top: none;">
-                <div class="info-box"><div class="label">👥 Население</div><div id="panel-pop" class="val">0</div></div>
-                <div class="info-box"><div class="label">🛢️ Нефть</div><div id="panel-oil" class="val">0</div></div>
-                <div class="info-box"><div class="label">🌾 Агрокомплекс</div><div id="panel-agro" class="val">0</div></div>
-                <div class="info-box"><div class="label">🏭 Индустрия</div><div id="panel-ind" class="val">0</div></div>
-            </div>
-
-            <!-- КОНТЕЙНЕР ДЛЯ АРМИИ РЕГИОНА -->
-            <div id="region-army-container"></div>
-
-            <!-- УНИВЕРСАЛЬНАЯ ПАНЕЛЬ ПРИКАЗОВ АРМИИ -->
-            <div id="action-buttons-container" style="margin-top: 15px; padding-top: 15px; border-top: 1px solid rgba(255,255,255,0.1);">
-                <button id="recruit-btn" style="display: none; width: 100%; margin-bottom: 10px; background: #3b82f6; color: white; border: none; padding: 10px; border-radius: 6px; font-weight: bold; cursor: pointer; transition: 0.2s;">ПЛАНИРОВАТЬ РЕКРУТИНГ</button>
-                <button id="init-move-btn" style="display: none; width: 100%; margin-bottom: 10px; background: #8b5cf6; color: white; border: none; padding: 10px; border-radius: 6px; font-weight: bold; cursor: pointer; transition: 0.2s;">ПЕРЕБРОСИТЬ ВОЙСКА</button>
-                <button id="init-attack-btn" style="display: none; width: 100%; margin-bottom: 10px; background: #ef4444; color: white; border: none; padding: 10px; border-radius: 6px; font-weight: bold; cursor: pointer; transition: 0.2s;">НАЧАТЬ НАСТУПЛЕНИЕ</button>
-            </div>
-            
-            <div id="army-action-panel" style="display: none; margin-top: 10px; padding-top: 15px; border-top: 1px solid rgba(255,255,255,0.1);">
-                <h3 id="action-panel-title" style="margin: 0 0 10px 0; font-size: 1em; color: #fff;">Выделение войск</h3>
-                <!-- КОНТЕЙНЕР ДЛЯ ПОЛЗУНКОВ/ВВОДА АРМИИ -->
-                <div id="action-army-inputs"></div>
-                <button id="confirm-action-btn" style="width: 100%; margin-top: 15px; background: var(--ui-accent); color: white; border: none; padding: 10px; border-radius: 6px; font-weight: bold; cursor: pointer;">ВЫБРАТЬ ЦЕЛЬ</button>
-                <button id="cancel-action-btn" style="width: 100%; margin-top: 5px; background: transparent; color: #94a3b8; border: 1px solid #94a3b8; padding: 8px; border-radius: 6px; cursor: pointer;">Отмена</button>
-            </div>
-        </div>
-
-        <div id="orders-panel" style="position: absolute; right: 20px; top: 80px; width: 280px; background: rgba(15, 23, 42, 0.95); border: 1px solid #334155; border-radius: 8px; padding: 15px; color: white; display: none; box-shadow: 0 4px 6px rgba(0,0,0,0.3);">
-            <h3 style="margin: 0 0 10px 0; font-size: 14px; color: #94a3b8; border-bottom: 1px solid #334155; padding-bottom: 5px; text-transform: uppercase;">План на неделю</h3>
-            <ul id="orders-list" style="list-style: none; padding: 0; margin: 0; font-size: 13px; display: flex; flex-direction: column; gap: 8px;">
-            <!-- Текстовые приказы будут появляться здесь -->
-            </ul>
-        </div>
-
-        <div id="zoom-indicator" class="ui-element">
-            Отображение: <span id="zoom-mode" style="color: var(--ui-accent-country); font-weight: bold; margin-left: 5px;">Глобальное (Страны)</span>
         </div>
     </div>
 
-    <!-- Базы данных (Справочники) -->
-    <script src="js/UnitsDB.js?v=1786783594"></script>
-    <script src="js/RegionsDB.js?v=1786783594"></script>
-    <script src="js/CitiesDB.js?v=1786783594"></script>
-    <script src="js/NeighborsDB.js?v=1786783594"></script> <!-- НОВЫЙ -->
-    <script src="js/CountriesDB.js?v=1786783594"></script> <!-- НОВЫЙ -->
+    <div id="summary-modal" class="modal ui-element">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 id="summary-title" style="color:#fff;">Отчёт за неделю</h2>
+                <button class="close-btn" id="close-summary-btn">✕</button>
+            </div>
+            <div id="summary-financial"></div>
+            <div id="summary-content" class="modal-body"></div>
+        </div>
+    </div>
 
-    <!-- Логика и движок игры -->
-    <script src="js/GameData.js?v=1786783594"></script>
-    <script src="js/MapEngine.js?v=1786783594"></script>
-    <script src="js/UIManager.js?v=1786783594"></script>
-    <script src="js/GameLoop.js?v=1786783594"></script>
-    <script src="js/main.js?v=1786783594"></script>
+    <div id="history-modal" class="modal ui-element">
+        <div class="modal-content wide">
+            <div class="modal-header">
+                <h2>Журнал событий</h2>
+                <button class="close-btn" id="close-history-btn">✕</button>
+            </div>
+            <div id="history-content" class="modal-body" style="gap:14px;"></div>
+        </div>
+    </div>
+
+    <div id="side-panel" class="ui-element">
+        <button class="close-btn" id="close-panel-btn">✕</button>
+        <div id="panel-badge" class="badge">Уровень</div>
+        <h2 id="panel-title">Название</h2>
+        <div id="panel-owner-wrap">
+            <span id="panel-color" class="owner-flag"></span>
+            Владелец: <span id="panel-owner" style="color:#fff;font-weight:700;">Страна</span>
+        </div>
+
+        <h3 class="section-title" style="margin-top:0;">Экономика</h3>
+        <div class="info-grid">
+            <div class="info-box"><div class="label">👥 Население</div><div id="panel-pop" class="val">0</div></div>
+            <div class="info-box"><div class="label">🛢️ Нефть</div><div id="panel-oil" class="val">0</div></div>
+            <div class="info-box"><div class="label">🌾 Агрокомплекс</div><div id="panel-agro" class="val">0</div></div>
+            <div class="info-box"><div class="label">🏭 Индустрия</div><div id="panel-ind" class="val">0</div></div>
+        </div>
+
+        <div id="region-army-container"></div>
+
+        <div id="action-buttons-container">
+            <button id="recruit-btn" class="action-btn">Планировать рекрутинг</button>
+            <button id="init-move-btn" class="action-btn">Перебросить войска</button>
+            <button id="init-attack-btn" class="action-btn">Начать наступление</button>
+        </div>
+
+        <div id="army-action-panel">
+            <h3 class="section-title" style="margin-top:0;">Выделение войск</h3>
+            <div id="action-army-inputs"></div>
+            <button id="confirm-action-btn">Выбрать цель</button>
+            <button id="cancel-action-btn">Отмена</button>
+        </div>
+    </div>
+
+    <div id="orders-panel" class="ui-element">
+        <h3>План на неделю</h3>
+        <ul id="orders-list"></ul>
+    </div>
+
+    <div id="zoom-indicator">Отображение:
+        <span id="zoom-mode" style="color:var(--ui-accent-country);font-weight:700;margin-left:4px;">Глобальное (страны)</span>
+    </div>
+    <div id="toast"></div>
+</div>
+
+<!-- Данные карты (сгенерированы tools/build_map.js) -->
+<script src="js/data/CountriesDB.js"></script>
+<script src="js/data/RegionsDB.js"></script>
+<script src="js/data/NeighborsDB.js"></script>
+<script src="js/data/CitiesDB.js"></script>
+
+<!-- Движок -->
+<script src="js/UnitsDB.js"></script>
+<script src="js/GameData.js"></script>
+<script src="js/MapEngine.js"></script>
+<script src="js/UIManager.js"></script>
+<script src="js/GameLoop.js"></script>
+<script src="js/main.js"></script>
 </body>
 </html>
-

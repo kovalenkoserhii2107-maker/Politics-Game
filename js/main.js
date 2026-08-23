@@ -1,519 +1,379 @@
 // =====================================================================
-// МОДУЛЬ 4: ГЛАВНЫЙ КОНТРОЛЛЕР
+// ГЛАВНЫЙ КОНТРОЛЛЕР
 // =====================================================================
 class GameCore {
     constructor(playerCountryId, cheatMode) {
-        // Карта уже загружена на этапе стартового экрана, просто инициализируем движок
         this.data = new GameData(playerCountryId, cheatMode);
-        this.data.buildDatabaseFromSVG();
-        
         this.ui = new UIManager();
-        this.map = new MapEngine(this.data, (regionId) => this.handleMapClick(regionId));
+        this.map = new MapEngine(this.data, regionId => this.handleMapClick(regionId));
         this.loop = new GameLoop(this.data, this.ui, this.map);
 
-        this.armyActionState = {
-            active: false, type: null, fromId: null, forces: {}
-        };
+        this.armyAction = { active: false, type: null, fromId: null, forces: {} };
 
-        // Снимаем выделение, когда интерфейс сообщает о закрытии панели
-        document.addEventListener('panelClosed', () => this.map.clearSelection());
-
-        // Глобальный слушатель для кнопок "Отменить" (Крестик) в журнале приказов
-        document.addEventListener('click', (e) => {
-            const btn = e.target.closest('.cancel-order-btn');
-            if (btn) {
-                e.stopPropagation(); 
-                
-                const index = parseInt(btn.dataset.orderIndex);
-                const type = btn.dataset.type; 
-                
-                if (!isNaN(index) && type && this.data.orders[type]) {
-                    
-                    // === ОТМЕНА РАЗВЕДКИ ===
-                    if (type === 'recon') {
-                        const order = this.data.orders.recon[index];
-                        
-                        const player = this.data.getCountry(this.data.playerCountry);
-                        player.money += order.cost; // Возвращаем $50k
-                        
-                        this.loop.updateTopBarUI(); // Обновляем верхнюю панель
-                        
-                        // Если карточка отмененного региона открыта прямо сейчас — возвращаем кнопку
-                        const actionPanel = document.getElementById('army-action-panel');
-                        if (actionPanel && actionPanel.dataset.regionId === order.target) {
-                            const spyBtn = document.getElementById('spy-btn');
-                            if (spyBtn) {
-                                spyBtn.innerText = "Отправить шпионов ($50k)"; 
-                                spyBtn.disabled = false;
-                                spyBtn.style.opacity = "1";
-                                spyBtn.style.cursor = "pointer";
-                            }
-                        }
-                    }
-                    
-                    // 1. Удаляем приказ из плана
-                    this.data.orders[type].splice(index, 1); 
-                    
-                    // 2. Обновляем окошко (если список станет пустым - оно автоматически закроется)
-                    this.ui.updateOrdersPanel(this.data.orders); 
-                    
-                    // 3. Моментально возвращаем войска в доступный резерв
-                    const actionPanel = document.getElementById('army-action-panel');
-                    if (actionPanel && actionPanel.dataset.regionId) {
-                        const regionId = actionPanel.dataset.regionId;
-                        this.updateActionButtonsVisibility(regionId);
-                        
-                        if (actionPanel.style.display === 'block') {
-                            const availableArmy = this.getAvailableArmy(regionId);
-                            Object.keys(UnitsDB).forEach(unitId => {
-                                const count = availableArmy[unitId] || 0;
-                                const input = document.getElementById(`action-${unitId}-input`);
-                                const slider = document.getElementById(`action-${unitId}-slider`);
-                                if (input && slider) {
-                                    input.max = count;
-                                    slider.max = count;
-                                    const row = input.closest('.army-row');
-                                    if (row) {
-                                        const span = row.querySelector('span span');
-                                        if (span) span.innerText = `(Дост: ${count})`;
-                                    }
-                                }
-                            });
-                        }
-                    }
-                }
-            }
+        document.addEventListener('panelClosed', () => {
+            this.map.clearSelection();
+            this.cancelTargeting();
         });
-        
-        document.addEventListener('zoomLevelChanged', (e) => {
+
+        document.addEventListener('zoomLevelChanged', e => {
             this.ui.updateZoomMode(e.detail.isRegional);
-            
-            const indicator = document.getElementById('zoom-indicator');
-            if (indicator) {
-                indicator.classList.add('visible'); 
-                if (this.zoomTimeout) clearTimeout(this.zoomTimeout);
-                this.zoomTimeout = setTimeout(() => {
-                    indicator.classList.remove('visible');
-                }, 2000);
-            }
+            this.ui.flashZoomIndicator();
         });
 
-        document.addEventListener('click', (e) => {
-            if (e.target.classList.contains('close-btn')) {
-                this.map.clearSelection();
-            }
+        document.addEventListener('keydown', e => {
+            if (e.key === 'Escape') { this.cancelTargeting(); this.ui.closePanel(); }
         });
-        
-        this.initGovPanelLogic();
-        this.initMoveLogic(); 
 
-        document.getElementById('log-btn').addEventListener('click', () => {
-            this.ui.showHistory(this.data.history);
+        document.addEventListener('click', e => {
+            const cancelBtn = e.target.closest('.cancel-order-btn');
+            if (cancelBtn) { e.stopPropagation(); this.cancelOrder(cancelBtn); return; }
+            if (e.target.classList.contains('close-btn')) this.map.clearSelection();
         });
+
+        this.initGovPanel();
+        this.initArmyPanel();
+
+        document.getElementById('log-btn').addEventListener('click', () => this.ui.showHistory(this.data.history));
     }
 
-    getAvailableArmy(regionId) {
-        try {
-            const region = this.data.getRegion(regionId);
-            if (!region) return {};
-            let available = { ...(region.army || {}) };
-            
-            if (this.data.orders) {
-                ['movements', 'attacks'].forEach(type => {
-                    if (this.data.orders[type]) {
-                        this.data.orders[type].forEach(order => {
-                            if (order.from === regionId && order.forces) {
-                                Object.keys(order.forces).forEach(unitId => {
-                                    if (available[unitId] !== undefined) {
-                                        available[unitId] -= order.forces[unitId];
-                                    }
-                                });
-                            }
-                        });
-                    }
-                });
-            }
-            return available;
-        } catch(e) {
-            console.error("Ошибка расчета доступных войск:", e);
-            return {};
+    cancelOrder(btn) {
+        const index = parseInt(btn.dataset.orderIndex, 10);
+        const type = btn.dataset.type;
+        if (Number.isNaN(index) || !this.data.orders[type]) return;
+
+        const order = this.data.cancelOrder(type, index);
+        if (!order) return;
+
+        if (type === 'recon') {
+            this.loop.updateTopBarUI();
+            const panel = document.getElementById('army-action-panel');
+            if (panel && panel.dataset.regionId === order.target) this.ui.resetSpyButton();
         }
+        this.ui.updateOrdersPanel(this.data.orders);
+        this.refreshOpenRegionPanel();
     }
-    
-    initMoveLogic() {
-        this.armyActionState = { active: false, type: null, fromId: null, forces: {} };
 
-        const initMoveBtn = document.getElementById('init-move-btn');
-        const initAttackBtn = document.getElementById('init-attack-btn');
-        const actionPanel = document.getElementById('army-action-panel');
+    // Возвращает войска отменённого приказа в доступный резерв открытой карточки.
+    refreshOpenRegionPanel() {
+        const panel = document.getElementById('army-action-panel');
+        const regionId = panel && panel.dataset.regionId;
+        if (!regionId) return;
+        this.updateActionButtons(regionId);
+        if (panel.style.display === 'block') this.renderForceInputs(regionId);
+    }
+
+    // --- выбор войск -------------------------------------------------
+    renderForceInputs(regionId) {
+        const available = this.data.getAvailableArmy(regionId);
+        const container = document.getElementById('action-army-inputs');
+        container.innerHTML = '';
+
+        for (const unitId of Object.keys(UnitsDB)) {
+            const count = available[unitId] || 0;
+            if (count <= 0) continue;
+            const unit = UnitsDB[unitId];
+            const row = document.createElement('div');
+            row.className = 'army-row force-row';
+            row.innerHTML = `
+                <div class="force-head">
+                    <span>${unit.icon} ${unit.name} <span class="force-avail">(Дост: ${count})</span></span>
+                    <div class="force-controls">
+                        <button class="top-btn force-max" data-unit="${unitId}">MAX</button>
+                        <input type="number" id="action-${unitId}-input" value="0" min="0" max="${count}">
+                    </div>
+                </div>
+                <input type="range" id="action-${unitId}-slider" value="0" min="0" max="${count}">`;
+            container.appendChild(row);
+
+            const input = row.querySelector(`#action-${unitId}-input`);
+            const slider = row.querySelector(`#action-${unitId}-slider`);
+            const clampTo = value => Math.max(0, Math.min(count, parseInt(value, 10) || 0));
+
+            input.addEventListener('input', () => { input.value = clampTo(input.value); slider.value = input.value; });
+            slider.addEventListener('input', () => { input.value = slider.value; });
+            row.querySelector('.force-max').addEventListener('click', () => { input.value = count; slider.value = count; });
+        }
+        return container.children.length > 0;
+    }
+
+    collectForces() {
+        const forces = {};
+        let any = false;
+        for (const unitId of Object.keys(UnitsDB)) {
+            const input = document.getElementById(`action-${unitId}-input`);
+            const value = input ? Math.max(0, parseInt(input.value, 10) || 0) : 0;
+            forces[unitId] = value;
+            if (value > 0) any = true;
+        }
+        return any ? forces : null;
+    }
+
+    initArmyPanel() {
+        const panel = document.getElementById('army-action-panel');
+        const moveBtn = document.getElementById('init-move-btn');
+        const attackBtn = document.getElementById('init-attack-btn');
         const confirmBtn = document.getElementById('confirm-action-btn');
         const cancelBtn = document.getElementById('cancel-action-btn');
-        const actionInputs = document.getElementById('action-army-inputs');
 
-        const openPanel = (type) => {
-            initMoveBtn.style.display = 'none';
-            initAttackBtn.style.display = 'none';
+        const openPanel = type => {
+            const regionId = panel.dataset.regionId;
+            if (!regionId) return;
+            moveBtn.style.display = 'none';
+            attackBtn.style.display = 'none';
             document.getElementById('recruit-btn').style.display = 'none';
-            actionPanel.style.display = 'block';
-            
-            const regionId = actionPanel.dataset.regionId;
-            const availableArmy = this.getAvailableArmy(regionId); 
-            
-            actionInputs.innerHTML = '';
-            Object.keys(UnitsDB).forEach(unitId => {
-                const count = availableArmy[unitId] || 0;
-                if (count > 0) {
-                    const unit = UnitsDB[unitId];
-                    actionInputs.innerHTML += `
-                        <div class="army-row" style="flex-direction: column; align-items: stretch; gap: 8px; margin-bottom: 15px;">
-                            <div style="display: flex; justify-content: space-between; align-items: center;">
-                                <span>${unit.icon} ${unit.name} <span style="color:#94a3b8; font-size:0.85em;">(Дост: ${count})</span></span>
-                                <div style="display: flex; gap: 5px; align-items: center;">
-                                    <button class="top-btn" id="action-${unitId}-max" style="padding: 2px 6px; font-size: 10px; background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2);">MAX</button>
-                                    <input type="number" id="action-${unitId}-input" value="0" min="0" max="${count}" style="width: 50px; background: rgba(0,0,0,0.5); color: white; border: 1px solid var(--ui-border); border-radius: 4px; padding: 4px; text-align: center;">
-                                </div>
-                            </div>
-                            <input type="range" id="action-${unitId}-slider" value="0" min="0" max="${count}" style="width: 100%; margin: 0; accent-color: var(--ui-accent);">
-                        </div>`;
-                }
-            });
-            
-            Object.keys(UnitsDB).forEach(unitId => {
-                const count = availableArmy[unitId] || 0;
-                if (count > 0) {
-                    const input = document.getElementById(`action-${unitId}-input`);
-                    const slider = document.getElementById(`action-${unitId}-slider`);
-                    const maxBtn = document.getElementById(`action-${unitId}-max`);
-                    
-                    if(input && slider && maxBtn) {
-                        input.addEventListener('input', (e) => {
-                            let val = parseInt(e.target.value) || 0;
-                            if(val > count) val = count;
-                            if(val < 0) val = 0;
-                            e.target.value = val;
-                            slider.value = val;
-                        });
-                        slider.addEventListener('input', (e) => {
-                            input.value = e.target.value;
-                        });
-                        maxBtn.addEventListener('click', () => {
-                            input.value = count;
-                            slider.value = count;
-                        });
-                    }
-                }
-            });
-            
-            this.armyActionState.type = type;
-            if (type === 'attack') {
-                confirmBtn.innerText = 'ВЫБРАТЬ ЦЕЛЬ ДЛЯ АТАКИ';
-                confirmBtn.style.background = '#ef4444';
-            } else {
-                confirmBtn.innerText = 'ВЫБРАТЬ ЦЕЛЬ ДЛЯ МАРША';
-                confirmBtn.style.background = 'var(--ui-accent)';
-            }
+            panel.style.display = 'block';
+            this.renderForceInputs(regionId);
+            this.armyAction.type = type;
+            confirmBtn.textContent = type === 'attack' ? 'ВЫБРАТЬ ЦЕЛЬ ДЛЯ АТАКИ' : 'ВЫБРАТЬ ЦЕЛЬ ДЛЯ МАРША';
+            confirmBtn.classList.toggle('danger', type === 'attack');
         };
 
-        initMoveBtn.addEventListener('click', () => openPanel('move'));
-        initAttackBtn.addEventListener('click', () => openPanel('attack'));
+        moveBtn.addEventListener('click', () => openPanel('move'));
+        attackBtn.addEventListener('click', () => openPanel('attack'));
 
         cancelBtn.addEventListener('click', () => {
-            actionPanel.style.display = 'none';
-            this.updateActionButtonsVisibility(actionPanel.dataset.regionId);
-            this.armyActionState.active = false;
-            this.map.disableTargetSelection();
+            panel.style.display = 'none';
+            this.updateActionButtons(panel.dataset.regionId);
+            this.cancelTargeting();
         });
 
         confirmBtn.addEventListener('click', () => {
-            const forces = {};
-            let hasTroopsSelected = false;
+            const forces = this.collectForces();
+            if (!forces) { this.ui.toast('Выберите хотя бы одно подразделение'); return; }
 
-            Object.keys(UnitsDB).forEach(unitId => {
-                const input = document.getElementById(`action-${unitId}-input`);
-                if (input) {
-                    const val = parseInt(input.value) || 0;
-                    forces[unitId] = val;
-                    if (val > 0) hasTroopsSelected = true;
-                } else {
-                    forces[unitId] = 0;
-                }
-            });
+            const regionId = panel.dataset.regionId;
+            const targets = this.armyAction.type === 'move'
+                ? this.data.getValidMoveTargets(regionId)
+                : this.data.getValidAttackTargets(regionId);
 
-            if (!hasTroopsSelected) return;
+            if (!targets.length) { this.ui.toast('Нет доступных целей'); return; }
 
-            const regionId = actionPanel.dataset.regionId;
-            
-            this.armyActionState.active = true;
-            this.armyActionState.fromId = regionId;
-            this.armyActionState.forces = forces;
-
-            if (this.armyActionState.type === 'move') {
-                const validTargets = this.data.getValidMoveTargets(regionId);
-                this.map.enableTargetSelection(validTargets, 'move-target');
-            } else {
-                const validTargets = this.data.getValidAttackTargets(regionId);
-                this.map.enableTargetSelection(validTargets, 'attack-target');
-            }
-
-            this.ui.closePanel();
+            this.armyAction.active = true;
+            this.armyAction.fromId = regionId;
+            this.armyAction.forces = forces;
+            this.map.enableTargetSelection(targets, this.armyAction.type === 'move' ? 'move-target' : 'attack-target');
+            this.ui.closePanelKeepTargeting();
+            this.ui.toast(this.armyAction.type === 'move' ? 'Выберите область для марша' : 'Выберите цель атаки');
         });
     }
 
-    updateActionButtonsVisibility(regionId) {
-        try {
-            const region = this.data.getRegion(regionId);
-            if (!region) return;
-
-            const recruitBtn = document.getElementById('recruit-btn');
-            const moveBtn = document.getElementById('init-move-btn');
-            const attackBtn = document.getElementById('init-attack-btn');
-
-            if (recruitBtn) recruitBtn.style.display = (region.owner === this.data.playerCountry) ? 'block' : 'none';
-
-            if (region.owner !== this.data.playerCountry) {
-                if (moveBtn) moveBtn.style.display = 'none';
-                if (attackBtn) attackBtn.style.display = 'none';
-                return;
-            }
-
-            const availableArmy = this.getAvailableArmy(regionId) || {};
-            let hasTroops = Object.values(availableArmy).some(count => count > 0);
-
-            if (hasTroops) {
-                const moveTargets = typeof this.data.getValidMoveTargets === 'function' ? this.data.getValidMoveTargets(regionId) : [];
-                if (moveBtn) moveBtn.style.display = (moveTargets && moveTargets.length > 0) ? 'block' : 'none';
-                
-                const attackTargets = typeof this.data.getValidAttackTargets === 'function' ? this.data.getValidAttackTargets(regionId) : [];
-                if (attackBtn) attackBtn.style.display = (attackTargets && attackTargets.length > 0) ? 'block' : 'none';
-            } else {
-                if (moveBtn) moveBtn.style.display = 'none';
-                if (attackBtn) attackBtn.style.display = 'none';
-            }
-        } catch(e) {
-            console.error("Ошибка при обновлении кнопок:", e);
-        }
+    cancelTargeting() {
+        if (!this.armyAction.active) return;
+        this.armyAction.active = false;
+        this.map.disableTargetSelection();
+        this.ui.hideToast();
     }
 
-    initGovPanelLogic() {
+    updateActionButtons(regionId) {
+        const region = this.data.getRegion(regionId);
+        const recruitBtn = document.getElementById('recruit-btn');
+        const moveBtn = document.getElementById('init-move-btn');
+        const attackBtn = document.getElementById('init-attack-btn');
+        const show = (btn, on) => { if (btn) btn.style.display = on ? 'block' : 'none'; };
+
+        if (!region || region.owner !== this.data.playerCountry) {
+            show(recruitBtn, false); show(moveBtn, false); show(attackBtn, false);
+            return;
+        }
+        show(recruitBtn, true);
+
+        const available = this.data.getAvailableArmy(regionId);
+        const hasTroops = Object.values(available).some(n => n > 0);
+        show(moveBtn, hasTroops && this.data.getValidMoveTargets(regionId).length > 0);
+        show(attackBtn, hasTroops && this.data.getValidAttackTargets(regionId).length > 0);
+    }
+
+    initGovPanel() {
         const player = this.data.getCountry(this.data.playerCountry);
         const taxSlider = document.getElementById('gov-tax-slider');
-        const taxVal = document.getElementById('gov-tax-val');
-        const projNet = document.getElementById('gov-proj-net');
-        const govArmyContainer = document.getElementById('gov-army-container');
+        const taxValue = document.getElementById('gov-tax-val');
+        const projection = document.getElementById('gov-proj-net');
+        const container = document.getElementById('gov-army-container');
 
-        govArmyContainer.innerHTML = '';
-        Object.keys(UnitsDB).forEach(unitId => {
+        container.innerHTML = '';
+        for (const unitId of Object.keys(UnitsDB)) {
             const unit = UnitsDB[unitId];
-            govArmyContainer.innerHTML += `
-                <div class="army-row">
-                    <span style="font-size: 0.9em; color: #cbd5e1;">${unit.icon} ${unit.name} (-$${unit.maintenanceCost / 1000}k/ход)</span>
-                    <div class="army-controls">
-                        <button class="army-btn" id="btn-${unitId}-minus">-</button>
-                        <span id="gov-${unitId}-val">0</span>
-                        <button class="army-btn" id="btn-${unitId}-plus">+</button>
-                    </div>
+            const row = document.createElement('div');
+            row.className = 'army-row';
+            row.innerHTML = `
+                <span class="gov-unit">${unit.icon} ${unit.name}
+                    <small>−$${unit.maintenanceCost / 1000}k/ход · $${unit.buildCost / 1000}k</small></span>
+                <div class="army-controls">
+                    <button class="army-btn" data-unit="${unitId}" data-delta="-1">−</button>
+                    <span id="gov-${unitId}-val">0</span>
+                    <button class="army-btn" data-unit="${unitId}" data-delta="1">+</button>
                 </div>`;
-        });
+            container.appendChild(row);
+        }
 
-        const updateGovUI = () => {
-            taxVal.innerText = (player.taxRate * 100).toFixed(0) + '%';
-            
-            Object.keys(UnitsDB).forEach(unitId => {
-                const el = document.getElementById(`gov-${unitId}-val`);
-                if (el) el.innerText = player.army[unitId] || 0;
-            });
-            
-            const projection = this.loop.getProjectedNetIncome(player.id);
-            projNet.innerText = this.ui.formatNumber(projection);
-            projNet.style.color = projection >= 0 ? '#4ade80' : '#f87171';
+        const update = () => {
+            taxValue.textContent = Math.round(player.taxRate * 100) + '%';
+            for (const unitId of Object.keys(UnitsDB)) {
+                document.getElementById(`gov-${unitId}-val`).textContent = player.army[unitId] || 0;
+            }
+            const net = this.loop.getProjectedNetIncome(player.id);
+            projection.textContent = (net >= 0 ? '+$' : '−$') + this.ui.formatNumber(Math.abs(net));
+            projection.style.color = net >= 0 ? '#4ade80' : '#f87171';
         };
 
-        Object.keys(UnitsDB).forEach(unitId => {
+        container.addEventListener('click', e => {
+            const btn = e.target.closest('.army-btn');
+            if (!btn) return;
+            const unitId = btn.dataset.unit;
             const unit = UnitsDB[unitId];
-            const plusBtn = document.getElementById(`btn-${unitId}-plus`);
-            const minusBtn = document.getElementById(`btn-${unitId}-minus`);
-            
-            if (plusBtn) plusBtn.addEventListener('click', () => {
-                if (player.money >= unit.buildCost) {
-                    player.money -= unit.buildCost;
-                    player.army[unitId] += 1;
-                    updateGovUI();
-                    this.loop.updateTopBarUI();
-                }
-            });
-            if (minusBtn) minusBtn.addEventListener('click', () => {
-                if (player.army[unitId] > 0) {
-                    player.army[unitId] -= 1;
-                    updateGovUI();
-                }
-            });
+            if (btn.dataset.delta === '1') {
+                if (player.money < unit.buildCost) { this.ui.toast('Недостаточно средств'); return; }
+                player.money -= unit.buildCost;
+                player.army[unitId] += 1;
+            } else {
+                if ((player.army[unitId] || 0) <= 0) return;
+                player.army[unitId] -= 1;
+                player.money += unit.buildCost;   // роспуск возвращает стоимость постройки
+            }
+            update();
+            this.loop.updateTopBarUI();
         });
 
-        taxSlider.addEventListener('input', (e) => {
-            player.taxRate = parseFloat(e.target.value);
-            updateGovUI();
-        });
-
-        document.getElementById('gov-btn').addEventListener('click', () => {
-            taxSlider.value = player.taxRate;
-            updateGovUI();
-        });
+        taxSlider.addEventListener('input', e => { player.taxRate = parseFloat(e.target.value); update(); });
+        document.getElementById('gov-btn').addEventListener('click', () => { taxSlider.value = player.taxRate; update(); });
+        update();
     }
 
     handleMapClick(regionId) {
-        if (this.armyActionState && this.armyActionState.active) {
-            const state = this.armyActionState;
-            if (state.type === 'move') {
-                const validTargets = this.data.getValidMoveTargets(state.fromId);
-                if (validTargets.includes(regionId)) {
-                    this.data.queueMovement(state.fromId, regionId, state.forces);
-                    this.ui.updateOrdersPanel(this.data.orders);
-                }
-            } else if (state.type === 'attack') {
-                const validTargets = this.data.getValidAttackTargets(state.fromId);
-                if (validTargets.includes(regionId)) {
-                    this.data.queueAttack(state.fromId, regionId, state.forces);
-                    this.ui.updateOrdersPanel(this.data.orders);
-                }
+        if (this.armyAction.active) {
+            const state = this.armyAction;
+            const targets = state.type === 'move'
+                ? this.data.getValidMoveTargets(state.fromId)
+                : this.data.getValidAttackTargets(state.fromId);
+
+            if (targets.includes(regionId)) {
+                if (state.type === 'move') this.data.queueMovement(state.fromId, regionId, state.forces);
+                else this.data.queueAttack(state.fromId, regionId, state.forces);
+                this.ui.updateOrdersPanel(this.data.orders);
             }
-            this.armyActionState.active = false;
-            this.map.disableTargetSelection();
-            return; 
+            this.cancelTargeting();
+            return;
         }
 
         const region = this.data.getRegion(regionId);
-        if (!region) return; 
-        
-        if (!region.army) region.army = {};
-
+        if (!region) return;
         const country = this.data.getCountry(region.owner);
         if (!country) return;
 
         if (this.map.isRegionalZoom) {
             this.map.selectRegion(regionId);
-            this.ui.showRegionInfo(region, country, this.data, this.data.playerCountry);
-            
-            const armyActionPanel = document.getElementById('army-action-panel');
-            if (armyActionPanel) {
-                armyActionPanel.dataset.regionId = region.id;
-                armyActionPanel.style.display = 'none';
-            }
-            
-            this.updateActionButtonsVisibility(region.id);
-
+            this.ui.showRegionInfo(region, country, this.data, this.data.playerCountry, this);
+            const panel = document.getElementById('army-action-panel');
+            panel.dataset.regionId = region.id;
+            panel.style.display = 'none';
+            this.updateActionButtons(region.id);
         } else {
             this.map.selectCountry(country.id);
-            const countryStats = this.data.getCountryStats(country.id);
-            this.ui.showCountryInfo(country, countryStats, this.data);
+            this.ui.showCountryInfo(country, this.data.getCountryStats(country.id), this.data);
         }
     }
 }
 
-let selectedFactionId = null;
+// =====================================================================
+// СТАРТОВЫЙ ЭКРАН
+// =====================================================================
+(function startScreen() {
+    let selectedId = null;
 
-// === ИСПРАВЛЕНИЕ: ПРОБИВАЕМ КЭШ И ВСТАВЛЯЕМ SVG НАДЕЖНО ===
-window.onload = () => {
-    // Добавляем ?v=... чтобы заставить GitHub отдать самый свежий файл, игнорируя кэш
-    fetch('world-map.svg?v=' + new Date().getTime())
-        .then(response => {
-            if (!response.ok) throw new Error("Сетевая ошибка: Файл карты не найден (404)");
-            return response.text();
-        })
-        .then(svgText => {
-            // Самый надежный способ вставить SVG в документ (исключает ошибку getBBox)
-            document.getElementById('map-container').innerHTML = svgText;
-            
-            // Запускаем меню
-            initStartScreen();
-        })
-        .catch(err => {
-            console.warn("Внимание: world-map.svg не загружен. Запускаем резервный режим...", err);
-            initStartScreen();
-        });
-};
+    const ready = () => {
+        const listEl = document.getElementById('start-country-list');
+        const searchEl = document.getElementById('start-search');
+        const startBtn = document.getElementById('start-game-btn');
 
-function initStartScreen() {
-    const factions = typeof PlayableFactions !== 'undefined' ? PlayableFactions : CountriesDB;
-    const listEl = document.getElementById('start-country-list');
-    
-    Object.keys(factions).forEach(id => {
-        const fac = factions[id];
-        if (!fac || !fac.name) return;
+        const playable = Object.keys(CountriesDB)
+            .filter(id => CountriesDB[id].playable && CountriesDB[id].regions > 0)
+            .sort((a, b) => CountriesDB[a].name.localeCompare(CountriesDB[b].name, 'ru'));
 
-        const div = document.createElement('div');
-        div.className = 'country-list-item';
-        div.innerText = fac.name;
-        
-        div.onclick = () => {
-            document.querySelectorAll('.country-list-item').forEach(el => el.classList.remove('selected'));
-            div.classList.add('selected');
-            selectedFactionId = id;
-            
-            document.getElementById('info-name').innerText = fac.name;
-            document.getElementById('info-capital').querySelector('span').innerText = fac.capital || 'Нет данных';
-            document.getElementById('info-pop').querySelector('span').innerText = fac.pop || 'Нет данных';
-            document.getElementById('info-area').querySelector('span').innerText = fac.area || 'Нет данных';
-            document.getElementById('info-gdp').querySelector('span').innerText = fac.gdp || 'Нет данных';
-            document.getElementById('info-army').querySelector('span').innerText = fac.army || 'Нет данных';
-            
-            const wikiLink = document.getElementById('info-wiki');
-            if (fac.wiki) {
-                wikiLink.href = fac.wiki;
-                wikiLink.style.display = 'inline-block';
-            } else {
-                wikiLink.style.display = 'none';
+        const render = filter => {
+            const query = filter.trim().toLowerCase();
+            listEl.innerHTML = '';
+            const fragment = document.createDocumentFragment();
+            for (const id of playable) {
+                const country = CountriesDB[id];
+                if (query && !country.name.toLowerCase().includes(query)) continue;
+                const item = document.createElement('div');
+                item.className = 'country-list-item' + (id === selectedId ? ' selected' : '');
+                item.dataset.id = id;
+                item.innerHTML = `<span>${country.name}</span><span class="list-regions">${country.regions}</span>`;
+                fragment.appendChild(item);
             }
-            
+            listEl.appendChild(fragment);
+            if (!listEl.children.length) {
+                listEl.innerHTML = '<div class="country-list-empty">Ничего не найдено</div>';
+            }
+        };
+
+        const select = id => {
+            selectedId = id;
+            for (const el of listEl.children) el.classList.toggle('selected', el.dataset.id === id);
+
+            const country = CountriesDB[id];
+            document.getElementById('info-name').textContent = country.name;
+            const set = (elId, value) => {
+                document.getElementById(elId).querySelector('span').textContent = value;
+            };
+            set('info-pop', country.population ? formatMillions(country.population) : 'нет данных');
+            set('info-area', country.area.toLocaleString('ru-RU') + ' км²');
+            set('info-regions', String(country.regions));
+
+            const regions = Object.keys(RegionsDB).filter(r => RegionsDB[r].cc === id);
+            set('info-capital', regions.length ? RegionsDB[regions[0]].name : '—');
+
             document.getElementById('info-visuals').style.visibility = 'visible';
             document.getElementById('info-flag').src = `https://flagcdn.com/w160/${id.toLowerCase()}.png`;
-            
-            const minimap = document.getElementById('info-minimap');
-            minimap.innerHTML = ''; 
-            
-            const paths = Array.from(document.querySelectorAll('#world-map path')).filter(p => p.id && p.id.startsWith(id + '-'));
-            let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-            
-            paths.forEach(p => {
-                // === ЖЕЛЕЗОБЕТОННАЯ ЗАЩИТА ОТ КРАША getBBox ===
-                if (typeof p.getBBox === 'function') {
-                    try {
-                        const clone = p.cloneNode(true);
-                        if (!clone.style) {
-                            clone.setAttribute('style', `fill: ${fac.color}; stroke: rgba(255,255,255,0.7); stroke-width: 0.5;`);
-                        } else {
-                            clone.style.fill = fac.color;
-                            clone.style.stroke = 'rgba(255,255,255,0.7)';
-                            clone.style.strokeWidth = '0.5';
-                        }
-                        minimap.appendChild(clone);
-                        
-                        const bbox = p.getBBox();
-                        if (bbox.width > 0 && bbox.x > 10) { 
-                            if (bbox.x < minX) minX = bbox.x;
-                            if (bbox.y < minY) minY = bbox.y;
-                            if (bbox.x + bbox.width > maxX) maxX = bbox.x + bbox.width;
-                            if (bbox.y + bbox.height > maxY) maxY = bbox.y + bbox.height;
-                        }
-                    } catch (e) {
-                        // Молча игнорируем элементы, которые невозможно отрисовать
-                    }
-                }
-            });
-            
-            if (minX !== Infinity && maxX !== -Infinity) {
-                const pad = 5;
-                minimap.setAttribute('viewBox', `${minX - pad} ${minY - pad} ${(maxX - minX) + pad * 2} ${(maxY - minY) + pad * 2}`);
-            }
-            
-            // Эта кнопка теперь разблокируется всегда, даже если карта битая!
-            document.getElementById('start-game-btn').disabled = false;
+            drawMinimap(id, regions, country.color);
+            startBtn.disabled = false;
         };
-        listEl.appendChild(div);
-    });
 
-    document.getElementById('start-game-btn').addEventListener('click', () => {
-        const isCheatActive = document.getElementById('cheat-toggle').checked;
-        document.getElementById('start-screen').style.display = 'none';
-        const game = new GameCore(selectedFactionId, isCheatActive);
-    });
-}
+        listEl.addEventListener('click', e => {
+            const item = e.target.closest('.country-list-item');
+            if (item) select(item.dataset.id);
+        });
+        searchEl.addEventListener('input', () => render(searchEl.value));
+
+        startBtn.addEventListener('click', () => {
+            if (!selectedId || !CountriesDB[selectedId]) return;
+            const cheat = document.getElementById('cheat-toggle').checked;
+            document.getElementById('start-screen').style.display = 'none';
+            window.game = new GameCore(selectedId, cheat);
+        });
+
+        render('');
+        select(playable.includes('UA') ? 'UA' : playable[0]);
+    };
+
+    function formatMillions(n) {
+        if (n >= 1e6) return (n / 1e6).toFixed(1).replace('.0', '') + ' млн';
+        if (n >= 1e3) return Math.round(n / 1e3) + ' тыс.';
+        return String(n);
+    }
+
+    function drawMinimap(countryId, regionIds, color) {
+        const svg = document.getElementById('info-minimap');
+        svg.innerHTML = '';
+        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+        for (const id of regionIds) {
+            const info = RegionsDB[id];
+            const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+            path.setAttribute('d', info.path);
+            path.setAttribute('fill', color);
+            path.setAttribute('stroke', 'rgba(255,255,255,0.65)');
+            path.setAttribute('stroke-width', '0.3');
+            svg.appendChild(path);
+            minX = Math.min(minX, info.cx); maxX = Math.max(maxX, info.cx);
+            minY = Math.min(minY, info.cy); maxY = Math.max(maxY, info.cy);
+        }
+        if (minX === Infinity) return;
+        const pad = Math.max((maxX - minX) * 0.25, (maxY - minY) * 0.25, 3);
+        svg.setAttribute('viewBox',
+            `${minX - pad} ${minY - pad} ${maxX - minX + pad * 2} ${maxY - minY + pad * 2}`);
+    }
+
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', ready);
+    else ready();
+})();
