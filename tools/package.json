@@ -9,6 +9,7 @@
   },
   "dependencies": {
     "all-the-cities": "^3.1.0",
+    "countries-list": "^3.4.1",
     "country-json": "^2.3.0",
     "polygon-clipping": "^0.15.7",
     "topojson-client": "^3.1.0",
