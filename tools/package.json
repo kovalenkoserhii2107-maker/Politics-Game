@@ -1,19 +1,18 @@
 {
-  "name": "tools",
-  "version": "1.0.0",
-  "description": "",
-  "main": "generate_grid.js",
-  "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
-  },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
+  "name": "politics-game-tools",
+  "version": "2.0.0",
+  "private": true,
   "type": "commonjs",
+  "description": "Offline map/data generators for Politics-Game",
+  "scripts": {
+    "build:map": "node build_map.js"
+  },
   "dependencies": {
-    "@turf/turf": "^7.4.0",
-    "svg-path-parser": "^1.1.0",
-    "svg-path-properties": "^2.0.2",
-    "xmldom": "^0.6.0"
+    "all-the-cities": "^3.1.0",
+    "country-json": "^2.3.0",
+    "polygon-clipping": "^0.15.7",
+    "topojson-client": "^3.1.0",
+    "world-atlas": "^2.0.2",
+    "world-countries": "^5.1.0"
   }
 }

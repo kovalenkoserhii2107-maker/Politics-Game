@@ -1,163 +1,124 @@
+// =====================================================================
+// МОДЕЛЬ МИРА: страны, области, приказы, разрешение хода
+// =====================================================================
 class GameData {
-    constructor(playerCountryId = 'UA', cheatMode = false) {
+    constructor(playerCountryId, cheatMode = false) {
         this.currentDate = new Date(2024, 0, 1);
-        this.playerCountry = playerCountryId; 
-        this.cheatMode = cheatMode; 
+        this.playerCountry = playerCountryId;
+        this.cheatMode = cheatMode;
 
-        this.generateEmptyArmy = () => {
-            let army = {};
-            Object.keys(UnitsDB).forEach(unitId => { army[unitId] = 0; });
-            return army;
-        };
-
-        this.generateBaseTech = () => {
-            let tech = { marchSpeed: 1 };
-            Object.keys(UnitsDB).forEach(unitId => { tech[unitId] = 1; });
-            return tech;
-        };
-
-        // Загружаем страны динамически из CountriesDB
         this.countries = {};
-        Object.keys(CountriesDB).forEach(id => {
+        this.regions = {};
+        this.regionsByCountry = {};
+        this.history = [];
+        this.orders = { recruitment: [], attacks: [], movements: [], recon: [] };
+
+        this.build();
+    }
+
+    emptyArmy() {
+        const army = {};
+        for (const unitId of Object.keys(UnitsDB)) army[unitId] = 0;
+        return army;
+    }
+
+    baseTech() {
+        const tech = { marchSpeed: 1 };
+        for (const unitId of Object.keys(UnitsDB)) tech[unitId] = 1;
+        return tech;
+    }
+
+    build() {
+        for (const id of Object.keys(CountriesDB)) {
             const c = CountriesDB[id];
             this.countries[id] = {
-                id: id,
+                id,
                 name: c.name,
                 color: c.color,
                 money: c.money,
                 influence: c.influence,
                 taxRate: c.taxRate,
+                playable: c.playable,
                 lastNetIncome: 0,
-                army: this.generateEmptyArmy(),
-                tech: this.generateBaseTech()
+                army: this.emptyArmy(),
+                tech: this.baseTech(),
             };
-        });
-
-        this.regions = {};
-        this.history = [];
-        this.orders = { recruitment: [], attacks: [], movements: [], recon: [] };
-    }
-
-    buildDatabaseFromSVG() {
-        // === СИСТЕМА СІТКИ: регіони будуються з RegionsDB ===
-        // Оригінальні SVG country paths залишаються для відображення меж/кольорів країн
-        // Клікабельні елементи — rect-клітинки сітки
-
-        // 1. Налаштовуємо оригінальні country paths
-        const countryPaths = document.querySelectorAll('#world-map path');
-        countryPaths.forEach(path => {
-            if (!path.id) return;
-            const cc = path.id.split('-')[0];
-            if (this.countries[cc]) {
-                path.setAttribute('data-country', cc);
-                const country = this.countries[cc];
-                if (country && country.color) {
-                    path.style.fill = country.color;
-                    // We don't need fillOpacity here because we hide it
-                }
-                path.style.stroke = 'rgba(0,0,0,0.35)';
-                path.style.strokeWidth = '0.2';
-                path.style.pointerEvents = 'none'; // Клік йде на rect нижче
-                path.style.display = 'none'; // HIDE ORIGINAL PATHS, USE GRID INSTEAD
-            } else {
-                path.style.display = 'none';
-            }
-        });
-
-        const svgEl = document.getElementById('world-map');
-        
-        // 1.5 Создаем clipPath для точной обрезки (ОТКЛЮЧЕНО, так как clipPath ломает рендеринг в некоторых браузерах)
-
-        // 2. Створюємо SVG group для сіткових клітинок
-        let gridGroup = document.getElementById('grid-regions');
-        if (!gridGroup) {
-            gridGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
-            gridGroup.setAttribute('id', 'grid-regions');
-            // Вставляємо ПІСЛЯ country paths щоб сітку було видно ПОВЕРХ країн!
-            svgEl.appendChild(gridGroup);
-        } else {
-            gridGroup.innerHTML = ''; 
+            this.regionsByCountry[id] = [];
         }
 
-        // 3. Будуємо регіони з RegionsDB
-        Object.keys(RegionsDB).forEach(regionId => {
-            const dbInfo = RegionsDB[regionId];
-            const countryCode = regionId.split('-')[0];
-
-            if (!this.countries[countryCode]) return;
-
-            // Створюємо SVG path — клікабельна клітинка сітки
-            const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-            path.setAttribute('id', regionId);
-            path.setAttribute('d', dbInfo.pathData);
-            path.setAttribute('data-country', countryCode);
-            path.setAttribute('fill', this.countries[countryCode].color || '#888');
-            path.setAttribute('fill-opacity', '1'); // FULLY VISIBLE
-            path.setAttribute('stroke-opacity', '0'); // No white lines by default
-            path.classList.add('region');
-
-            gridGroup.appendChild(path);
-
-            // Додаємо в базу регіонів
-            this.regions[regionId] = {
-                id: regionId,
-                name: dbInfo.name,
-                owner: countryCode,
-                originalOwner: countryCode,
-                population: dbInfo.population,
+        for (const id of Object.keys(RegionsDB)) {
+            const info = RegionsDB[id];
+            if (!this.countries[info.cc]) continue;
+            this.regions[id] = {
+                id,
+                name: info.name,
+                owner: info.cc,
+                originalOwner: info.cc,
+                population: info.population,
+                area: info.area,
+                cx: info.cx,
+                cy: info.cy,
                 loyalty: 1.0,
-                army: this.generateEmptyArmy(),
-                resources: { oil: dbInfo.oil, agro: dbInfo.agro, industry: dbInfo.industry }
+                army: this.emptyArmy(),
+                resources: { oil: info.oil, agro: info.agro, industry: info.industry },
             };
-        });
+            this.regionsByCountry[info.cc].push(id);
+        }
 
-        console.log(`Grid: ${Object.keys(this.regions).length} регіонів завантажено`);
         this.distributeArmiesToBorders();
+        this.setStartingBudgets();
     }
 
-    // Визначає розмір клітинки для країни (синхронно з generate_grid.js)
-    _getAdaptiveCellSize(countryCode) {
-        const CELL_MAP = {
-            'BH':1,'CY':1,'LU':1,'SG':1,'QA':1,'KW':1,'LB':1,
-            'MD':2,'ME':2,'MK':2,'AL':2,'SI':2,'EE':2,'LV':2,'LT':2,
-            'DK':2,'NL':2,'BE':2,'IE':2,'BT':2,'LK':2,'JO':2,'IL':2,
-            'SY':2,'NP':2,'GE':2,'AM':2,'AZ':2,'KH':2,'LA':2,'TW':2,
-            'KP':2,'KR':2,'SK':2,'BA':2,'HR':2,'HU':2,'AT':2,'CH':2,
-            'CZ':2,'RS':2,'BG':2,'RO':2,'BY':2,'YE':2,'OM':2,
-            'UA':3,'PL':3,'DE':3,'TR':3,'GB':3,'IT':3,'ES':3,'FR':3,
-            'PT':3,'GR':3,'NO':3,'FI':3,'SE':3,'IS':3,'IQ':3,'AF':3,
-            'PK':3,'MM':3,'TH':3,'VN':3,'MY':3,'PH':3,'JP':3,'BD':3,
-            'UZ':3,'TM':3,'TJ':3,'KG':3,'IR':4,'SA':4,'IN':4,'ID':4,
-            'MN':4,'CN':6,'RU':6,'KZ':6
-        };
-        return CELL_MAP[countryCode] || 3;
+    // Стартовые налог и казна подбираются под уже расставленную армию, чтобы
+    // страна не оказывалась банкротом на первом же ходу. Сама механика налога
+    // не меняется — игрок по-прежнему двигает ползунок как хочет.
+    setStartingBudgets() {
+        const INDUSTRY_VALUE = 400;
+        for (const country of Object.values(this.countries)) {
+            const regions = this.getCountryRegions(country.id);
+            if (!regions.length) continue;
+
+            let population = 0, industry = 0, upkeep = 0;
+            for (const region of regions) {
+                population += region.population;
+                industry += region.resources.industry * INDUSTRY_VALUE;
+                for (const unitId of Object.keys(UnitsDB)) {
+                    upkeep += (region.army[unitId] || 0) * UnitsDB[unitId].maintenanceCost;
+                }
+            }
+            if (population <= 0) continue;
+
+            const breakEven = (upkeep - industry) / population;
+            country.taxRate = Math.min(0.20, Math.max(0.05, Math.ceil(breakEven * 100) / 100 + 0.01));
+            const income = population * country.taxRate + industry;
+            country.money = Math.max(2000000, Math.round(income * 3));
+        }
     }
 
     getCountry(id) { return this.countries[id]; }
     getRegion(id) { return this.regions[id]; }
+    getNeighbors(id) { return NeighborsDB[id] || []; }
+
+    // Области страны — заранее сгруппированы, поэтому без перебора всего мира.
+    getCountryRegions(countryId) {
+        return (this.regionsByCountry[countryId] || []).map(id => this.regions[id]);
+    }
 
     getCountryStats(countryId) {
-        let stats = { population: 0, oil: 0, agro: 0, industry: 0, army: this.generateEmptyArmy() };
+        const stats = { population: 0, oil: 0, agro: 0, industry: 0, regions: 0, army: this.emptyArmy() };
         const country = this.getCountry(countryId);
-        
-        if (country && country.army) {
-            Object.keys(UnitsDB).forEach(unitId => {
-                stats.army[unitId] += (country.army[unitId] || 0);
-            });
+        if (country) {
+            for (const unitId of Object.keys(UnitsDB)) stats.army[unitId] += country.army[unitId] || 0;
         }
-
-        Object.values(this.regions).forEach(region => {
-            if (region.owner === countryId) {
-                stats.population += region.population;
-                stats.oil += region.resources.oil;
-                stats.agro += region.resources.agro;
-                stats.industry += region.resources.industry;
-                
-                Object.keys(UnitsDB).forEach(unitId => {
-                    stats.army[unitId] += (region.army[unitId] || 0);
-                });
-            }
-        });
+        for (const region of Object.values(this.regions)) {
+            if (region.owner !== countryId) continue;
+            stats.regions++;
+            stats.population += region.population;
+            stats.oil += region.resources.oil;
+            stats.agro += region.resources.agro;
+            stats.industry += region.resources.industry;
+            for (const unitId of Object.keys(UnitsDB)) stats.army[unitId] += region.army[unitId] || 0;
+        }
         return stats;
     }
 
@@ -168,366 +129,337 @@ class GameData {
         if (!country) return 0;
 
         let power = 0;
-        Object.keys(UnitsDB).forEach(unitId => {
+        for (const unitId of Object.keys(UnitsDB)) {
             const count = region.army[unitId] || 0;
-            if (count > 0) {
-                const unit = UnitsDB[unitId];
-                const techLevel = country.tech[unitId] || 1;
-                const techMultiplier = 1 + (techLevel - 1) * 0.2; 
-                power += count * (unit.baseAttack + unit.baseDefense) * techMultiplier;
-            }
-        });
+            if (!count) continue;
+            const unit = UnitsDB[unitId];
+            const techMultiplier = 1 + ((country.tech[unitId] || 1) - 1) * 0.2;
+            power += count * (unit.baseAttack + unit.baseDefense) * techMultiplier;
+        }
         return Math.floor(power);
     }
 
     calculateMilitaryPower(countryId) {
         const country = this.getCountry(countryId);
         if (!country) return 0;
-        
-        let totalPower = 0;
-        Object.keys(UnitsDB).forEach(unitId => {
-            const count = country.army[unitId] || 0;
-            if (count > 0) {
-                const unit = UnitsDB[unitId];
-                const techLevel = country.tech[unitId] || 1;
-                const techMultiplier = 1 + (techLevel - 1) * 0.2;
-                totalPower += count * (unit.baseAttack + unit.baseDefense) * techMultiplier;
-            }
-        });
 
-        Object.values(this.regions).forEach(region => {
-            if (region.owner === countryId) {
-                totalPower += this.calculateRegionMilitaryPower(region.id);
-            }
-        });
-        
-        return Math.floor(totalPower);
+        let total = 0;
+        for (const unitId of Object.keys(UnitsDB)) {
+            const count = country.army[unitId] || 0;
+            if (!count) continue;
+            const unit = UnitsDB[unitId];
+            const techMultiplier = 1 + ((country.tech[unitId] || 1) - 1) * 0.2;
+            total += count * (unit.baseAttack + unit.baseDefense) * techMultiplier;
+        }
+        for (const region of Object.values(this.regions)) {
+            if (region.owner === countryId) total += this.calculateRegionMilitaryPower(region.id);
+        }
+        return Math.floor(total);
     }
 
     getRecruitPotential(regionId) {
         const region = this.getRegion(regionId);
         if (!region) return 0;
-        
-        let potential = Math.floor(region.population / 150000);
-        const logisticsCap = Math.max(1, Math.floor(region.resources.industry / 5));
-        let finalPotential = Math.min(potential, logisticsCap);
-
-        return Math.max(1, finalPotential); 
+        const byPopulation = Math.floor(region.population / 150000);
+        const byLogistics = Math.max(1, Math.floor(region.resources.industry / 5));
+        return Math.max(1, Math.min(byPopulation, byLogistics));
     }
 
     saveTurnHistory(turnData) {
-        this.history.unshift(turnData); 
-        if (this.history.length > 10) { this.history.pop(); }
+        this.history.unshift(turnData);
+        if (this.history.length > 10) this.history.pop();
     }
 
-    areNeighbors(regionId1, regionId2) {
-        if (GeneratedNeighbors[regionId1]) {
-            return GeneratedNeighbors[regionId1].includes(regionId2);
-        }
-        return false;
-    }
+    areNeighbors(a, b) { return this.getNeighbors(a).includes(b); }
 
-    // Проверяет, граничит ли указанный регион с территорией игрока
     isNeighborToPlayer(regionId) {
-        let isNeighbor = false;
-        const neighbors = GeneratedNeighbors[regionId] || [];
-        
-        for (let i = 0; i < neighbors.length; i++) {
-            const nReg = this.getRegion(neighbors[i]);
-            // Если хотя бы один сосед принадлежит игроку — возвращаем true
-            if (nReg && nReg.owner === this.playerCountry) {
-                return true;
-            }
+        for (const id of this.getNeighbors(regionId)) {
+            const region = this.regions[id];
+            if (region && region.owner === this.playerCountry) return true;
         }
         return false;
     }
 
-    getFriendlyDistance(startRegionId, targetRegionId, ownerId) {
-        if (startRegionId === targetRegionId) return 0;
-        let queue = [{ id: startRegionId, dist: 0 }];
-        let visited = new Set([startRegionId]);
-
-        while (queue.length > 0) {
-            let current = queue.shift();
-            if (current.id === targetRegionId) return current.dist;
-
-            let neighbors = GeneratedNeighbors[current.id] || [];
-            for (let nextId of neighbors) {
-                let nextRegion = this.getRegion(nextId);
-                if (!nextRegion || visited.has(nextId) || nextRegion.owner !== ownerId) continue;
-                
-                visited.add(nextId);
-                queue.push({ id: nextId, dist: current.dist + 1 });
-            }
-        }
-        return -1; 
-    }
-
+    // Обход в ширину с ограничением глубины: не перебирает весь мир,
+    // а расходится от исходной области максимум на maxDist шагов.
     getValidMoveTargets(startRegionId) {
-        const region = this.getRegion(startRegionId);
-        if (!region) return [];
-        const country = this.getCountry(region.owner);
+        const start = this.getRegion(startRegionId);
+        if (!start) return [];
+        const country = this.getCountry(start.owner);
         if (!country) return [];
-        
+
         const maxDist = country.tech.marchSpeed || 1;
-        let validIds = [];
-        Object.values(this.regions).forEach(r => {
-            if (r.owner === country.id && r.id !== startRegionId) {
-                let dist = this.getFriendlyDistance(startRegionId, r.id, country.id);
-                if (dist !== -1 && dist <= maxDist) validIds.push(r.id);
+        const visited = new Set([startRegionId]);
+        const targets = [];
+        let frontier = [startRegionId];
+
+        for (let depth = 0; depth < maxDist && frontier.length; depth++) {
+            const next = [];
+            for (const id of frontier) {
+                for (const nextId of this.getNeighbors(id)) {
+                    if (visited.has(nextId)) continue;
+                    const region = this.regions[nextId];
+                    if (!region || region.owner !== country.id) continue;
+                    visited.add(nextId);
+                    targets.push(nextId);
+                    next.push(nextId);
+                }
             }
-        });
-        return validIds;
+            frontier = next;
+        }
+        return targets;
     }
 
     getValidAttackTargets(startRegionId) {
         const region = this.getRegion(startRegionId);
         if (!region) return [];
-        const countryId = region.owner;
-        let validIds = [];
-        
-        let neighbors = GeneratedNeighbors[startRegionId] || [];
-        for (let nextId of neighbors) {
-            let nextRegion = this.getRegion(nextId);
-            if (nextRegion && nextRegion.owner !== countryId) {
-                validIds.push(nextId);
-            }
+        const targets = [];
+        for (const id of this.getNeighbors(startRegionId)) {
+            const other = this.regions[id];
+            if (other && other.owner !== region.owner) targets.push(id);
         }
-        return validIds;
+        return targets;
+    }
+
+    describeForces(forces) {
+        return Object.keys(forces)
+            .filter(id => forces[id] > 0)
+            .map(id => `${forces[id]} ${UnitsDB[id].name}`)
+            .join(', ');
     }
 
     queueMovement(fromId, toId, forces) {
-        const fromRegion = this.getRegion(fromId);
-        const toRegion = this.getRegion(toId);
-        if (!fromRegion || !toRegion) return;
-        
-        let forcesText = Object.keys(forces).filter(id => forces[id] > 0).map(id => `${forces[id]} ${UnitsDB[id].name}`).join(', ');
-        this.orders.movements.push({ from: fromId, to: toId, forces: forces, text: `[Марш] ${fromRegion.name} ➔ ${toRegion.name} (${forcesText})` });
+        const from = this.getRegion(fromId), to = this.getRegion(toId);
+        if (!from || !to) return;
+        this.orders.movements.push({
+            from: fromId, to: toId, forces,
+            text: `[Марш] ${from.name} ➔ ${to.name} (${this.describeForces(forces)})`,
+        });
     }
 
     queueAttack(fromId, toId, forces) {
-        const fromRegion = this.getRegion(fromId);
-        const toRegion = this.getRegion(toId);
-        if (!fromRegion || !toRegion) return;
-        
-        let forcesText = Object.keys(forces).filter(id => forces[id] > 0).map(id => `${forces[id]} ${UnitsDB[id].name}`).join(', ');
-        this.orders.attacks.push({ from: fromId, to: toId, forces: forces, text: `[Атака] ${fromRegion.name} ➔ ${toRegion.name} (${forcesText})` });
+        const from = this.getRegion(fromId), to = this.getRegion(toId);
+        if (!from || !to) return;
+        this.orders.attacks.push({
+            from: fromId, to: toId, forces,
+            text: `[Атака] ${from.name} ➔ ${to.name} (${this.describeForces(forces)})`,
+        });
+    }
+
+    queueRecruitment(regionId, amount) {
+        const region = this.getRegion(regionId);
+        if (!region) return false;
+        this.orders.recruitment.push({
+            regionId, amount,
+            text: `[Рекрутинг] ${region.name}: +${amount} батальонов`,
+        });
+        return true;
     }
 
     queueRecon(targetId, cost, prob, regionName) {
-        if (!this.orders.recon) this.orders.recon = [];
-        
-        // Блокируем двойную отправку шпионов в один и тот же регион за ход
         if (this.orders.recon.some(o => o.target === targetId)) return false;
-        
-        // ПРАВИЛЬНОЕ ОБРАЩЕНИЕ К КАЗНЕ ИГРОКА
         const player = this.getCountry(this.playerCountry);
-        
-        if (player.money >= cost) {
-            player.money -= cost;
-            this.orders.recon.push({ 
-                target: targetId, 
-                cost: cost, 
-                prob: prob, 
-                regionName: regionName 
-            });
-            return true;
+        if (!player || player.money < cost) return false;
+        player.money -= cost;
+        this.orders.recon.push({ target: targetId, cost, prob, regionName });
+        return true;
+    }
+
+    cancelOrder(type, index) {
+        const list = this.orders[type];
+        if (!list || index < 0 || index >= list.length) return null;
+        const [order] = list.splice(index, 1);
+        if (type === 'recon') {
+            const player = this.getCountry(this.playerCountry);
+            if (player) player.money += order.cost;
         }
-        return false;
+        return order;
+    }
+
+    // Сколько войск в области ещё не расписано по приказам этого хода.
+    getAvailableArmy(regionId) {
+        const region = this.getRegion(regionId);
+        if (!region) return {};
+        const available = { ...region.army };
+        for (const type of ['movements', 'attacks']) {
+            for (const order of this.orders[type]) {
+                if (order.from !== regionId) continue;
+                for (const unitId of Object.keys(order.forces)) {
+                    if (available[unitId] !== undefined) available[unitId] -= order.forces[unitId];
+                }
+            }
+        }
+        return available;
     }
 
     processOrders() {
-        let resultsLogs = [];
+        const logs = [];
 
-        // === 1. РАЗВЕДКА (Выполняется первой в начале хода) ===
-        if (this.orders.recon && this.orders.recon.length > 0) {
-            this.orders.recon.forEach(order => {
-                const region = this.getRegion(order.target);
-                if (region) {
-                    const roll = Math.random() * 100;
-                    if (roll <= order.prob) {
-                        // УСПЕХ
-                        let activeDate = new Date(this.currentDate);
-                        activeDate.setMonth(activeDate.getMonth() + 1); 
-                        region.reconActiveUntil = activeDate;
-                        
-                        resultsLogs.push({ 
-                            success: true, 
-                            message: `🕵️ Разведка: Шпионы успешно внедрились в ${region.name}. Данные о гарнизоне получены.` 
-                        });
-                    } else {
-                        // ПРОВАЛ
-                        resultsLogs.push({ 
-                            success: false, 
-                            message: `💥 Провал операции в ${region.name}. Шпионы были перехвачены контрразведкой.` 
-                        });
-                    }
-                }
-            });
-            this.orders.recon = []; // Очищаем очередь разведки
+        // 1. Разведка
+        for (const order of this.orders.recon) {
+            const region = this.getRegion(order.target);
+            if (!region) continue;
+            if (Math.random() * 100 <= order.prob) {
+                const until = new Date(this.currentDate);
+                until.setMonth(until.getMonth() + 1);
+                region.reconActiveUntil = until;
+                logs.push({ success: true, message: `🕵️ Разведка: шпионы внедрились в ${region.name}. Данные о гарнизоне получены.` });
+            } else {
+                logs.push({ success: false, message: `💥 Провал операции в ${region.name}. Шпионы перехвачены контрразведкой.` });
+            }
+        }
+        this.orders.recon = [];
+
+        // 2. Рекрутинг
+        for (const order of this.orders.recruitment) {
+            const region = this.getRegion(order.regionId);
+            if (!region) continue;
+            region.army.infantry += order.amount;
+            logs.push({ success: true, message: `В ${region.name} набрано +${order.amount} пехоты.` });
         }
 
-        // === 2. РЕКРУТИНГ ===
-        this.orders.recruitment.forEach(order => {
-            const region = this.getRegion(order.regionId);
-            if (region) {
-                region.army.infantry += order.amount; 
-                resultsLogs.push({ success: true, message: `В ${region.name} набрано +${order.amount} пехоты.` });
+        // 3. Перемещения
+        for (const order of this.orders.movements) {
+            const from = this.getRegion(order.from), to = this.getRegion(order.to);
+            if (!from || !to || from.owner !== to.owner) continue;
+            for (const unitId of Object.keys(order.forces)) {
+                const moved = Math.min(from.army[unitId] || 0, order.forces[unitId]);
+                from.army[unitId] -= moved;
+                to.army[unitId] += moved;
             }
-        });
+            logs.push({ success: true, message: order.text + ' — выполнено.' });
+        }
 
-        // === 3. ПЕРЕМЕЩЕНИЕ ВОЙСК ===
-        this.orders.movements.forEach(order => {
-            const fromRegion = this.getRegion(order.from);
-            const toRegion = this.getRegion(order.to);
+        // 4. Атаки
+        for (const order of this.orders.attacks) {
+            const result = this.resolveAttack(order);
+            if (result) logs.push(result);
+        }
 
-            if (fromRegion && toRegion && fromRegion.owner === toRegion.owner) {
-                Object.keys(order.forces).forEach(unitId => {
-                    const amountToMove = order.forces[unitId];
-                    const actualAmount = Math.min(fromRegion.army[unitId] || 0, amountToMove);
-                    fromRegion.army[unitId] -= actualAmount;
-                    toRegion.army[unitId] += actualAmount;
-                });
-                resultsLogs.push({ success: true, message: order.text + " — Выполнено." });
-            }
-        });
-
-        // === 4. АТАКИ ===
-        this.orders.attacks.forEach(order => {
-            const fromRegion = this.getRegion(order.from);
-            const targetRegion = this.getRegion(order.to);
-            if (!fromRegion || !targetRegion || targetRegion.owner === this.playerCountry) return;
-
-            let actualForces = {};
-            let hasTroops = false;
-            let powerAtt = 0;
-
-            Object.keys(UnitsDB).forEach(unitId => {
-                const amount = Math.min(fromRegion.army[unitId] || 0, order.forces[unitId] || 0);
-                actualForces[unitId] = amount;
-                if (amount > 0) hasTroops = true;
-                fromRegion.army[unitId] -= amount; 
-                powerAtt += amount * UnitsDB[unitId].baseAttack;
-            });
-
-            if (!hasTroops) return;
-
-            let powerDef = 1; 
-            Object.keys(UnitsDB).forEach(unitId => {
-                powerDef += (targetRegion.army[unitId] || 0) * UnitsDB[unitId].baseDefense;
-            });
-
-            const requiredAdvantage = 1.2; 
-            let success = powerAtt >= powerDef * requiredAdvantage;
-            let defLossPct = powerAtt > 0 ? Math.min(1, (powerAtt * 0.2) / powerDef) : 0;
-            let attLossPct = powerDef > 1 ? Math.min(1, (powerDef * 0.1) / powerAtt) : 0;
-
-            if (this.cheatMode && fromRegion.owner === this.playerCountry) {
-                success = true;      
-                attLossPct = 0;      
-                defLossPct = 1;      
-            }
-
-            let attLosses = {};
-            let defLosses = {};
-            let survivingAtt = {};
-
-            Object.keys(UnitsDB).forEach(unitId => {
-                let defAmount = targetRegion.army[unitId] || 0;
-                let defLoss = Math.min(defAmount, Math.ceil(defAmount * defLossPct));
-                defLosses[unitId] = defLoss;
-                targetRegion.army[unitId] -= defLoss;
-
-                let attAmount = actualForces[unitId] || 0;
-                let attLoss = Math.min(attAmount, Math.floor(attAmount * attLossPct));
-                attLosses[unitId] = attLoss;
-                survivingAtt[unitId] = attAmount - attLoss;
-            });
-
-            let msg = "";
-
-            if (success) {
-                targetRegion.owner = this.playerCountry;
-                Object.keys(UnitsDB).forEach(unitId => targetRegion.army[unitId] = survivingAtt[unitId]);
-                msg = `Наступление: ${fromRegion.name} ➔ ${targetRegion.name} успешно! Регион захвачен.`;
-            } else {
-                Object.keys(UnitsDB).forEach(unitId => fromRegion.army[unitId] += survivingAtt[unitId]);
-                msg = `Наступление: ${fromRegion.name} ➔ ${targetRegion.name} захлебнулось.`;
-            }
-
-            resultsLogs.push({
-                success: success, message: msg,
-                losses: { attacker: { ...attLosses }, defender: { ...defLosses }, initialAttacker: { ...actualForces } }
-            });
-        });
-
-        // Очищаем очереди приказов
         this.orders.recruitment = [];
         this.orders.movements = [];
         this.orders.attacks = [];
+        return logs;
+    }
 
-        return resultsLogs;
+    resolveAttack(order) {
+        const from = this.getRegion(order.from);
+        const target = this.getRegion(order.to);
+        if (!from || !target || from.owner === target.owner) return null;
+
+        const attacker = from.owner;
+        const actualForces = {};
+        let hasTroops = false;
+        let powerAtt = 0;
+
+        for (const unitId of Object.keys(UnitsDB)) {
+            const amount = Math.min(from.army[unitId] || 0, order.forces[unitId] || 0);
+            actualForces[unitId] = amount;
+            if (amount > 0) hasTroops = true;
+            from.army[unitId] -= amount;
+            powerAtt += amount * UnitsDB[unitId].baseAttack;
+        }
+        if (!hasTroops) return null;
+
+        let powerDef = 1;
+        for (const unitId of Object.keys(UnitsDB)) {
+            powerDef += (target.army[unitId] || 0) * UnitsDB[unitId].baseDefense;
+        }
+
+        let success = powerAtt >= powerDef * 1.2;
+        let defLossPct = Math.min(1, (powerAtt * 0.2) / powerDef);
+        let attLossPct = powerDef > 1 ? Math.min(1, (powerDef * 0.1) / powerAtt) : 0;
+
+        if (this.cheatMode && attacker === this.playerCountry) {
+            success = true;
+            attLossPct = 0;
+            defLossPct = 1;
+        }
+
+        const attLosses = {}, defLosses = {}, survivors = {};
+        for (const unitId of Object.keys(UnitsDB)) {
+            const defAmount = target.army[unitId] || 0;
+            const defLoss = Math.min(defAmount, Math.ceil(defAmount * defLossPct));
+            defLosses[unitId] = defLoss;
+            target.army[unitId] -= defLoss;
+
+            const attAmount = actualForces[unitId] || 0;
+            const attLoss = Math.min(attAmount, Math.floor(attAmount * attLossPct));
+            attLosses[unitId] = attLoss;
+            survivors[unitId] = attAmount - attLoss;
+        }
+
+        let message;
+        if (success) {
+            target.owner = attacker;          // регион достаётся тому, кто атаковал
+            target.loyalty = 0.5;
+            for (const unitId of Object.keys(UnitsDB)) target.army[unitId] = survivors[unitId];
+            message = `Наступление: ${from.name} ➔ ${target.name} успешно! Регион захвачен.`;
+        } else {
+            for (const unitId of Object.keys(UnitsDB)) from.army[unitId] += survivors[unitId];
+            message = `Наступление: ${from.name} ➔ ${target.name} захлебнулось.`;
+        }
+
+        return {
+            success,
+            message,
+            losses: { attacker: attLosses, defender: defLosses, initialAttacker: actualForces },
+        };
     }
 
     distributeArmiesToBorders() {
         const RealWorldForces = {
-            'RU': { infantry: 132, tanks: 35, artillery: 60, aviation: 120, antiair: 40 },
-            'UA': { infantry: 90,  tanks: 18, artillery: 30, aviation: 10,  antiair: 15 },
-            'TR': { infantry: 42,  tanks: 22, artillery: 20, aviation: 60,  antiair: 15 },
-            'PL': { infantry: 20,  tanks: 6,  artillery: 6,  aviation: 10,  antiair: 5 },
-            'RO': { infantry: 7,   tanks: 3,  artillery: 4,  aviation: 6,   antiair: 3 },
-            'BY': { infantry: 6,   tanks: 5,  artillery: 6,  aviation: 7,   antiair: 4 },
-            'HU': { infantry: 4,   tanks: 1,  artillery: 1,  aviation: 1,   antiair: 1 },
-            'BG': { infantry: 3,   tanks: 1,  artillery: 1,  aviation: 1,   antiair: 1 },
-            'GE': { infantry: 3,   tanks: 1,  artillery: 1,  aviation: 1,   antiair: 1 },
-            'SK': { infantry: 2,   tanks: 1,  artillery: 1,  aviation: 1,   antiair: 1 },
-            'MD': { infantry: 1,   tanks: 0,  artillery: 1,  aviation: 0,   antiair: 0 },
-            'IT': { infantry: 10,   tanks: 5,  artillery: 1,  aviation: 0,   antiair: 0 }
+            RU: { infantry: 132, tanks: 35, artillery: 60, aviation: 120, antiair: 40 },
+            UA: { infantry: 90, tanks: 18, artillery: 30, aviation: 10, antiair: 15 },
+            TR: { infantry: 42, tanks: 22, artillery: 20, aviation: 60, antiair: 15 },
+            PL: { infantry: 20, tanks: 6, artillery: 6, aviation: 10, antiair: 5 },
+            RO: { infantry: 7, tanks: 3, artillery: 4, aviation: 6, antiair: 3 },
+            BY: { infantry: 6, tanks: 5, artillery: 6, aviation: 7, antiair: 4 },
+            HU: { infantry: 4, tanks: 1, artillery: 1, aviation: 1, antiair: 1 },
+            BG: { infantry: 3, tanks: 1, artillery: 1, aviation: 1, antiair: 1 },
+            GE: { infantry: 3, tanks: 1, artillery: 1, aviation: 1, antiair: 1 },
+            SK: { infantry: 2, tanks: 1, artillery: 1, aviation: 1, antiair: 1 },
+            MD: { infantry: 1, tanks: 0, artillery: 1, aviation: 0, antiair: 0 },
+            IT: { infantry: 10, tanks: 5, artillery: 1, aviation: 0, antiair: 0 },
+            DE: { infantry: 18, tanks: 6, artillery: 5, aviation: 12, antiair: 6 },
+            FR: { infantry: 20, tanks: 6, artillery: 5, aviation: 14, antiair: 6 },
+            NO: { infantry: 5, tanks: 1, artillery: 1, aviation: 3, antiair: 2 },
+            KZ: { infantry: 8, tanks: 3, artillery: 3, aviation: 3, antiair: 3 },
         };
 
-        Object.keys(this.countries).forEach(countryId => {
+        for (const countryId of Object.keys(this.countries)) {
             const forces = RealWorldForces[countryId] || { infantry: 1, tanks: 0, artillery: 0, aviation: 0, antiair: 0 };
-            const myRegions = Object.values(this.regions).filter(r => r.owner === countryId);
-            
-            if (myRegions.length === 0) return;
+            const myRegions = this.getCountryRegions(countryId);
+            if (!myRegions.length) continue;
 
-            const borderRegions = myRegions.filter(region => {
-                const neighbors = GeneratedNeighbors[region.id] || [];
-                return neighbors.some(nId => {
-                    const nReg = this.getRegion(nId);
-                    return nReg && nReg.owner !== countryId;
-                });
-            });
+            const borderRegions = myRegions.filter(region =>
+                this.getNeighbors(region.id).some(id => {
+                    const other = this.regions[id];
+                    return other && other.owner !== countryId;
+                }));
 
-            const targetRegions = borderRegions.length > 0 ? borderRegions : myRegions;
-            const borderTotalPop = targetRegions.reduce((sum, r) => sum + r.population, 0);
+            const targets = borderRegions.length ? borderRegions : myRegions;
+            const totalPop = targets.reduce((sum, r) => sum + r.population, 0);
+            if (!totalPop) continue;
 
-            if (borderTotalPop === 0) return;
+            for (const unitId of Object.keys(forces)) {
+                const total = forces[unitId];
+                if (!total) continue;
 
-            Object.keys(forces).forEach(unitId => {
-                const totalUnits = forces[unitId];
-                if (totalUnits === 0) return;
-
-                let unallocated = totalUnits;
-                let remainders = [];
-                
-                targetRegions.forEach(region => {
-                    const exactShare = totalUnits * (region.population / borderTotalPop);
-                    const integerPart = Math.floor(exactShare);
-                    const fractionalPart = exactShare - integerPart;
-                    
-                    region.army[unitId] = (region.army[unitId] || 0) + integerPart;
-                    unallocated -= integerPart;
-                    
-                    remainders.push({ region: region, fraction: fractionalPart });
-                });
-
+                let allocated = 0;
+                const remainders = [];
+                for (const region of targets) {
+                    const exact = total * (region.population / totalPop);
+                    const whole = Math.floor(exact);
+                    region.army[unitId] = (region.army[unitId] || 0) + whole;
+                    allocated += whole;
+                    remainders.push({ region, fraction: exact - whole });
+                }
                 remainders.sort((a, b) => b.fraction - a.fraction);
-
-                for (let i = 0; i < unallocated; i++) {
+                for (let i = 0; i < total - allocated && i < remainders.length; i++) {
                     remainders[i].region.army[unitId] += 1;
                 }
-            });
-        });
+            }
+        }
     }
 }

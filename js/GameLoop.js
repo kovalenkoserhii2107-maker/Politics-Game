@@ -1,153 +1,98 @@
 // =====================================================================
-// МОДУЛЬ 5: ИГРОВОЙ ЦИКЛ И ЭКОНОМИКА (Game Loop)
+// ИГРОВОЙ ЦИКЛ И ЭКОНОМИКА
 // =====================================================================
 class GameLoop {
-    // Добавили mapEngine в аргументы
     constructor(gameData, uiManager, mapEngine) {
         this.data = gameData;
         this.ui = uiManager;
-        this.map = mapEngine; // Сохраняем ссылку на карту!
-        
-        this.monthNames = ["Января", "Февраля", "Марта", "Апреля", "Мая", "Июня", "Июля", "Августа", "Сентября", "Октября", "Ноября", "Декабря"];
-        
-        // Стоимость содержания армии (в игровой валюте за ход)
-        this.MAINTENANCE_COST = {
-            infantry: 25000, 
-            tanks: 80000     
-        };
-        
-        // Базовая доходность единицы промышленности
+        this.map = mapEngine;
+
+        this.monthNames = ['Января', 'Февраля', 'Марта', 'Апреля', 'Мая', 'Июня',
+                           'Июля', 'Августа', 'Сентября', 'Октября', 'Ноября', 'Декабря'];
         this.INDUSTRY_VALUE = 400;
 
-        document.getElementById('end-turn-btn').addEventListener('click', () => this.processTurn());
+        this.endTurnBtn = document.getElementById('end-turn-btn');
+        this.endTurnBtn.addEventListener('click', () => this.processTurn());
         this.updateTopBarUI();
+        this.ui.updateZoomMode(this.map.isRegionalZoom);
+    }
+
+    // Доход и содержание армии в областях одной страны.
+    countryBalance(countryId) {
+        const country = this.data.getCountry(countryId);
+        let income = 0, expense = 0;
+        if (!country) return { income, expense };
+
+        for (const region of Object.values(this.data.regions)) {
+            if (region.owner !== countryId) continue;
+            income += region.population * country.taxRate * region.loyalty;
+            income += region.resources.industry * this.INDUSTRY_VALUE;
+            for (const unitId of Object.keys(UnitsDB)) {
+                expense += (region.army[unitId] || 0) * UnitsDB[unitId].maintenanceCost;
+            }
+        }
+        for (const unitId of Object.keys(UnitsDB)) {
+            expense += (country.army[unitId] || 0) * UnitsDB[unitId].maintenanceCost;
+        }
+        return { income, expense };
+    }
+
+    getProjectedNetIncome(countryId) {
+        const { income, expense } = this.countryBalance(countryId);
+        return income - expense;
     }
 
     processTurn() {
+        this.endTurnBtn.disabled = true;
         this.data.currentDate.setDate(this.data.currentDate.getDate() + 7);
 
-        // Запускаем исполнение приказов (рекрутинг и атаки)
         const combatLogs = this.data.processOrders();
-        
-        let incomes = {};
-        let expenses = {};
-        
-        Object.keys(this.data.countries).forEach(id => { 
-            incomes[id] = 0; 
-            expenses[id] = 0; 
-        });
 
-// 1. РАСЧЕТ ДОХОДОВ И РАСХОДОВ НА АРМИЮ В РЕГИОНАХ
-        Object.values(this.data.regions).forEach(region => {
-            const owner = region.owner;
-            if (owner && incomes[owner] !== undefined) {
-                const country = this.data.countries[owner];
-                const popTax = region.population * country.taxRate * region.loyalty;
-                const indIncome = region.resources.industry * this.INDUSTRY_VALUE;
-                incomes[owner] += (popTax + indIncome);
-
-                // === НОВОЕ: Списываем деньги за солдат, стоящих в этом регионе ===
-                if (region.army) {
-                    Object.keys(UnitsDB).forEach(unitId => {
-                        expenses[owner] += (region.army[unitId] || 0) * UnitsDB[unitId].maintenanceCost;
-                    });
-                }
-            }
-        });
-
-        // 2. РАСЧЕТ РАСХОДОВ (Резерв в правительстве)
-        Object.keys(this.data.countries).forEach(countryId => {
-            const country = this.data.countries[countryId];
-            if (country.army) {
-                Object.keys(UnitsDB).forEach(unitId => {
-                    const unitCount = country.army[unitId] || 0;
-                    expenses[countryId] += unitCount * UnitsDB[unitId].maintenanceCost;
-                });
-            }
-            
-            const netIncome = incomes[countryId] - expenses[countryId];
-            country.money += netIncome;
-            country.lastNetIncome = netIncome;
-        });
-
-        this.updateTopBarUI();
-        
-        // 3. ОБНОВЛЕНИЕ КАРТЫ ПОСЛЕ БОЕВ
-        if (this.map) {
-            this.map.refreshColors();
-            this.map.createCountryLabels();
+        const balances = {};
+        for (const id of Object.keys(this.data.countries)) {
+            const balance = this.countryBalance(id);
+            balances[id] = balance;
+            const country = this.data.countries[id];
+            country.lastNetIncome = balance.income - balance.expense;
+            country.money += country.lastNetIncome;
+            // Лояльность захваченных областей постепенно восстанавливается.
+        }
+        for (const region of Object.values(this.data.regions)) {
+            if (region.loyalty < 1) region.loyalty = Math.min(1, region.loyalty + 0.05);
         }
 
-        // --- ФОРМИРУЕМ ОТЧЕТ О КОНЦЕ ХОДА ---
-        const playerFin = { 
-            income: incomes[this.data.playerCountry], 
-            expense: expenses[this.data.playerCountry], 
-            net: incomes[this.data.playerCountry] - expenses[this.data.playerCountry] 
-        };
+        this.updateTopBarUI();
+        this.map.refreshColors();
+        this.map.createCountryLabels();
 
+        const player = balances[this.data.playerCountry] || { income: 0, expense: 0 };
         const turnData = {
-            date: document.getElementById('glob-date').innerText,
-            financial: playerFin,
-            logs: combatLogs
+            date: document.getElementById('glob-date').textContent,
+            financial: { income: player.income, expense: player.expense, net: player.income - player.expense },
+            logs: combatLogs,
         };
 
-        // Сохраняем в память (до 10 дней)
         this.data.saveTurnHistory(turnData);
-        
-        // Выводим всплывающее окно
         this.ui.showTurnSummary(turnData);
-        
-        // Очищаем визуальную панель приказов
         this.ui.updateOrdersPanel(this.data.orders);
+        this.endTurnBtn.disabled = false;
     }
 
     updateTopBarUI() {
         const player = this.data.getCountry(this.data.playerCountry);
-        const d = this.data.currentDate;
-        
-        document.getElementById('glob-money').innerText = this.ui.formatNumber(player.money);
-        
-        const netElement = document.getElementById('glob-net');
-        if (player.lastNetIncome > 0) {
-            netElement.innerHTML = `<span style="color: #4ade80;">(+${this.ui.formatNumber(player.lastNetIncome)})</span>`;
-        } else if (player.lastNetIncome < 0) {
-            netElement.innerHTML = `<span style="color: #f87171;">(${this.ui.formatNumber(player.lastNetIncome)})</span>`;
-        } else {
-            netElement.innerHTML = `<span style="color: #94a3b8;">(0)</span>`;
-        }
-        
-        document.getElementById('glob-influence').innerText = player.influence;
-        document.getElementById('glob-date').innerText = `${d.getDate()} ${this.monthNames[d.getMonth()]} ${d.getFullYear()}`;
-    }
+        if (!player) return;
+        const date = this.data.currentDate;
 
-	getProjectedNetIncome(countryId) {
-        let income = 0;
-        let expense = 0;
-        const country = this.data.countries[countryId];
+        document.getElementById('glob-money').textContent = this.ui.formatNumber(player.money);
 
-        Object.values(this.data.regions).forEach(region => {
-            if (region.owner === countryId) {
-                const popTax = region.population * country.taxRate * region.loyalty;
-                const indIncome = region.resources.industry * this.INDUSTRY_VALUE;
-                income += (popTax + indIncome);
+        const net = document.getElementById('glob-net');
+        const value = player.lastNetIncome;
+        net.textContent = value === 0 ? '(0)'
+            : (value > 0 ? '(+' : '(−') + this.ui.formatNumber(Math.abs(value)) + ')';
+        net.style.color = value > 0 ? '#4ade80' : value < 0 ? '#f87171' : '#94a3b8';
 
-                // === НОВОЕ: Прогноз расходов на армию в регионе ===
-                if (region.army) {
-                    Object.keys(UnitsDB).forEach(unitId => {
-                        expense += (region.army[unitId] || 0) * UnitsDB[unitId].maintenanceCost;
-                    });
-                }
-            }
-        });
-
-        // Считаем потенциальные расходы резерва
-        if (country.army) {
-            Object.keys(UnitsDB).forEach(unitId => {
-                const unitCount = country.army[unitId] || 0;
-                expense += unitCount * UnitsDB[unitId].maintenanceCost;
-            });
-        }
-
-        return income - expense;
+        document.getElementById('glob-influence').textContent = player.influence;
+        document.getElementById('glob-date').textContent =
+            `${date.getDate()} ${this.monthNames[date.getMonth()]} ${date.getFullYear()}`;
     }
 }
