@@ -657,7 +657,10 @@ function writeOutput(countries, regions, perCountry, neighbors, cityIndex) {
     s = HEADER + 'const RegionsDB = {\n';
     for (const r of regions) {
         s += `  '${r.id}': { name: ${q(r.name)}, cc: '${r.cc}', cx: ${r.cx.toFixed(2)}, cy: ${r.cy.toFixed(2)},`
-           + ` area: ${Math.round(r.areaKm2)}, r: ${r.labelRadius.toFixed(2)}, population: ${r.population},`
+           + ` area: ${Math.round(r.areaKm2)}, r: ${r.labelRadius.toFixed(2)},`
+           + ` bx: ${r.bbox[0].toFixed(1)}, by: ${r.bbox[1].toFixed(1)},`
+           + ` bw: ${(r.bbox[2] - r.bbox[0]).toFixed(1)}, bh: ${(r.bbox[3] - r.bbox[1]).toFixed(1)},`
+           + ` population: ${r.population},`
            + ` agro: ${r.agro}, industry: ${r.industry}, oil: ${r.oil},`
            + ` path: '${pathData(r.mp)}' },\n`;
     }

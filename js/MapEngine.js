@@ -12,9 +12,12 @@ class MapEngine {
         this.data = gameData;
         this.onRegionClick = onRegionClick;
 
-        this.scale = 3;
-        this.translateX = 0;
-        this.translateY = 0;
+        // Камера задаётся через viewBox, а не CSS-трансформом: iOS Safari
+        // растрирует трансформированный слой один раз и потом растягивает
+        // битмап, из-за чего карта на телефоне выглядит размытой.
+        this.scale = 3;          // во сколько раз ближе, чем «весь мир на экране»
+        this.camX = 0;           // левый верхний угол видимой области, единицы карты
+        this.camY = 0;
         this.isDragging = false;
         this.wasDragging = false;
         this.zoomThreshold = 6;
@@ -24,6 +27,10 @@ class MapEngine {
 
         this.paths = new Map();       // regionId -> <path>
         this.selection = new Set();
+        // Что можно не рисовать, когда оно за краем экрана
+        this.cullRegions = [];
+        this.cullLabels = [];
+        this.cullCities = [];
 
         this.buildLayers();
         this.initEvents();
@@ -69,6 +76,8 @@ class MapEngine {
             path.dataset.region = id;
             fragment.appendChild(path);
             this.paths.set(id, path);
+            const info = RegionsDB[id];
+            this.cullRegions.push({ el: path, x: info.bx, y: info.by, w: info.bw, h: info.bh, vis: true });
         }
         this.regionLayer.appendChild(fragment);
     }
@@ -138,7 +147,26 @@ class MapEngine {
     }
 
     // --- камера --------------------------------------------------------
+    // Одна единица карты = pxPerUnit экранных пикселей.
+    measure() {
+        const rect = this.container.getBoundingClientRect();
+        this.rect = rect;
+        this.baseScale = Math.min(rect.width / 1200, rect.height / 800) || 1;
+        return rect;
+    }
+
+    get pxPerUnit() { return this.baseScale * this.scale; }
+
+    clientToMap(clientX, clientY) {
+        const k = this.pxPerUnit;
+        return {
+            x: this.camX + (clientX - this.rect.left) / k,
+            y: this.camY + (clientY - this.rect.top) / k,
+        };
+    }
+
     centerOnPlayer() {
+        this.measure();
         const regions = this.data.getCountryRegions(this.data.playerCountry);
         let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
         for (const region of regions) {
@@ -147,43 +175,68 @@ class MapEngine {
         }
         if (minX === Infinity) { minX = 560; minY = 200; maxX = 640; maxY = 260; }
 
-        const w = window.innerWidth, h = window.innerHeight;
-        const base = Math.min(w / 1200, h / 800);
-        const offsetX = (w - 1200 * base) / 2;
-        const offsetY = (h - 800 * base) / 2;
-
-        const spanX = Math.max(maxX - minX, 6) * base;
-        const spanY = Math.max(maxY - minY, 6) * base;
-        const desired = Math.min((w * 0.55) / spanX, (h * 0.55) / spanY);
-        this.scale = Math.min(Math.max(desired, 2.5), 30);
-
-        const cx = offsetX + ((minX + maxX) / 2) * base;
-        const cy = offsetY + ((minY + maxY) / 2) * base;
-        this.translateX = w / 2 - cx * this.scale;
-        this.translateY = h / 2 - cy * this.scale;
-        this.applyTransform();
+        const spanX = Math.max(maxX - minX, 5);
+        const spanY = Math.max(maxY - minY, 5);
+        const fit = Math.min(
+            (this.rect.width * 0.62) / (spanX * this.baseScale),
+            (this.rect.height * 0.55) / (spanY * this.baseScale));
+        this.scale = Math.min(Math.max(fit, 2.5), 30);
+        this.centerOn((minX + maxX) / 2, (minY + maxY) / 2);
     }
 
-    applyTransform() {
-        this.svg.style.transformOrigin = '0 0';
-        this.svg.style.transform =
-            `translate3d(${this.translateX}px, ${this.translateY}px, 0) scale(${this.scale})`;
-        // Толщина линий и подписи городов задаются в единицах карты, а карта
-        // масштабируется целиком. Держим их постоянными на экране.
-        this.svg.style.setProperty('--sw', (1 / this.scale).toFixed(4) + 'px');
+    centerOn(x, y) {
+        const k = this.pxPerUnit;
+        this.camX = x - this.rect.width / (2 * k);
+        this.camY = y - this.rect.height / (2 * k);
+        this.applyCamera();
     }
 
-    // Один общий путь для колеса, щипка и жестов: меняем масштаб,
-    // удерживая точку под курсором на месте.
+    applyCamera() {
+        const k = this.pxPerUnit;
+        const viewW = this.rect.width / k;
+        const viewH = this.rect.height / k;
+        this.svg.setAttribute('viewBox',
+            `${this.camX.toFixed(3)} ${this.camY.toFixed(3)} ${viewW.toFixed(3)} ${viewH.toFixed(3)}`);
+        // Толщина линий и подписи заданы в единицах карты — держим их
+        // постоянными на экране: один экранный пиксель = 1/k единиц.
+        this.svg.style.setProperty('--sw', (1 / k).toFixed(5) + 'px');
+        this.cull();
+    }
+
+    // Всё, что за краем экрана, из отрисовки убираем: при камере на viewBox
+    // браузер каждый кадр рисует вектор заново, и лишняя геометрия стоит кадров.
+    cull() {
+        const k = this.pxPerUnit;
+        const padX = (this.rect.width / k) * 0.15 + 2;
+        const padY = (this.rect.height / k) * 0.15 + 2;
+        const x1 = this.camX - padX, x2 = this.camX + this.rect.width / k + padX;
+        const y1 = this.camY - padY, y2 = this.camY + this.rect.height / k + padY;
+
+        for (const list of [this.cullRegions, this.cullLabels, this.cullCities]) {
+            for (const item of list) {
+                const visible = item.x + item.w >= x1 && item.x <= x2
+                             && item.y + item.h >= y1 && item.y <= y2;
+                if (visible !== item.vis) {
+                    item.vis = visible;
+                    item.el.style.display = visible ? '' : 'none';
+                }
+            }
+        }
+    }
+
+    // Меняем масштаб, удерживая точку под курсором на месте.
     zoomAt(newScale, pivotX, pivotY) {
         const clamped = Math.min(Math.max(newScale, this.minScale), this.maxScale);
         if (clamped === this.scale) return;
         const wasRegional = this.isRegionalZoom;
-        const ratio = clamped / this.scale;
-        this.translateX = pivotX - (pivotX - this.translateX) * ratio;
-        this.translateY = pivotY - (pivotY - this.translateY) * ratio;
+        const anchor = this.clientToMap(pivotX, pivotY);
+
         this.scale = clamped;
-        this.applyTransform();
+        const k = this.pxPerUnit;
+        this.camX = anchor.x - (pivotX - this.rect.left) / k;
+        this.camY = anchor.y - (pivotY - this.rect.top) / k;
+
+        this.applyCamera();
         this.applyDetail();
         this.scheduleLabelUpdate();
         if (wasRegional !== this.isRegionalZoom) {
@@ -234,6 +287,7 @@ class MapEngine {
 
         this.container.addEventListener('wheel', e => {
             e.preventDefault();
+            this.measure();
             const factor = Math.exp(-e.deltaY * 0.0016);
             this.zoomAt(this.scale * factor, e.clientX, e.clientY);
         }, { passive: false });
@@ -245,10 +299,11 @@ class MapEngine {
             this.container.setPointerCapture(e.pointerId);
             this.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
             if (this.pointers.size === 1) {
+                this.measure();
                 this.isDragging = true;
                 this.wasDragging = false;
-                this.dragStartX = e.clientX - this.translateX;
-                this.dragStartY = e.clientY - this.translateY;
+                this.dragCamX = this.camX;
+                this.dragCamY = this.camY;
                 this.downX = e.clientX;
                 this.downY = e.clientY;
             } else {
@@ -274,9 +329,10 @@ class MapEngine {
             if (Math.abs(e.clientX - this.downX) > 4 || Math.abs(e.clientY - this.downY) > 4) {
                 this.wasDragging = true;
             }
-            this.translateX = e.clientX - this.dragStartX;
-            this.translateY = e.clientY - this.dragStartY;
-            this.applyTransform();
+            const k = this.pxPerUnit;
+            this.camX = this.dragCamX - (e.clientX - this.downX) / k;
+            this.camY = this.dragCamY - (e.clientY - this.downY) / k;
+            this.applyCamera();
         });
 
         const release = e => {
@@ -291,7 +347,12 @@ class MapEngine {
         this.container.addEventListener('pointerup', release);
         this.container.addEventListener('pointercancel', release);
 
-        window.addEventListener('resize', () => this.applyTransform());
+        window.addEventListener('resize', () => {
+            const cx = this.camX + this.rect.width / (2 * this.pxPerUnit);
+            const cy = this.camY + this.rect.height / (2 * this.pxPerUnit);
+            this.measure();
+            this.centerOn(cx, cy);
+        });
     }
 
     pinchState() {
@@ -367,6 +428,7 @@ class MapEngine {
     createRegionLabels() {
         this.regionLabelLayer.innerHTML = '';
         this.regionLabels = [];
+        this.cullLabels = [];
         const fragment = document.createDocumentFragment();
 
         for (const region of Object.values(this.data.regions)) {
@@ -382,6 +444,7 @@ class MapEngine {
             text.textContent = region.name;
             fragment.appendChild(text);
             this.regionLabels.push({ el: text, fit: fitByWidth });
+            this.cullLabels.push({ el: text, x: region.cx, y: region.cy, w: 0, h: 0, vis: true });
         }
         this.regionLabelLayer.appendChild(fragment);
         this.updateLabelVisibility();
@@ -407,6 +470,7 @@ class MapEngine {
     // --- города ------------------------------------------------------------
     drawCities() {
         this.cityLayer.innerHTML = '';
+        this.cullCities = [];
         const fragment = document.createDocumentFragment();
         for (const city of CitiesDB) {
             const group = document.createElementNS('http://www.w3.org/2000/svg', 'g');
@@ -431,6 +495,7 @@ class MapEngine {
                 group.appendChild(label);
             }
             fragment.appendChild(group);
+            this.cullCities.push({ el: group, x: city.x, y: city.y, w: 0, h: 0, vis: true });
         }
         this.cityLayer.appendChild(fragment);
     }
