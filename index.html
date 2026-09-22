@@ -2,8 +2,16 @@
 <html lang="ru">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
 <title>Grand Strategy</title>
+<meta name="theme-color" content="#0b1221">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Strategy">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icons/icon-180.png">
+<link rel="icon" type="image/png" href="icons/icon-192.png">
 <style>
 :root {
     --ui-bg: rgba(17, 24, 39, 0.96);
@@ -286,6 +294,7 @@ button { font-family: inherit; }
 #recruit-btn { background: var(--ui-accent); }
 #init-move-btn { background: #8b5cf6; }
 #init-attack-btn { background: var(--ui-danger); }
+#init-disband-btn { background: #475569; }
 .action-btn:hover { filter: brightness(1.12); }
 
 #army-action-panel { display: none; margin-top: 10px; padding-top: 14px; border-top: 1px solid rgba(255,255,255,0.1); }
@@ -435,35 +444,220 @@ input[type=range] { width: 100%; cursor: pointer; accent-color: var(--ui-accent)
     #start-game-btn { position: sticky; bottom: 10px; padding: 13px; }
 }
 
-@media (max-width: 768px) {
-    #top-bar { flex-wrap: wrap; padding: 6px 8px; font-size: 12px; gap: 6px; justify-content: center; }
-    .stat-group { flex: 1 1 100%; justify-content: space-between; gap: 8px; }
-    .stat-item { white-space: nowrap; }
-    .top-btn { padding: 6px 10px; font-size: 12px; }
 
-    /* Боковая панель превращается в шторку снизу */
-    #side-panel {
-        width: 100%; height: 62vh; left: 0; top: auto; bottom: -75vh;
-        background: #0f172a;   /* непрозрачно: сквозь полупрозрачную карту не читается */
-        border-radius: 14px 14px 0 0; border-left: 1px solid var(--ui-border);
-        box-shadow: 0 -8px 26px rgba(0,0,0,0.7);
-        transition: bottom 0.25s ease; padding: 16px 16px 26px;
+/* ================= НОВЫЕ ЭЛЕМЕНТЫ ================= */
+:root { --nav-h: 0px; --safe-b: env(safe-area-inset-bottom, 0px); --safe-t: env(safe-area-inset-top, 0px); }
+body { overscroll-behavior: none; }
+#top-bar { padding-top: calc(10px + var(--safe-t)); }
+.nav-btn .ico { display: none; }
+.war-badge {
+    display: none; min-width: 18px; height: 18px; padding: 0 5px; margin-left: 6px;
+    border-radius: 9px; background: var(--ui-danger); color: #fff; font-size: 11px;
+    align-items: center; justify-content: center; font-weight: 800;
+}
+
+.tag {
+    display: inline-block; padding: 3px 8px; margin: 0 6px 6px 0; border-radius: 12px;
+    font-size: 0.78em; background: rgba(255,255,255,0.08); color: #cbd5e1;
+}
+.tag.war { background: rgba(239,68,68,0.18); color: #fca5a5; }
+.tag.peace { background: rgba(74,222,128,0.12); color: #86efac; }
+.tag.truce { background: rgba(250,204,21,0.14); color: #fde68a; }
+.tag.own { background: rgba(59,130,246,0.2); color: #bfdbfe; }
+.tag.capital { background: rgba(251,191,36,0.18); color: #fcd34d; }
+#panel-tags { margin: -4px 0 10px; }
+.hint { color: var(--ui-muted); font-size: 0.84em; margin: 6px 0 10px; line-height: 1.35; }
+.war-summary { color: #fca5a5; font-size: 0.86em; margin: 12px 0 8px; }
+#diplo-actions:not(:empty) { margin-top: 14px; padding-top: 12px; border-top: 1px solid rgba(255,255,255,0.1); }
+.action-btn small { display: block; font-weight: 500; opacity: 0.8; font-size: 0.8em; margin-top: 2px; }
+.action-btn.war { display: block; background: var(--ui-danger); }
+.action-btn.peace { display: block; background: #0f766e; }
+.action-btn:disabled { opacity: 0.45; cursor: not-allowed; filter: none; }
+.spy-btn {
+    background: #8b5cf6; color: #fff; border: none; padding: 11px; border-radius: 8px;
+    cursor: pointer; font-weight: 700; width: 100%;
+}
+.spy-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* строки выбора количества: крупные кнопки вместо клавиатуры */
+.stepper-row { background: rgba(0,0,0,0.3); border-radius: 10px; padding: 10px 12px; margin-bottom: 8px; }
+.stepper-row.unavailable { opacity: 0.45; }
+.stepper-head { display: flex; flex-direction: column; gap: 2px; margin-bottom: 8px; }
+.stepper-label { font-weight: 700; white-space: nowrap; }
+.stepper-sub { color: var(--ui-muted); font-size: 0.78em; }
+.stepper-controls { display: flex; align-items: center; gap: 8px; }
+.step-btn {
+    width: 42px; height: 42px; border-radius: 10px; border: none; cursor: pointer;
+    background: var(--ui-border); color: #fff; font-size: 1.4em; font-weight: 700;
+    touch-action: manipulation;
+}
+.step-btn:active { background: var(--ui-accent); }
+.step-value { min-width: 44px; text-align: center; font-size: 1.2em; font-weight: 800; }
+.step-chips { margin-left: auto; display: flex; gap: 6px; }
+.chip {
+    height: 34px; min-width: 40px; padding: 0 10px; border-radius: 17px; cursor: pointer;
+    background: rgba(255,255,255,0.08); color: #e2e8f0; border: 1px solid rgba(255,255,255,0.14);
+    font-weight: 700; touch-action: manipulation;
+}
+.chip:active { background: var(--ui-accent); }
+#recruit-panel { display: none; margin-top: 10px; }
+#recruit-total { margin: 6px 0 10px; font-size: 0.9em; }
+#confirm-recruit-btn {
+    width: 100%; background: var(--ui-accent); color: #fff; border: none; padding: 12px;
+    border-radius: 8px; font-weight: 700; cursor: pointer; margin-top: 4px;
+}
+#cancel-recruit-btn {
+    width: 100%; margin-top: 6px; background: transparent; color: var(--ui-muted);
+    border: 1px solid var(--ui-muted); padding: 10px; border-radius: 8px; cursor: pointer;
+}
+.sheet-handle { display: none; }
+
+/* кнопки карты */
+#map-controls {
+    position: absolute; right: 16px; bottom: 24px; display: flex; flex-direction: column; gap: 8px;
+    transition: opacity 0.2s;
+}
+.map-btn {
+    width: 46px; height: 46px; border-radius: 12px; border: 1px solid var(--ui-border);
+    background: var(--ui-bg); color: #fff; font-size: 1.35em; font-weight: 700; cursor: pointer;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.5); touch-action: manipulation;
+}
+.map-btn:active { background: var(--ui-accent); }
+
+/* режим выбора цели */
+#target-banner {
+    position: absolute; left: 50%; top: 74px; transform: translate(-50%, -10px);
+    display: flex; align-items: center; gap: 12px; padding: 10px 10px 10px 16px;
+    background: rgba(15,23,42,0.97); border: 1px solid var(--ui-accent); border-radius: 12px;
+    box-shadow: 0 8px 22px rgba(0,0,0,0.6); font-weight: 700; white-space: nowrap;
+    opacity: 0; pointer-events: none; transition: opacity 0.2s, transform 0.2s;
+}
+#target-banner.visible { opacity: 1; pointer-events: auto; transform: translate(-50%, 0); }
+#target-cancel {
+    background: rgba(255,255,255,0.1); color: #fff; border: none; border-radius: 8px;
+    padding: 8px 12px; font-weight: 700; cursor: pointer;
+}
+
+/* план хода: сворачивается по нажатию на заголовок */
+#orders-toggle { cursor: pointer; display: flex; justify-content: space-between; align-items: center; }
+#orders-count {
+    background: var(--ui-accent); color: #fff; border-radius: 10px; padding: 1px 8px; font-size: 12px;
+}
+#orders-panel.collapsed #orders-list { display: none; }
+#orders-panel.collapsed h3 { margin: 0; border: none; padding: 0; }
+
+/* дипломатия, решения, правительство */
+.diplo-influence { margin-bottom: 6px; }
+.diplo-row {
+    display: flex; justify-content: space-between; align-items: center; gap: 10px;
+    background: rgba(0,0,0,0.3); border-radius: 8px; padding: 10px 12px; margin-bottom: 6px;
+}
+.mini-btn {
+    border: none; border-radius: 8px; padding: 9px 14px; font-weight: 700; cursor: pointer;
+    background: var(--ui-accent); color: #fff; white-space: nowrap; touch-action: manipulation;
+}
+.mini-btn.war { background: var(--ui-danger); }
+.mini-btn.peace { background: #0f766e; }
+.mini-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.event-list { display: flex; flex-direction: column; gap: 6px; margin-bottom: 4px; }
+.event { background: rgba(251,191,36,0.1); border-left: 3px solid var(--ui-accent-country); padding: 9px 10px; border-radius: 6px; font-weight: 600; }
+.log-detail, .log-power { font-size: 0.82em; color: #cbd5e1; margin-top: 4px; }
+#decision-text, #gameover-text { color: #cbd5e1; line-height: 1.45; margin: 0 0 16px; }
+.decision-buttons { display: flex; gap: 10px; }
+.decision-buttons button { flex: 1; padding: 13px; border-radius: 10px; border: none; font-weight: 700; cursor: pointer; }
+#decision-accept, #gameover-new-btn { background: #0f766e; color: #fff; }
+#decision-decline { background: rgba(255,255,255,0.1); color: #fff; }
+.budget-row { display: flex; justify-content: space-between; padding: 5px 0; border-bottom: 1px dashed rgba(255,255,255,0.08); }
+.budget-row.total { font-weight: 800; border-bottom: none; padding-top: 8px; }
+.research-row { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px dashed rgba(255,255,255,0.08); }
+#gov-tax-note { font-size: 0.82em; color: var(--ui-muted); margin-top: 6px; }
+.gov-menu { display: flex; gap: 10px; margin-top: 14px; }
+.gov-menu button { flex: 1; padding: 11px; border-radius: 8px; border: 1px solid var(--ui-border); background: rgba(255,255,255,0.06); color: #fff; font-weight: 700; cursor: pointer; }
+#continue-box {
+    display: none; margin-bottom: 14px; padding: 12px 14px; border-radius: 10px;
+    background: rgba(59,130,246,0.12); border: 1px solid rgba(59,130,246,0.4);
+}
+#continue-box .continue-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+#continue-info { color: #cbd5e1; font-size: 0.9em; }
+#continue-btn { background: var(--ui-accent); color: #fff; border: none; border-radius: 8px; padding: 11px 16px; font-weight: 800; cursor: pointer; white-space: nowrap; }
+.scenario-box { margin-top: 0; background: rgba(251,191,36,0.06); border-color: rgba(251,191,36,0.25); }
+.scenario-box .cheat-label { color: #fde68a; }
+.scenario-box .cheat-text-wrap b { color: #fbbf24; }
+.scenario-box input { accent-color: #f59e0b; }
+
+/* территория противника обведена красным */
+#world-map .region.enemy { stroke: #ef4444 !important; stroke-width: calc(var(--sw) * 1.6); }
+
+/* ================= ТЕЛЕФОН ================= */
+@media (max-width: 768px) {
+    :root { --nav-h: calc(62px + var(--safe-b)); }
+
+    #top-bar { padding: calc(6px + var(--safe-t)) 10px 6px; font-size: 12px; }
+    #top-bar .stats { flex: 1 1 100%; justify-content: space-between; gap: 8px; }
+    .stat-item { white-space: nowrap; }
+
+    /* кнопки уезжают в нижнюю навигацию — до них достаёт большой палец */
+    #action-bar {
+        position: fixed; left: 0; right: 0; bottom: 0; height: var(--nav-h);
+        padding: 6px 8px var(--safe-b); box-sizing: border-box; gap: 6px;
+        display: grid; grid-template-columns: 1fr 1fr 1fr 1.3fr;
+        background: rgba(11,18,33,0.98); border-top: 1px solid var(--ui-border); z-index: 30;
     }
-    #side-panel.active { bottom: 0; }
-    #side-panel h2 { font-size: 1.3em; }
+    .nav-btn {
+        display: flex; flex-direction: column; align-items: center; justify-content: center;
+        gap: 2px; padding: 4px 2px; font-size: 11px; border-radius: 10px; position: relative;
+        background: transparent; border: none; color: #cbd5e1;
+    }
+    .nav-btn .ico { display: block; font-size: 20px; line-height: 1; }
+    .nav-btn.warning { background: transparent; color: var(--ui-accent-country); }
+    #end-turn-btn { background: var(--ui-accent); color: #fff; font-size: 12px; }
+    .war-badge { position: absolute; top: 2px; right: 14%; margin: 0; }
+
+    #map-controls { right: 10px; bottom: calc(var(--nav-h) + 12px); }
+    body.sheet-open #map-controls { opacity: 0; pointer-events: none; }
+
+    /* карточка — шторка над нижней навигацией, смахивается вниз */
+    #side-panel {
+        width: 100%; height: 58vh; max-height: none; left: 0; top: auto;
+        bottom: calc(-70vh - var(--nav-h));
+        background: #0f172a;
+        border-radius: 16px 16px 0 0; border-left: 1px solid var(--ui-border);
+        box-shadow: 0 -8px 26px rgba(0,0,0,0.7);
+        transition: bottom 0.25s ease, transform 0.2s ease; padding: 6px 16px 26px; z-index: 25;
+    }
+    #side-panel.active { bottom: var(--nav-h); }
+    .sheet-handle {
+        display: block; width: 100%; height: 26px; margin: 0 auto 4px; cursor: grab; position: relative;
+    }
+    .sheet-handle::after {
+        content: ''; position: absolute; left: 50%; top: 9px; width: 44px; height: 5px;
+        margin-left: -22px; border-radius: 3px; background: #475569;
+    }
+    #side-panel h2 { font-size: 1.3em; padding-right: 40px; }
+    #side-panel .close-btn { top: 30px; }
     .info-box { padding: 9px; }
     .info-box .val { font-size: 1.15em; }
-    .close-btn { width: 34px; height: 34px; }
+    .close-btn { width: 36px; height: 36px; }
+    .action-btn { padding: 13px; font-size: 1em; }
 
-    /* План хода не должен закрывать пол-экрана */
     #orders-panel {
-        right: 8px; left: 8px; top: auto; bottom: 8px; width: auto;
-        max-height: 30vh; overflow-y: auto; padding: 10px 12px;
+        left: 8px; right: auto; top: auto; bottom: calc(var(--nav-h) + 10px);
+        width: min(300px, calc(100vw - 80px)); max-height: 32vh; overflow-y: auto; padding: 10px 12px;
     }
+    body.sheet-open #orders-panel { display: none !important; }
     #orders-list { font-size: 12px; }
+    #target-banner { top: calc(56px + var(--safe-t)); max-width: 94vw; }
     #zoom-indicator { display: none; }
-    .modal-content { width: 100%; max-width: 100%; max-height: 90vh; border-radius: 12px; padding: 16px; }
-    #toast { bottom: 16px; font-size: 0.9em; padding: 10px 16px; max-width: 88vw; text-align: center; }
+    .modal { align-items: flex-end; padding-bottom: 0; }
+    .modal-content {
+        width: 100%; max-width: 100%; max-height: 88vh; border-radius: 16px 16px 0 0;
+        padding: 16px 16px calc(16px + var(--safe-b));
+    }
+    /* сообщения — сверху, чтобы их не закрывали план хода и шторка */
+    #toast {
+        top: calc(58px + var(--safe-t)); bottom: auto; font-size: 0.9em; padding: 10px 16px;
+        max-width: 88vw; text-align: center; white-space: normal; z-index: 40;
+    }
 }
 
 @media (max-width: 480px) {
@@ -482,6 +676,12 @@ input[type=range] { width: 100%; cursor: pointer; accent-color: var(--ui-accent)
         <h1>GRAND STRATEGY</h1>
         <div class="start-layout">
             <div class="country-column">
+                <div id="continue-box">
+                    <div class="continue-row">
+                        <div><b>Сохранённая партия</b><div id="continue-info"></div></div>
+                        <button id="continue-btn">Продолжить</button>
+                    </div>
+                </div>
                 <input id="start-search" type="search" placeholder="Поиск страны…" autocomplete="off">
                 <div class="country-list" id="start-country-list"></div>
             </div>
@@ -491,16 +691,25 @@ input[type=range] { width: 100%; cursor: pointer; accent-color: var(--ui-accent)
                     <img id="info-flag" src="" alt="Флаг" class="country-flag">
                     <svg id="info-minimap" class="country-minimap"></svg>
                 </div>
-                <div class="country-info-row" id="info-capital"><strong>Крупнейшая область:</strong> <span>—</span></div>
+                <div class="country-info-row" id="info-capital"><strong>Столица:</strong> <span>—</span></div>
                 <div class="country-info-row" id="info-pop"><strong>Население:</strong> <span>—</span></div>
                 <div class="country-info-row" id="info-area"><strong>Площадь:</strong> <span>—</span></div>
                 <div class="country-info-row" id="info-regions"><strong>Областей:</strong> <span>—</span></div>
+                <div class="cheat-box scenario-box">
+                    <label class="cheat-label">
+                        <input type="checkbox" id="scenario-toggle">
+                        <span class="cheat-text-wrap">
+                            <b>Сценарий 2024</b>
+                            <span>С первого хода идёт война России и Украины</span>
+                        </span>
+                    </label>
+                </div>
                 <div class="cheat-box">
                     <label class="cheat-label">
                         <input type="checkbox" id="cheat-toggle">
                         <span class="cheat-text-wrap">
                             <b>Чит-код: режим бога</b>
-                            <span>Гарантированная победа без потерь</span>
+                            <span>Ваши атаки всегда успешны и без потерь</span>
                         </span>
                     </label>
                 </div>
@@ -516,49 +725,80 @@ input[type=range] { width: 100%; cursor: pointer; accent-color: var(--ui-accent)
 
 <div id="ui-layer">
     <div id="top-bar" class="ui-element">
-        <div class="stat-group">
+        <div class="stat-group stats">
             <div class="stat-item"><span>Казна:</span> $<span id="glob-money">0</span>
                 <span id="glob-net" style="font-size:0.85em;font-weight:700;margin-left:4px;"></span></div>
             <div class="stat-item"><span>Влияние:</span> <span id="glob-influence">0</span></div>
             <div class="stat-item"><span>Дата:</span> <span id="glob-date" style="color:#fff;">1 Января 2024</span></div>
         </div>
-        <div class="stat-group">
-            <button id="log-btn" class="top-btn">Журнал</button>
-            <button id="gov-btn" class="top-btn warning">Правительство</button>
-            <button id="end-turn-btn" class="top-btn primary">Конец хода</button>
+        <div class="stat-group" id="action-bar">
+            <button id="diplo-btn" class="top-btn nav-btn"><span class="ico">🤝</span><span class="lbl">Дипломатия</span><span id="war-badge" class="war-badge"></span></button>
+            <button id="log-btn" class="top-btn nav-btn"><span class="ico">📜</span><span class="lbl">Журнал</span></button>
+            <button id="gov-btn" class="top-btn nav-btn warning"><span class="ico">🏛️</span><span class="lbl">Правительство</span></button>
+            <button id="end-turn-btn" class="top-btn nav-btn primary"><span class="ico">⏭️</span><span class="lbl">Конец хода</span></button>
         </div>
     </div>
 
+    <div id="map-controls" class="ui-element">
+        <button class="map-btn" id="zoom-in-btn" aria-label="Приблизить">+</button>
+        <button class="map-btn" id="zoom-out-btn" aria-label="Отдалить">−</button>
+        <button class="map-btn" id="home-btn" aria-label="К моей стране">◎</button>
+    </div>
+
+    <div id="target-banner" class="ui-element">
+        <span id="target-text">Выберите цель</span>
+        <button id="target-cancel">Отмена</button>
+    </div>
+
+    <!-- ПРАВИТЕЛЬСТВО -->
     <div id="gov-modal" class="modal ui-element">
         <div class="modal-content">
             <div class="modal-header">
-                <h2>Управление государством</h2>
+                <h2>Правительство</h2>
                 <button class="close-btn" id="close-gov-btn">✕</button>
             </div>
             <div class="modal-body">
                 <div class="gov-section">
-                    <h3>Экономика</h3>
+                    <h3>Налоги</h3>
                     <div style="display:flex;justify-content:space-between;">
-                        <span>Налоговая ставка:</span>
+                        <span>Налоговая ставка</span>
                         <span id="gov-tax-val" style="color:var(--ui-accent-country);font-weight:700;">5%</span>
                     </div>
-                    <input type="range" id="gov-tax-slider" min="0.01" max="0.20" step="0.01" value="0.05">
+                    <input type="range" id="gov-tax-slider" min="0.01" max="0.30" step="0.01" value="0.05">
+                    <div id="gov-tax-note"></div>
                 </div>
                 <div class="gov-section">
-                    <h3>Вооружённые силы (резерв)</h3>
-                    <div id="gov-army-container"></div>
+                    <h3>Бюджет на ход</h3>
+                    <div id="gov-budget"></div>
                 </div>
-                <div class="gov-summary">Прогноз бюджета:<br>
-                    <span id="gov-proj-net" style="font-size:1.25em;display:block;margin-top:4px;">$0</span>
+                <div class="gov-section">
+                    <h3>Исследования</h3>
+                    <div id="gov-research"></div>
+                </div>
+                <div class="gov-menu">
+                    <button id="save-game-btn">💾 Сохранить</button>
+                    <button id="new-game-btn">🔄 Новая игра</button>
                 </div>
             </div>
         </div>
     </div>
 
+    <!-- ДИПЛОМАТИЯ -->
+    <div id="diplo-modal" class="modal ui-element">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Дипломатия</h2>
+                <button class="close-btn" id="close-diplo-btn">✕</button>
+            </div>
+            <div id="diplo-content" class="modal-body"></div>
+        </div>
+    </div>
+
+    <!-- ИТОГИ ХОДА -->
     <div id="summary-modal" class="modal ui-element">
         <div class="modal-content">
             <div class="modal-header">
-                <h2 id="summary-title" style="color:#fff;">Отчёт за неделю</h2>
+                <h2 id="summary-title" style="color:#fff;">Итоги хода</h2>
                 <button class="close-btn" id="close-summary-btn">✕</button>
             </div>
             <div id="summary-financial"></div>
@@ -566,6 +806,7 @@ input[type=range] { width: 100%; cursor: pointer; accent-color: var(--ui-accent)
         </div>
     </div>
 
+    <!-- ЖУРНАЛ -->
     <div id="history-modal" class="modal ui-element">
         <div class="modal-content wide">
             <div class="modal-header">
@@ -576,7 +817,30 @@ input[type=range] { width: 100%; cursor: pointer; accent-color: var(--ui-accent)
         </div>
     </div>
 
+    <!-- РЕШЕНИЕ (предложение мира и т.п.) -->
+    <div id="decision-modal" class="modal ui-element">
+        <div class="modal-content">
+            <div class="modal-header"><h2 id="decision-title">Решение</h2></div>
+            <p id="decision-text"></p>
+            <div class="decision-buttons">
+                <button id="decision-decline">Нет</button>
+                <button id="decision-accept">Да</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- КОНЕЦ ИГРЫ -->
+    <div id="gameover-modal" class="modal ui-element">
+        <div class="modal-content">
+            <div class="modal-header"><h2>Государство пало</h2></div>
+            <p id="gameover-text"></p>
+            <div class="decision-buttons"><button id="gameover-new-btn">Новая игра</button></div>
+        </div>
+    </div>
+
+    <!-- КАРТОЧКА ОБЛАСТИ / СТРАНЫ -->
     <div id="side-panel" class="ui-element">
+        <div class="sheet-handle" id="sheet-handle" aria-label="Закрыть"></div>
         <button class="close-btn" id="close-panel-btn">✕</button>
         <div id="panel-badge" class="badge">Уровень</div>
         <h2 id="panel-title">Название</h2>
@@ -584,6 +848,7 @@ input[type=range] { width: 100%; cursor: pointer; accent-color: var(--ui-accent)
             <span id="panel-color" class="owner-flag"></span>
             Владелец: <span id="panel-owner" style="color:#fff;font-weight:700;">Страна</span>
         </div>
+        <div id="panel-tags"></div>
 
         <h3 class="section-title" style="margin-top:0;">Экономика</h3>
         <div class="info-grid">
@@ -594,15 +859,27 @@ input[type=range] { width: 100%; cursor: pointer; accent-color: var(--ui-accent)
         </div>
 
         <div id="region-army-container"></div>
+        <div id="diplo-actions"></div>
 
         <div id="action-buttons-container">
-            <button id="recruit-btn" class="action-btn">Планировать рекрутинг</button>
-            <button id="init-move-btn" class="action-btn">Перебросить войска</button>
-            <button id="init-attack-btn" class="action-btn">Начать наступление</button>
+            <button id="recruit-btn" class="action-btn">🏭 Набрать войска</button>
+            <button id="init-move-btn" class="action-btn">🚚 Перебросить войска</button>
+            <button id="init-attack-btn" class="action-btn">⚔️ Наступление</button>
+            <button id="init-disband-btn" class="action-btn">🏳️ Распустить войска</button>
+            <div id="action-hint" class="hint"></div>
+        </div>
+
+        <div id="recruit-panel">
+            <h3 class="section-title" style="margin-top:0;">Набор войск</h3>
+            <div id="recruit-capacity" class="hint"></div>
+            <div id="recruit-list"></div>
+            <div id="recruit-total"></div>
+            <button id="confirm-recruit-btn">Заказать</button>
+            <button id="cancel-recruit-btn">Отмена</button>
         </div>
 
         <div id="army-action-panel">
-            <h3 class="section-title" style="margin-top:0;">Выделение войск</h3>
+            <h3 id="action-panel-title" class="section-title" style="margin-top:0;">Выделение войск</h3>
             <div id="action-army-inputs"></div>
             <button id="confirm-action-btn">Выбрать цель</button>
             <button id="cancel-action-btn">Отмена</button>
@@ -610,7 +887,7 @@ input[type=range] { width: 100%; cursor: pointer; accent-color: var(--ui-accent)
     </div>
 
     <div id="orders-panel" class="ui-element">
-        <h3>План на неделю</h3>
+        <h3 id="orders-toggle"><span>План на ход</span><span id="orders-count">0</span></h3>
         <ul id="orders-list"></ul>
     </div>
 
@@ -629,6 +906,7 @@ input[type=range] { width: 100%; cursor: pointer; accent-color: var(--ui-accent)
 <!-- Движок -->
 <script src="js/UnitsDB.js"></script>
 <script src="js/GameData.js"></script>
+<script src="js/AI.js"></script>
 <script src="js/MapEngine.js"></script>
 <script src="js/UIManager.js"></script>
 <script src="js/GameLoop.js"></script>

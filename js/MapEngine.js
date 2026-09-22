@@ -149,6 +149,8 @@ class MapEngine {
 
     // --- раскраска ----------------------------------------------------
     refreshColors() {
+        const player = this.data.playerCountry;
+        const enemies = new Set(this.data.enemiesOf(player));
         for (const [id, path] of this.paths) {
             const region = this.data.getRegion(id);
             if (!region) continue;
@@ -159,6 +161,9 @@ class MapEngine {
                 path.style.fill = country.color;
                 path.style.stroke = country.color;
             }
+            // территория противника обведена красным — фронт видно сразу
+            path.classList.toggle('enemy', enemies.has(region.owner));
+            path.classList.toggle('own', region.owner === player);
         }
         this.drawArmyMarkers();
     }
@@ -182,7 +187,7 @@ class MapEngine {
         };
     }
 
-    centerOnPlayer() {
+    centerOnPlayer(animated = false) {
         this.measure();
         const regions = this.data.getCountryRegions(this.data.playerCountry);
         let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
@@ -198,8 +203,92 @@ class MapEngine {
         const aspect = this.rect.height / this.rect.width;
         const wantView = Math.max(spanX / 0.8, (spanY / 0.8) / aspect);
         const view = Math.min(Math.max(wantView, this.minView), this.maxView);
-        this.scale = this.rect.width / (view * this.baseScale);
-        this.centerOn((minX + maxX) / 2, (minY + maxY) / 2);
+        const scale = this.rect.width / (view * this.baseScale);
+        const cx = (minX + maxX) / 2, cy = (minY + maxY) / 2;
+        if (animated) {
+            const safe = this.safeRect();
+            this.animateTo({ x: cx, y: cy }, { x: (safe.left + safe.right) / 2, y: (safe.top + safe.bottom) / 2 }, scale);
+        } else {
+            this.scale = scale;
+            this.centerOn(cx, cy);
+        }
+    }
+
+    // Часть экрана, не закрытая панелями: верхней полосой, нижней навигацией
+    // на телефоне и открытой карточкой (шторкой снизу или колонкой слева).
+    safeRect() {
+        const w = window.innerWidth, h = window.innerHeight;
+        const topBar = document.getElementById('top-bar');
+        const top = topBar ? topBar.getBoundingClientRect().bottom : 0;
+        let bottom = h, left = 0;
+        const nav = document.getElementById('action-bar');
+        if (nav) {
+            const r = nav.getBoundingClientRect();
+            if (r.top > h / 2) bottom = r.top;
+        }
+        if (document.body.classList.contains('sheet-open')) {
+            if (w <= 768) bottom -= h * 0.58;
+            else left = 340;
+        }
+        return { left, top, right: w, bottom: Math.max(top + 80, bottom) };
+    }
+
+    screenOf(x, y) {
+        const k = this.pxPerUnit;
+        return { x: (x - this.camX) * k + this.rect.left, y: (y - this.camY) * k + this.rect.top };
+    }
+
+    // Если точка карты спрятана под панелью — плавно выводим её в видимую часть.
+    ensureVisible(x, y) {
+        this.measure();
+        const safe = this.safeRect();
+        const p = this.screenOf(x, y);
+        const margin = 30;
+        if (p.x > safe.left + margin && p.x < safe.right - margin && p.y > safe.top + margin && p.y < safe.bottom - margin) return;
+        this.animateTo({ x, y }, { x: (safe.left + safe.right) / 2, y: (safe.top + safe.bottom) / 2 }, this.scale);
+    }
+
+    zoomBy(factor) {
+        this.measure();
+        const safe = this.safeRect();
+        const pivot = { x: (safe.left + safe.right) / 2, y: (safe.top + safe.bottom) / 2 };
+        const anchor = this.clientToMap(pivot.x, pivot.y);
+        this.animateTo(anchor, pivot, this.clampScale(this.scale * factor));
+    }
+
+    clampScale(scale) {
+        const minScale = this.rect.width / (this.maxView * this.baseScale);
+        const maxScale = this.rect.width / (this.minView * this.baseScale);
+        return Math.min(Math.max(scale, minScale), maxScale);
+    }
+
+    // Плавный перелёт: точка карты `point` едет к экранной точке `screen`,
+    // масштаб меняется геометрически — так движение выглядит равномерным.
+    animateTo(point, screen, targetScale, ms = 280) {
+        cancelAnimationFrame(this.animFrame);
+        const from = this.screenOf(point.x, point.y);
+        const s0 = this.scale, s1 = targetScale;
+        const wasRegional = this.isRegionalZoom;
+        const t0 = performance.now();
+        const step = now => {
+            const t = Math.min(1, (now - t0) / ms);
+            const e = 1 - Math.pow(1 - t, 3);
+            this.scale = s0 * Math.pow(s1 / s0, e);
+            const k = this.pxPerUnit;
+            const sx = from.x + (screen.x - from.x) * e;
+            const sy = from.y + (screen.y - from.y) * e;
+            this.camX = point.x - (sx - this.rect.left) / k;
+            this.camY = point.y - (sy - this.rect.top) / k;
+            this.applyCamera();
+            this.applyDetail();
+            this.scheduleLabelUpdate();
+            if (t < 1) this.animFrame = requestAnimationFrame(step);
+            else if (wasRegional !== this.isRegionalZoom) {
+                this.updateLOD();
+                document.dispatchEvent(new CustomEvent('zoomLevelChanged', { detail: { isRegional: this.isRegionalZoom } }));
+            }
+        };
+        this.animFrame = requestAnimationFrame(step);
     }
 
     centerOn(x, y) {
@@ -244,6 +333,7 @@ class MapEngine {
 
     // Меняем масштаб, удерживая точку под курсором на месте.
     zoomAt(newScale, pivotX, pivotY) {
+        cancelAnimationFrame(this.animFrame);
         const minScale = this.rect.width / (this.maxView * this.baseScale);
         const maxScale = this.rect.width / (this.minView * this.baseScale);
         const clamped = Math.min(Math.max(newScale, minScale), maxScale);
@@ -316,6 +406,7 @@ class MapEngine {
         this.pointers = new Map();
         this.container.addEventListener('pointerdown', e => {
             if (e.pointerType === 'mouse' && e.button !== 0) return;
+            cancelAnimationFrame(this.animFrame);
             this.container.setPointerCapture(e.pointerId);
             this.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
             if (this.pointers.size === 1) {
