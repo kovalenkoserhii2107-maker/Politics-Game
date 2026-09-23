@@ -200,9 +200,76 @@ function longestSegment(mp, y) {
     return best;
 }
 
+// --- визуальный центр: полюс недоступности --------------------------
+// Точка внутри многоугольника, наиболее удалённая от его границ (алгоритм
+// polylabel: перебор клеток с отсечением по верхней оценке). В отличие от
+// центроида и середины самой широкой хорды она не липнет к краю вогнутой
+// или вытянутой области — сюда ставятся значки войск и подписи.
+function poleOfInaccessibility(mp, precision = 0.02) {
+    // берём самый крупный кусок: подпись нужна на основной суше, не на острове
+    let poly = mp[0];
+    for (const p of mp) if (Math.abs(ringArea(p[0])) > Math.abs(ringArea(poly[0]))) poly = p;
+    const [x1, y1, x2, y2] = bboxOf([poly]);
+    const w = x2 - x1, h = y2 - y1;
+    const size = Math.min(w, h);
+    if (size <= 0) return [x1, y1];
+
+    const dist = (x, y) => {       // >0 внутри, <0 снаружи
+        let inside = false, best = Infinity;
+        for (const ring of poly) {
+            for (let i = 0, n = ring.length - 1; i < n; i++) {
+                const [ax, ay] = ring[i], [bx, by] = ring[i + 1];
+                if ((ay > y) !== (by > y) && x < ((bx - ax) * (y - ay)) / (by - ay) + ax) inside = !inside;
+                best = Math.min(best, segDist2(x, y, ax, ay, bx, by));
+            }
+        }
+        return (inside ? 1 : -1) * Math.sqrt(best);
+    };
+    const cell = (x, y, half) => {
+        const d = dist(x, y);
+        return { x, y, half, d, max: d + half * Math.SQRT2 };
+    };
+
+    const queue = [];
+    const push = c => {             // очередь по убыванию max, двоичная вставка
+        let lo = 0, hi = queue.length;
+        while (lo < hi) { const mid = (lo + hi) >> 1; if (queue[mid].max < c.max) hi = mid; else lo = mid + 1; }
+        queue.splice(lo, 0, c);
+    };
+    const half0 = size / 2;
+    for (let x = x1; x < x2; x += size) for (let y = y1; y < y2; y += size) push(cell(x + half0, y + half0, half0));
+
+    const c = centroidOf([poly]);
+    let best = cell(c[0], c[1], 0);
+    const box = cell(x1 + w / 2, y1 + h / 2, 0);
+    if (box.d > best.d) best = box;
+
+    while (queue.length) {
+        const cur = queue.shift();
+        if (cur.d > best.d) best = cur;
+        if (cur.max - best.d <= precision) continue;
+        const q = cur.half / 2;
+        push(cell(cur.x - q, cur.y - q, q));
+        push(cell(cur.x + q, cur.y - q, q));
+        push(cell(cur.x - q, cur.y + q, q));
+        push(cell(cur.x + q, cur.y + q, q));
+    }
+    return [best.x, best.y, Math.max(0, best.d)];
+}
+
+function segDist2(px, py, ax, ay, bx, by) {
+    let dx = bx - ax, dy = by - ay;
+    if (dx !== 0 || dy !== 0) {
+        const t = Math.max(0, Math.min(1, ((px - ax) * dx + (py - ay) * dy) / (dx * dx + dy * dy)));
+        ax += dx * t; ay += dy * t;
+    }
+    dx = px - ax; dy = py - ay;
+    return dx * dx + dy * dy;
+}
+
 module.exports = {
     K, X0, Y0, R_EARTH,
     xToLon, yToLat, lonToX, latToY,
     parsePath, ringArea, polyAreaPx, bboxOf, areaKm2, centroidOf,
-    pointInRing, pointInMulti, pointOnSurface,
+    pointInRing, pointInMulti, pointOnSurface, poleOfInaccessibility,
 };

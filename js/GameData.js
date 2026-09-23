@@ -131,6 +131,9 @@ class GameData {
                 area: info.area,
                 cx: info.cx,
                 cy: info.cy,
+                // визуальный центр — сюда ставятся значок войск и подпись
+                lx: info.lx ?? info.cx,
+                ly: info.ly ?? info.cy,
                 loyalty: 1.0,
                 development: { industry: 0, agro: 0, oil: 0 },
                 army: this.emptyArmy(),

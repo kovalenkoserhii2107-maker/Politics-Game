@@ -1,0 +1,71 @@
+/* =====================================================================
+   КАРТА: подписи, города, значки войск, ступени детализации
+   Размеры заданы через --sw (1 экранный px в единицах карты) и --k (то же
+   без единиц — для масштаба групп), поэтому на экране они постоянны при
+   любом приближении.
+   ===================================================================== */
+#layer-cities, #layer-armies, #layer-region-labels, #layer-labels { pointer-events: none; }
+
+/* --- страны --- */
+.country-label { font-family: var(--font); }
+.country-label.too-small { display: none; }
+
+/* --- области без города с их именем: подпись в визуальном центре --- */
+.region-label {
+    font-family: var(--mono); font-weight: 500; letter-spacing: 0.08em; text-transform: uppercase;
+    fill: rgba(255, 255, 255, 0.78); text-anchor: middle; dominant-baseline: middle;
+    paint-order: stroke; stroke: rgba(0, 0, 0, 0.6); stroke-width: calc(var(--sw) * 3);
+    transform: translateY(calc(var(--sw) * -16));
+}
+.region-label.too-small, .region-label.crowded { display: none; }
+
+/* --- города на своих местах --- */
+.city-marker {
+    r: calc(var(--sw) * 2.4);
+    fill: var(--light); stroke: rgba(0, 0, 0, 0.7); stroke-width: calc(var(--sw) * 1);
+}
+.capital-marker {
+    r: calc(var(--sw) * 3.6);
+    fill: var(--accent); stroke: #fff; stroke-width: calc(var(--sw) * 1.4);
+}
+.city-label, .capital-label {
+    font-family: var(--font); dominant-baseline: middle;
+    font-size: calc(var(--sw) * 11); font-weight: 600; fill: #e6e9ee;
+    paint-order: stroke; stroke: rgba(0, 0, 0, 0.82); stroke-width: calc(var(--sw) * 3);
+    stroke-linejoin: round;
+}
+.capital-label { font-size: calc(var(--sw) * 12); font-weight: 800; fill: #fff; }
+.city-label.right, .capital-label.right { text-anchor: start; transform: translateX(calc(var(--sw) * 5)); }
+.city-label.left, .capital-label.left { text-anchor: end; transform: translateX(calc(var(--sw) * -5)); }
+.city-label.crowded, .capital-label.crowded { display: none; }
+
+/* --- значки войск: плашка с числом --- */
+.badge-inner { transform: scale(var(--k, 0.1)); }
+.army-badge rect:first-child {
+    fill: rgba(10, 11, 13, 0.88); stroke-width: 1;
+}
+.army-badge text {
+    font-family: var(--mono); font-weight: 700; font-size: 11px; fill: #fff;
+    dominant-baseline: central;
+}
+.army-badge.own rect:first-child { stroke: var(--good); }
+.army-badge.own .badge-tick { fill: var(--good); }
+.army-badge.enemy rect:first-child { stroke: var(--accent); }
+.army-badge.enemy .badge-tick { fill: var(--accent); }
+.army-badge.unknown rect:first-child { stroke: rgba(255, 90, 78, 0.7); stroke-dasharray: 3 2; }
+.army-badge.unknown .badge-tick { fill: rgba(255, 90, 78, 0.7); }
+.army-badge.unknown text { fill: var(--text-2); }
+
+/* --- ступени детализации ---
+   Скрытое именно display:none, а не opacity — иначе браузер продолжает
+   рисовать невидимые слои на каждом кадре панорамирования.
+   lod-0: страны; lod-1: области, столицы и главные города; lod-2: все города. */
+#world-map.lod-0 #layer-region-labels { display: none; }
+/* издалека — только точки столиц, без подписей: страны подписаны крупно */
+#world-map.lod-0 .city-group:not(.capital),
+#world-map.lod-0 .city-group text { display: none; }
+#world-map.lod-1 .city-group.tier-2 { display: none; }
+#world-map.lod-1 .country-label,
+#world-map.lod-2 .country-label { display: none; }
+/* Значки войск привязаны к уровню взаимодействия, а не к подписям. */
+#world-map.global-view #layer-armies { display: none; }
