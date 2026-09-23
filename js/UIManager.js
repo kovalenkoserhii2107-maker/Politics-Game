@@ -16,18 +16,34 @@ class UIManager {
             if (el) el.addEventListener('click', handler);
         };
         bind('close-panel-btn', () => this.closePanel());
+        bind('close-campaign-btn', () => this.hideModal('campaign-modal'));
         bind('close-gov-btn', () => this.hideModal('gov-modal'));
         bind('close-history-btn', () => this.hideModal('history-modal'));
         bind('close-diplo-btn', () => this.hideModal('diplo-modal'));
         bind('close-summary-btn', () => this.closeSummary());
 
-        for (const id of ['history-modal', 'gov-modal', 'diplo-modal']) {
+        for (const id of ['history-modal', 'gov-modal', 'diplo-modal', 'campaign-modal']) {
             const modal = document.getElementById(id);
             if (modal) modal.addEventListener('click', e => { if (e.target === modal) this.hideModal(id); });
         }
         const summary = document.getElementById('summary-modal');
         summary.addEventListener('click', e => { if (e.target === summary) this.closeSummary(); });
 
+        document.addEventListener('keydown', e => {
+            const modal = document.querySelector('.modal.active');
+            if (!modal) return;
+            if (e.key === 'Escape') {
+                e.stopImmediatePropagation();
+                if (modal.id === 'summary-modal') this.closeSummary();
+                else if (!['decision-modal', 'gameover-modal'].includes(modal.id)) this.hideModal(modal.id);
+            }
+            if (e.key === 'Tab') {
+                const targets = [...modal.querySelectorAll('button:not(:disabled), input:not(:disabled), select:not(:disabled), summary')].filter(el => el.getClientRects().length);
+                const first = targets[0], last = targets[targets.length - 1];
+                if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last?.focus(); }
+                else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first?.focus(); }
+            }
+        });
         this.initSheetSwipe();
         this.initOrdersToggle();
     }
@@ -77,8 +93,28 @@ class UIManager {
         this.zoomIndicator.style.color = isRegional ? 'var(--ui-accent)' : 'var(--ui-accent-country)';
     }
 
-    showModal(id) { const el = document.getElementById(id); if (el) el.classList.add('active'); }
-    hideModal(id) { const el = document.getElementById(id); if (el) el.classList.remove('active'); }
+    syncModalAccess() {
+        const active = !!document.querySelector('.modal.active');
+        for (const id of ['top-bar', 'map-controls', 'side-panel', 'target-banner']) document.getElementById(id).inert = active;
+    }
+
+    showModal(id) {
+        const el = document.getElementById(id);
+        if (!el) return;
+        this.modalFocus = document.activeElement;
+        el.classList.add('active');
+        el.setAttribute('role', 'dialog');
+        el.setAttribute('aria-modal', 'true');
+        this.syncModalAccess();
+        el.querySelector('button:not(:disabled), select:not(:disabled), input')?.focus({ preventScroll: true });
+    }
+
+    hideModal(id) {
+        const el = document.getElementById(id);
+        if (el) el.classList.remove('active');
+        this.syncModalAccess();
+        if (!document.querySelector('.modal.active') && this.modalFocus?.isConnected) this.modalFocus.focus({ preventScroll: true });
+    }
 
     showTargetBanner(text) {
         document.getElementById('target-text').textContent = text;
@@ -217,6 +253,7 @@ class UIManager {
                 : '<div class="hint">Точный состав армии известен только своих войск и противников.</div>');
 
         document.getElementById('diplo-actions').innerHTML = this.diplomacyButtons(data, country.id);
+        document.getElementById('development-panel').innerHTML = '';
         document.getElementById('action-buttons-container').style.display = 'none';
         this.resetPanelSections();
         this.openPanel();
@@ -241,6 +278,7 @@ class UIManager {
         tags.push(this.tag(`Лояльность ${Math.round(region.loyalty * 100)}%`, region.loyalty < 0.6 ? 'war' : ''));
         document.getElementById('panel-tags').innerHTML = tags.join('');
         this.fillEconomy({ population: region.population, ...region.resources });
+        this.renderDevelopment(region, data);
 
         const isNeighbor = data.isNeighborToPlayer(region.id);
         const reconActive = region.reconActiveUntil && region.reconActiveUntil >= data.currentDate;
@@ -373,6 +411,7 @@ class UIManager {
         this.closePanel();
         this.hideModal('gov-modal');
         this.hideModal('diplo-modal');
+        this.hideModal('campaign-modal');
         this.onSummaryClose = onClose;
 
         document.getElementById('summary-title').textContent = `Итоги на ${turnData.date}`;
@@ -422,6 +461,7 @@ class UIManager {
 
     showHistory(history) {
         this.closePanel();
+        this.hideModal('campaign-modal');
         const container = document.getElementById('history-content');
         container.innerHTML = history.length
             ? history.map(turn => {
@@ -453,11 +493,57 @@ class UIManager {
     }
 
     showGameOver(data) {
-        const country = data.countries[data.playerCountry];
-        document.getElementById('gameover-text').textContent =
-            `${country.name} прекратила существование на ${data.turn}-м ходу. `
-            + 'Можно начать заново той же или другой страной.';
+        const victory = data.outcome === 'victory';
+        document.getElementById('gameover-title').textContent = victory ? 'Мировое господство' : 'Кампания завершена';
+        document.getElementById('gameover-text').textContent = victory
+            ? `${data.countries[data.playerCountry].name}: все ${data.campaignProgress().total} областей суверенных стран под вашим управлением. Победа на ${data.turn}-м ходу${data.cheatMode ? ' в режиме бога' : ''}.`
+            : `${data.countries[data.playerCountry].name} потеряла все области на ${data.turn}-м ходу. Попробуйте другой экономический курс или другую страну.`;
         this.showModal('gameover-modal');
+    }
+
+    renderDevelopment(region, data) {
+        const container = document.getElementById('development-panel');
+        if (region.owner !== data.playerCountry) {
+            container.innerHTML = !data.countries[region.owner].playable && data.isNeighborToPlayer(region.id)
+                ? `<summary>Интеграция территории</summary><div class="development-card"><strong>Интеграция территории</strong><p>Территория без суверенного правительства. Установите управление за $500K и 10 влияния. Лояльность начнётся с 50%.</p><button class="mini-btn" data-action="integrate" data-region="${region.id}">Установить управление</button></div>` : '';
+            return;
+        }
+        const project = data.projects.find(p => p.regionId === region.id);
+        container.open = false;
+        let html = `<summary>Развитие области${project ? ` · ${project.remaining} ход.` : ' · 3 проекта'}</summary>`;
+        if (project) {
+            html += `<div class="development-card"><strong>${DEVELOPMENT[project.kind].name}</strong><p>До завершения: ${project.remaining} ход. Средства зарезервированы.</p><button class="mini-btn" data-action="cancel-project" data-region="${region.id}">Отменить · вернуть ${this.money(project.cost)}</button></div>`;
+        } else {
+            for (const [kind, plan] of Object.entries(DEVELOPMENT)) {
+                const level = region.development[kind], cost = data.developmentCost(region.id, kind);
+                const modifier = kind === 'industry' ? POLICIES[data.countries[data.playerCountry].policy].industry : region.loyalty;
+                const gain = plan.gain * plan.income * modifier;
+                const disabled = level >= 5 || data.countries[data.playerCountry].money < cost || data.gameOver;
+                html += `<div class="development-card"><strong>${plan.name} · ${level}/5</strong><p>${plan.turns} ход. · +${plan.gain} к ресурсу · около +${this.money(gain)}/ход при текущем курсе и лояльности${kind === 'industry' ? '. Также увеличивает мощность набора' : ''}.</p><button class="mini-btn" data-action="invest" data-region="${region.id}" data-kind="${kind}" ${disabled ? 'disabled' : ''}>${level >= 5 ? 'Максимальный уровень' : `Построить · ${this.money(cost)}`}</button></div>`;
+            }
+        }
+        container.innerHTML = html;
+    }
+
+    showCampaign(data) {
+        this.closePanel();
+        const p = data.campaignProgress(), c = data.campaign;
+        const balance = data.countryBalance(data.playerCountry);
+        const steps = [
+            ['Бюджет государства', 'Выберите налог и политический курс.', c.budget, 'campaign-budget', 'Открыть'],
+            ['Развитие экономики', 'Закажите первый проект в своей области.', c.investment, 'campaign-invest', 'Развивать'],
+            ['Подготовка армии', 'Наберите войска в пределах бюджета.', c.recruited, 'campaign-recruit', 'Набрать'],
+            ['Внешняя политика', 'Сравните соседей. Объявите войну, когда готовы.', c.diplomacy, 'campaign-diplomacy', 'Соседи'],
+            ['Первое завоевание', 'Отправьте армию в соседнюю область противника.', c.conquest, 'campaign-region', 'На карту'],
+        ];
+        document.getElementById('campaign-content').innerHTML = `
+            <div class="campaign-hero"><h3>${p.rank}</h3><strong>${p.controlled} / ${p.total}</strong><p>областей суверенных стран под вашим управлением · ${(p.share * 100).toFixed(1)}%</p><progress value="${p.controlled}" max="${p.total}" aria-label="Мировое господство"></progress><p>Победа — контроль всех этих областей. Укрепляйте экономику, удерживайте лояльность и расширяйте влияние.</p></div>
+            <div class="budget-row"><span>Прогноз на неделю</span><b class="${balance.income >= balance.expense ? 'pos' : 'neg'}">${this.money(balance.income - balance.expense)}</b></div>
+            <h3 class="section-title">Первые шаги</h3>
+            ${steps.map(([name, sub, done, action, label], i) => `<div class="campaign-step ${done ? 'done' : ''}"><span class="step-number">${i + 1}</span><div><b>${name}${done ? ' · выполнено' : ''}</b><small>${sub}</small></div><button class="mini-btn" data-action="${action}">${label}</button></div>`).join('')}
+            <h3 class="section-title">Ваши области</h3><label class="sr-only" for="owned-region-select">Выбрать область</label><select id="owned-region-select">${data.getCountryRegions(data.playerCountry).map(r => `<option value="${r.id}">${this.escape(r.name)} · лояльность ${Math.round(r.loyalty * 100)}%</option>`).join('')}</select><button class="mini-btn" data-action="campaign-region">Открыть область</button>
+            <p class="hint">Для океанских походов исследуйте логистику до уровня 3. Экспедиция: $500K + $25K за подразделение и 5 влияния. Территории без правительства интегрируются за $500K и 10 влияния при общей границе.</p><p class="hint">Активных строек: ${data.projects.filter(x => x.country === data.playerCountry).length}. Нажмите область на карте для набора, строительства или марша.</p>`;
+        this.showModal('campaign-modal');
     }
 
     // --- дипломатия ----------------------------------------------------------------------------
@@ -514,16 +600,25 @@ class UIManager {
         const balance = data.countryBalance(player.id);
         const net = balance.income - balance.expense;
 
+        const select = document.getElementById('gov-policy');
+        select.innerHTML = Object.entries(POLICIES).map(([key, policy]) => `<option value="${key}">${policy.name}</option>`).join('');
+        select.value = player.policy;
+        const cooldown = Math.max(0, 3 - (data.turn - player.policyChangedAt));
+        select.disabled = cooldown > 0 || player.influence < 5 || data.gameOver;
+        document.getElementById('gov-policy-note').textContent = `${POLICIES[player.policy].description} Смена: 5 влияния.${cooldown ? ` Доступна через ${cooldown} ход.` : ''}`;
         document.getElementById('gov-tax-val').textContent = Math.round(player.taxRate * 100) + '%';
         document.getElementById('gov-tax-slider').value = player.taxRate;
         const penalty = Math.max(0, player.taxRate - 0.1) * 2;
         document.getElementById('gov-tax-note').textContent = penalty > 0
-            ? `Высокий налог: лояльность будет снижаться до ${Math.round((1 - penalty) * 100)}% — а с ней и сбор.`
+            ? `Высокий налог: лояльность будет снижаться до ${Math.round(Math.min(1, 1 + POLICIES[player.policy].loyalty - penalty) * 100)}% — а с ней и сбор.`
             : 'Налог до 10% не снижает лояльность.';
 
         document.getElementById('gov-budget').innerHTML = `
             <div class="budget-row"><span>Налоги</span><span class="pos">+${this.money(balance.tax)}</span></div>
             <div class="budget-row"><span>Индустрия</span><span class="pos">+${this.money(balance.industry)}</span></div>
+            <div class="budget-row"><span>Сельское хозяйство</span><span class="pos">+${this.money(balance.agro)}</span></div>
+            <div class="budget-row"><span>Энергетика</span><span class="pos">+${this.money(balance.energy)}</span></div>
+            <div class="budget-row"><span>Социальная программа</span><span class="neg">−${this.money(balance.social)}</span></div>
             <div class="budget-row"><span>Содержание армии</span><span class="neg">−${this.money(balance.upkeep)}</span></div>
             <div class="budget-row total"><span>Итого за ход</span><span class="${net >= 0 ? 'pos' : 'neg'}">${net >= 0 ? '+' : ''}${this.money(net)}</span></div>`;
 
@@ -534,7 +629,7 @@ class UIManager {
             return this.researchRow(unitId, `${unit.icon} ${unit.name}`, `ур. ${level}/${RULES.TECH_MAX} · сила +${Math.round((level - 1) * RULES.TECH_STEP * 100)}%`, cost, player.money);
         });
         const march = player.tech.marchSpeed || 1;
-        rows.push(this.researchRow('marchSpeed', '🚚 Логистика', `марш на ${march} обл. за ход`, data.techCost(player.id, 'marchSpeed'), player.money));
+        rows.push(this.researchRow('marchSpeed', '🚚 Логистика', `марш на ${march} обл. за ход${march >= 3 ? ' · экспедиции по всему миру' : ' · на ур. 3: экспедиции'}`, data.techCost(player.id, 'marchSpeed'), player.money));
         document.getElementById('gov-research').innerHTML = rows.join('');
     }
 

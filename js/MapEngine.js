@@ -192,8 +192,9 @@ class MapEngine {
         const regions = this.data.getCountryRegions(this.data.playerCountry);
         let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
         for (const region of regions) {
-            minX = Math.min(minX, region.cx); maxX = Math.max(maxX, region.cx);
-            minY = Math.min(minY, region.cy); maxY = Math.max(maxY, region.cy);
+            const bounds = RegionsDB[region.id];
+            minX = Math.min(minX, bounds.bx); maxX = Math.max(maxX, bounds.bx + bounds.bw);
+            minY = Math.min(minY, bounds.by); maxY = Math.max(maxY, bounds.by + bounds.bh);
         }
         if (minX === Infinity) { minX = 560; minY = 200; maxX = 640; maxY = 260; }
 
@@ -216,6 +217,19 @@ class MapEngine {
 
     // Часть экрана, не закрытая панелями: верхней полосой, нижней навигацией
     // на телефоне и открытой карточкой (шторкой снизу или колонкой слева).
+    focusRegion(id) {
+        const region = this.data.getRegion(id), bounds = RegionsDB[id];
+        if (!region || !bounds) return;
+        cancelAnimationFrame(this.animFrame);
+        this.measure();
+        const width = Math.max(bounds.bw * 1.4, bounds.bh * 1.4 * this.rect.width / this.rect.height, this.minView);
+        this.scale = this.clampScale(this.rect.width / (Math.min(width, this.interactiveView * 0.9) * this.baseScale));
+        this.centerOn(region.cx, region.cy);
+        this.updateLOD();
+        this.updateLabelVisibility();
+        document.dispatchEvent(new CustomEvent('zoomLevelChanged', { detail: { isRegional: this.isRegionalZoom } }));
+    }
+
     safeRect() {
         const w = window.innerWidth, h = window.innerHeight;
         const topBar = document.getElementById('top-bar');
@@ -391,7 +405,7 @@ class MapEngine {
             if (this.wasDragging) return;
             if (e.target === this.svg) {
                 this.clearSelection();
-                document.dispatchEvent(new Event('panelClosed'));
+                document.dispatchEvent(new Event('mapBackground'));
             }
         });
 
@@ -407,7 +421,8 @@ class MapEngine {
         this.container.addEventListener('pointerdown', e => {
             if (e.pointerType === 'mouse' && e.button !== 0) return;
             cancelAnimationFrame(this.animFrame);
-            this.container.setPointerCapture(e.pointerId);
+            // Capture only an actual drag. Capturing a mouse press here
+            // retargets its click to the container instead of the region.
             this.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
             if (this.pointers.size === 1) {
                 this.measure();
@@ -419,6 +434,8 @@ class MapEngine {
                 this.downY = e.clientY;
             } else {
                 this.isDragging = false;
+                this.wasDragging = true;
+                for (const id of this.pointers.keys()) this.container.setPointerCapture(id);
                 this.pinchStart = this.pinchState();
             }
         });
@@ -439,7 +456,9 @@ class MapEngine {
             if (!this.isDragging) return;
             if (Math.abs(e.clientX - this.downX) > 4 || Math.abs(e.clientY - this.downY) > 4) {
                 this.wasDragging = true;
+                if (!this.container.hasPointerCapture(e.pointerId)) this.container.setPointerCapture(e.pointerId);
             }
+            if (!this.wasDragging) return;
             const k = this.pxPerUnit;
             this.camX = this.dragCamX - (e.clientX - this.downX) / k;
             this.camY = this.dragCamY - (e.clientY - this.downY) / k;
@@ -462,7 +481,11 @@ class MapEngine {
             const cx = this.camX + this.rect.width / (2 * this.pxPerUnit);
             const cy = this.camY + this.rect.height / (2 * this.pxPerUnit);
             this.measure();
+            this.scale = this.clampScale(this.scale);
             this.centerOn(cx, cy);
+            this.updateLOD();
+            this.updateLabelVisibility();
+            document.dispatchEvent(new CustomEvent('zoomLevelChanged', { detail: { isRegional: this.isRegionalZoom } }));
         });
     }
 

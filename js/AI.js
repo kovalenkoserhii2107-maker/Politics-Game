@@ -34,9 +34,15 @@ class AI {
             if (!d.regionsByCountry[country.id].length) continue;
             this.balanceTaxes(country);
             const enemies = d.enemiesOf(country.id);
-            if (this.disbandIfBroke(country, enemies)) continue;
+            this.disbandIfBroke(country, enemies);
             if (enemies.length) this.planWar(country, enemies);
-            else if (playerNeighbours.has(country.id)) this.planPeace(country);
+            else {
+                if (playerNeighbours.has(country.id)) this.planPeace(country);
+                if (d.turn % 4 === 0 && country.money > 3000000) {
+                    const region = d.getCountryRegions(country.id).find(r => !d.projects.some(p => p.regionId === r.id) && r.development.industry < 5);
+                    if (region) d.invest(region.id, 'industry', country.id);
+                }
+            }
         }
     }
 
@@ -45,7 +51,7 @@ class AI {
         const balance = this.data.countryBalance(country.id);
         const population = this.data.getCountryRegions(country.id).reduce((s, r) => s + r.population * r.loyalty, 0);
         if (population <= 0) return;
-        const need = (balance.expense - balance.industry) / population + 0.01;
+        const need = (balance.expense - (balance.income - balance.tax)) / population + 0.01;
         country.taxRate = Math.min(0.2, Math.max(0.05, Math.round(need * 100) / 100));
     }
 

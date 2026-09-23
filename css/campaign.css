@@ -1,0 +1,83 @@
+/* Campaign screens extend the existing navy / blue / gold palette. */
+.sr-only { position:absolute; width:1px; height:1px; overflow:hidden; clip-path:inset(50%); }
+button, summary, select { touch-action:manipulation; }
+button:focus-visible, summary:focus-visible, select:focus-visible, input:focus-visible { outline:3px solid #fbbf24; outline-offset:3px; }
+body:not(.in-game) #ui-layer, body:not(.in-game) #map-container { visibility:hidden; }
+.start-heading { margin-bottom:16px; text-align:left; }
+.start-heading h1 { margin:6px 0; letter-spacing:2px; font-size:1.8rem; }
+.start-heading p { margin:0; color:#a9b7cc; font-size:0.92rem; }
+.eyebrow { color:#8b9bb3; font-size:0.66rem; letter-spacing:0.12em; }
+.start-window { max-height:95dvh; }
+.quick-countries { display:grid; grid-template-columns:1fr; gap:8px; margin-bottom:12px; }
+.quick-country { display:flex; align-items:center; justify-content:space-between; gap:8px; padding:13px; min-height:52px; border:1px solid var(--ui-border); border-radius:10px; color:var(--ui-text); background:#0c1526; text-align:left; cursor:pointer; }
+.quick-country small { color:#a9b7cc; font-size:0.75rem; }
+.quick-country[aria-pressed=true] { border-color:#60a5fa; background:#152d50; }
+.country-list-item { width:100%; border:0; border-bottom:1px solid #26334a; background:transparent; color:var(--ui-text); font:inherit; text-align:left; cursor:pointer; min-height:44px; }
+.country-list-item.selected { background:#15345c; }
+summary { cursor:pointer; min-height:44px; display:list-item; padding:12px 4px; box-sizing:border-box; color:#cbd5e1; font-size:0.9rem; }
+#all-countries .country-list { height:190px; }
+#all-countries input { width:100%; box-sizing:border-box; }
+.start-options { border-top:1px solid var(--ui-border); margin-top:12px; }
+.start-options .cheat-box { margin:8px 0; }
+.start-goal { color:#a9b7cc; font-size:0.8rem; line-height:1.45; margin:12px 0 0; }
+.start-metrics { display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-top:12px; }
+.start-metric { border:1px solid var(--ui-border); background:#0b1423; border-radius:8px; padding:10px; }
+.start-metric small { color:#a9b7cc; display:block; font-size:0.7rem; margin-bottom:4px; }
+.start-metric strong { font-size:1.05rem; }
+#start-game-btn { min-height:50px; margin-top:14px; }
+#campaign-count { display:block; font-size:10px; opacity:0.85; }
+.campaign-hero { padding:16px; background:#132947; border:1px solid #30517d; border-radius:12px; margin-bottom:14px; }
+.campaign-hero h3 { margin:0 0 6px; font-size:1.2rem; }
+.campaign-hero p { margin:6px 0; color:#b7c8dd; font-size:0.85rem; line-height:1.4; }
+.campaign-hero strong { font-size:1.4rem; color:#fbbf24; }
+progress { width:100%; height:10px; accent-color:#60a5fa; display:block; margin-top:12px; }
+.campaign-step { display:flex; align-items:center; gap:12px; border-bottom:1px solid var(--ui-border); padding:12px 0; }
+.step-number { flex:0 0 26px; height:26px; line-height:26px; border-radius:50%; text-align:center; background:#27364d; font-size:0.8rem; }
+.campaign-step.done .step-number { background:#145345; color:#b5f9de; }
+.campaign-step div { flex:1; font-size:0.85rem; }
+.campaign-step small { display:block; color:#a9b7cc; margin-top:4px; line-height:1.4; }
+.campaign-step button { min-height:44px; }
+#owned-region-select, #gov-policy { width:100%; min-height:46px; background:#0b1423; border:1px solid var(--ui-border); color:#e2e8f0; padding:10px; border-radius:8px; margin:8px 0; font:inherit; }
+.development-card { padding:12px; background:#132238; border:1px solid var(--ui-border); border-radius:10px; margin:8px 0; }
+.development-card strong { font-size:0.86rem; }
+.development-card p { color:#a9b7cc; font-size:0.78rem; line-height:1.4; margin:7px 0; }
+.development-card button { width:100%; min-height:44px; }
+#development-panel { margin-top:12px; }
+#side-panel { overscroll-behavior:contain; }
+.modal { overscroll-behavior:contain; }
+.modal-content { max-height:90dvh; }
+#target-banner { white-space:normal; max-width:calc(100vw - 24px); box-sizing:border-box; }
+#save-warning { color:#fbbf24; border:1px solid #785c22; border-radius:8px; padding:10px; }
+@media (max-width:768px) {
+ .start-window { padding:16px 14px calc(14px + env(safe-area-inset-bottom,0px)); height:100dvh; max-height:100dvh; overflow-y:auto; display:block; }
+ .start-heading h1 { font-size:1.45rem; text-align:left; }
+ .start-heading { margin-bottom:12px; }
+ .start-layout { display:flex; flex-direction:column; overflow:visible; gap:10px; }
+ .country-column, .country-info { flex:none; width:100%; box-sizing:border-box; }
+ .country-info { padding:0; }
+ .country-info h2 { margin:8px 0; padding:0; border:0; font-size:1.35rem; }
+ .quick-countries { grid-template-columns:repeat(3,minmax(0,1fr)); gap:6px; margin-bottom:0; }
+ .quick-country { display:block; padding:10px 7px; text-align:left; font-size:0.83rem; min-width:0; }
+ .quick-country small { display:block; font-size:0.62rem; margin-top:5px; line-height:1.4; }
+ #all-countries summary { padding-bottom:4px; }
+ #all-countries .country-list { max-height:190px; }
+ .visual-header { margin:8px 0; height:68px; }
+ .country-info-row { margin-bottom:4px; padding-bottom:4px; font-size:0.8rem; }
+ #info-area { display:none; }
+ #start-game-btn { position:sticky; bottom:0; box-shadow:0 -6px 16px #111827; }
+ .section-title { margin-top:6px; }
+ #campaign-count { font-size:10px; }
+ #campaign-btn { gap:3px; }
+ .campaign-step { gap:8px; }
+ .campaign-step .mini-btn { padding:8px; font-size:0.75rem; }
+ #side-panel .close-btn { min-width:44px; min-height:44px; }
+ .stepper-controls { gap:5px; }
+ .step-chips { gap:4px; }
+ .chip { min-width:34px; padding:0 7px; min-height:44px; }
+ .step-value { min-width:32px; }
+ #orders-panel { max-height:22dvh; }
+}
+@media (prefers-reduced-motion:reduce) { * { scroll-behavior:auto !important; transition:none !important; } }
+
+#side-panel:not(.active), #target-banner:not(.visible) { visibility:hidden; }
+#development-panel:empty { display:none; }

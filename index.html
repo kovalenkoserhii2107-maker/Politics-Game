@@ -2,7 +2,7 @@
 <html lang="ru">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>Grand Strategy</title>
 <meta name="theme-color" content="#0b1221">
 <meta name="mobile-web-app-capable" content="yes">
@@ -667,13 +667,14 @@ body { overscroll-behavior: none; }
     .country-list { max-height: 30vh; }
 }
 </style>
+<link rel="stylesheet" href="css/campaign.css">
 </head>
 <body>
 
 <!-- СТАРТОВЫЙ ЭКРАН -->
 <div id="start-screen">
     <div class="start-window">
-        <h1>GRAND STRATEGY</h1>
+        <div class="start-heading"><span class="eyebrow">ПОЛИТИКА · ЭКОНОМИКА · СТРАТЕГИЯ</span><h1>GRAND STRATEGY</h1><p>Постройте державу. Измените карту мира.</p></div>
         <div class="start-layout">
             <div class="country-column">
                 <div id="continue-box">
@@ -682,8 +683,14 @@ body { overscroll-behavior: none; }
                         <button id="continue-btn">Продолжить</button>
                     </div>
                 </div>
-                <input id="start-search" type="search" placeholder="Поиск страны…" autocomplete="off">
-                <div class="country-list" id="start-country-list"></div>
+                <p id="save-warning" class="hint" role="status" hidden></p>
+                <h2 class="section-title">1. Выберите страну</h2>
+                <div id="quick-countries" class="quick-countries" aria-label="Быстрый выбор страны"></div>
+                <details id="all-countries"><summary>Все страны мира</summary>
+                    <label class="sr-only" for="start-search">Поиск страны</label>
+                    <input id="start-search" type="search" placeholder="Название страны…" autocomplete="off">
+                    <div class="country-list" id="start-country-list" aria-label="Страны"></div>
+                </details>
             </div>
             <div class="country-info">
                 <h2 id="info-name">Выберите страну</h2>
@@ -695,6 +702,10 @@ body { overscroll-behavior: none; }
                 <div class="country-info-row" id="info-pop"><strong>Население:</strong> <span>—</span></div>
                 <div class="country-info-row" id="info-area"><strong>Площадь:</strong> <span>—</span></div>
                 <div class="country-info-row" id="info-regions"><strong>Областей:</strong> <span>—</span></div>
+                <div id="start-economy" aria-live="polite"></div>
+                <p class="start-goal">Цель кампании — контроль всех областей суверенных стран. Один ход — одна неделя.</p>
+                <details class="start-options"><summary>2. Сценарий и режим игры</summary>
+                <p class="hint">По умолчанию — мирный старт. Сначала укрепите бюджет и производство.</p>
                 <div class="cheat-box scenario-box">
                     <label class="cheat-label">
                         <input type="checkbox" id="scenario-toggle">
@@ -713,7 +724,8 @@ body { overscroll-behavior: none; }
                         </span>
                     </label>
                 </div>
-                <button id="start-game-btn" disabled>Начать игру</button>
+                </details>
+                <button id="start-game-btn" disabled>Начать кампанию</button>
             </div>
         </div>
     </div>
@@ -733,7 +745,7 @@ body { overscroll-behavior: none; }
         </div>
         <div class="stat-group" id="action-bar">
             <button id="diplo-btn" class="top-btn nav-btn"><span class="ico">🤝</span><span class="lbl">Дипломатия</span><span id="war-badge" class="war-badge"></span></button>
-            <button id="log-btn" class="top-btn nav-btn"><span class="ico">📜</span><span class="lbl">Журнал</span></button>
+            <button id="campaign-btn" class="top-btn nav-btn"><span class="lbl">Кампания</span><small id="campaign-count"></small></button>
             <button id="gov-btn" class="top-btn nav-btn warning"><span class="ico">🏛️</span><span class="lbl">Правительство</span></button>
             <button id="end-turn-btn" class="top-btn nav-btn primary"><span class="ico">⏭️</span><span class="lbl">Конец хода</span></button>
         </div>
@@ -750,6 +762,10 @@ body { overscroll-behavior: none; }
         <button id="target-cancel">Отмена</button>
     </div>
 
+    <div id="campaign-modal" class="modal ui-element" role="dialog" aria-modal="true" aria-labelledby="campaign-title">
+        <div class="modal-content"><div class="modal-header"><h2 id="campaign-title">Ваша кампания</h2><button class="close-btn" id="close-campaign-btn" aria-label="Закрыть кампанию">✕</button></div>
+        <div class="modal-body"><div id="campaign-content"></div><button id="log-btn" class="top-btn">Журнал событий</button></div></div>
+    </div>
     <!-- ПРАВИТЕЛЬСТВО -->
     <div id="gov-modal" class="modal ui-element">
         <div class="modal-content">
@@ -758,13 +774,16 @@ body { overscroll-behavior: none; }
                 <button class="close-btn" id="close-gov-btn">✕</button>
             </div>
             <div class="modal-body">
+                <div class="gov-section"><h3>Политический курс</h3>
+                    <label for="gov-policy">Приоритет государства</label><select id="gov-policy"></select><p id="gov-policy-note" class="hint"></p>
+                </div>
                 <div class="gov-section">
                     <h3>Налоги</h3>
                     <div style="display:flex;justify-content:space-between;">
                         <span>Налоговая ставка</span>
                         <span id="gov-tax-val" style="color:var(--ui-accent-country);font-weight:700;">5%</span>
                     </div>
-                    <input type="range" id="gov-tax-slider" min="0.01" max="0.30" step="0.01" value="0.05">
+                    <input aria-label="Налоговая ставка" type="range" id="gov-tax-slider" min="0.01" max="0.30" step="0.01" value="0.05">
                     <div id="gov-tax-note"></div>
                 </div>
                 <div class="gov-section">
@@ -832,7 +851,7 @@ body { overscroll-behavior: none; }
     <!-- КОНЕЦ ИГРЫ -->
     <div id="gameover-modal" class="modal ui-element">
         <div class="modal-content">
-            <div class="modal-header"><h2>Государство пало</h2></div>
+            <div class="modal-header"><h2 id="gameover-title">Кампания завершена</h2></div>
             <p id="gameover-text"></p>
             <div class="decision-buttons"><button id="gameover-new-btn">Новая игра</button></div>
         </div>
@@ -861,6 +880,7 @@ body { overscroll-behavior: none; }
         <div id="region-army-container"></div>
         <div id="diplo-actions"></div>
 
+        <details id="development-panel"></details>
         <div id="action-buttons-container">
             <button id="recruit-btn" class="action-btn">🏭 Набрать войска</button>
             <button id="init-move-btn" class="action-btn">🚚 Перебросить войска</button>
