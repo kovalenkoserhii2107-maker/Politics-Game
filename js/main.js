@@ -501,112 +501,241 @@ class GameCore {
 // СТАРТОВЫЙ ЭКРАН
 // =====================================================================
 (function startScreen() {
+    const FEATURED = ['US', 'CN', 'BR', 'DE', 'FR', 'UA'];
+    const LIST_PREVIEW = 12;
+    const LEVELS = ['', 'Легко', 'Средне', 'Сложно'];
+    const $ = id => document.getElementById(id);
+    const escape = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    const flagUrl = (id, w) => `https://flagcdn.com/w${w}/${id.toLowerCase()}.png`;
+    const flagImg = (id, w, cls = 'flag') => `<img class="${cls}" src="${flagUrl(id, w)}" data-cc="${id}" alt="" width="36" height="24" loading="lazy">`;
+    const bars = level => `<span class="bars lvl-${level}" aria-hidden="true"><i></i><i></i><i></i></span>`;
+
     let selectedId = null;
+    let expanded = false;
+    const previews = {};       // один пробный мир на сценарий — ~30 мс
+    const assessments = {};    // сложность стран по сценарию
 
     const ready = () => {
-        const listEl = document.getElementById('start-country-list');
-        const searchEl = document.getElementById('start-search');
-        const startBtn = document.getElementById('start-game-btn');
+        const listEl = $('start-country-list');
+        const searchEl = $('start-search');
+        const startBtn = $('start-game-btn');
+        const moreBtn = $('list-more');
 
         const playable = Object.keys(CountriesDB)
             .filter(id => CountriesDB[id].playable && CountriesDB[id].regions > 0)
             .sort((a, b) => CountriesDB[a].name.localeCompare(CountriesDB[b].name, 'ru'));
+        const featured = FEATURED.filter(id => playable.includes(id));
+
+        const scenario = () => ($('scenario-toggle').checked ? 'war2024' : 'peace');
+        const preview = () => {
+            const key = scenario();
+            if (!previews[key]) previews[key] = new GameData(playable[0], { scenario: key });
+            return previews[key];
+        };
+
+        // Сложность — по тому, что реально ждёт игрока на первом ходу:
+        // размер страны, недельный баланс, сильнейший сосед и война.
+        const assess = id => {
+            const key = scenario();
+            assessments[key] = assessments[key] || {};
+            if (assessments[key][id]) return assessments[key][id];
+            const d = preview();
+            const unitsOf = cc => Object.values(d.getCountryStats(cc).army).reduce((a, b) => a + b, 0);
+            const balance = d.countryBalance(id);
+            const net = balance.income - balance.expense;
+            const army = unitsOf(id);
+            const neighbours = d.neighbourCountries(id).filter(cc => d.countries[cc].playable);
+            let rival = null, rivalArmy = 0;
+            for (const cc of neighbours) {
+                const n = unitsOf(cc);
+                if (n > rivalArmy) { rival = cc; rivalArmy = n; }
+            }
+            const enemies = d.enemiesOf(id);
+            const regions = CountriesDB[id].regions;
+            const ratio = rivalArmy / Math.max(army, 1);
+            let score = 0;
+            if (regions <= 2) score += 1;
+            if (regions >= 10) score -= 1;
+            if (ratio > 4) score += 2; else if (ratio > 1.2) score += 1;
+            if (net < 0) score += 1;
+            if (enemies.length) score += 1;
+            const level = score <= 0 ? 1 : score === 1 ? 2 : 3;
+
+            let advice;
+            if (enemies.length) advice = `Идёт война: ${enemies.map(cc => d.countries[cc].name).join(', ')}. Сначала удержите границу: наберите войска и не распыляйте силы.`;
+            else if (net < 0) advice = 'Расходы больше доходов. В «Правительстве» поднимите налог или распустите часть войск, иначе армия начнёт разбегаться.';
+            else if (rival && ratio > 1.2) advice = `Сильный сосед — ${d.countries[rival].name}: ${rivalArmy} подразделений против ваших ${army}. Не ссорьтесь с ним, пока не окрепнете.`;
+            else if (regions <= 2) advice = 'Маленькая страна: мало денег и войск. Стройте экономику и выбирайте слабых соседей.';
+            else advice = 'Хороший старт: деньги есть, соседи не опасны. Вложитесь в экономику и наберите армию.';
+
+            return (assessments[key][id] = {
+                level, advice, net, army, regions, neighbours: neighbours.length,
+                money: d.countries[id].money,
+            });
+        };
+
+        const money = n => {
+            const v = Math.abs(n);
+            if (v >= 1e9) return '$' + (v / 1e9).toFixed(1).replace('.0', '') + 'B';
+            if (v >= 1e6) return '$' + (v / 1e6).toFixed(1).replace('.0', '') + 'M';
+            if (v >= 1e3) return '$' + Math.round(v / 1e3) + 'K';
+            return '$' + Math.round(v);
+        };
 
         const launch = data => {
-            document.getElementById('start-screen').style.display = 'none';
+            $('start-screen').style.display = 'none';
             document.body.classList.add('in-game');
             window.game = new GameCore(data);
             if (!data.gameOver && !data.decisions.length && data.turn === 0 && !data.campaign.budget) window.game.ui.showCampaign(data);
         };
 
-        // Сохранённая партия — сразу предлагаем продолжить.
+        // Сохранённая партия — первым делом предлагаем продолжить.
         const saved = SaveGame.load();
-        const saveProblem = SaveGame.error;
+        let saveProblem = SaveGame.error;
         if (saveProblem) {
-            const warning = document.getElementById('save-warning');
-            warning.hidden = false;
-            warning.textContent = saveProblem;
+            $('save-warning').hidden = false;
+            $('save-delete-btn').addEventListener('click', () => {
+                SaveGame.clear();
+                saveProblem = '';
+                $('save-warning').hidden = true;
+            });
         }
         if (saved) {
             const g = saved.game;
             const country = CountriesDB[g.player];
             const date = new Date(g.date);
-            const box = document.getElementById('continue-box');
-            box.style.display = 'block';
-            document.getElementById('continue-info').textContent =
-                `${country ? country.name : g.player} · ${date.getDate()}.${String(date.getMonth() + 1).padStart(2, '0')}.${date.getFullYear()} · ход ${g.turn}`;
-            document.getElementById('continue-btn').addEventListener('click', () => {
+            $('continue-box').hidden = false;
+            $('continue-flag').outerHTML = flagImg(g.player, 80).replace('<img', '<img id="continue-flag"');
+            $('continue-name').textContent = country ? country.name : g.player;
+            $('continue-info').textContent =
+                `Ход ${g.turn} · ${date.getDate()}.${String(date.getMonth() + 1).padStart(2, '0')}.${date.getFullYear()}`;
+            $('continue-btn').addEventListener('click', () => {
                 try { launch(GameData.restore(g)); }
                 catch (e) { alert('Не удалось загрузить партию. Сохранение оставлено в хранилище.'); }
             });
         }
 
-        const render = filter => {
-            const query = filter.trim().toLowerCase();
-            listEl.innerHTML = '';
-            const fragment = document.createDocumentFragment();
-            for (const id of playable) {
-                const country = CountriesDB[id];
-                if (query && !country.name.toLowerCase().includes(query)) continue;
-                const item = document.createElement('button');
-                item.className = 'country-list-item' + (id === selectedId ? ' selected' : '');
-                item.type = 'button';
-                item.setAttribute('aria-pressed', String(id === selectedId));
-                item.dataset.id = id;
-                item.innerHTML = `<span>${country.name}</span><span class="list-regions">${country.regions}</span>`;
-                fragment.appendChild(item);
-            }
-            listEl.appendChild(fragment);
-            if (!listEl.children.length) listEl.innerHTML = '<div class="country-list-empty">Ничего не найдено</div>';
+        const renderFeatured = () => {
+            $('quick-countries').innerHTML = featured.map(id => {
+                const a = assess(id);
+                return `<button class="quick-country" type="button" data-id="${id}" aria-pressed="${id === selectedId}">
+                    ${flagImg(id, 80)}
+                    <b>${escape(CountriesDB[id].name)}</b>
+                    <span class="quick-meta">${bars(a.level)}${LEVELS[a.level]}</span>
+                </button>`;
+            }).join('');
         };
 
-        const select = id => {
-            selectedId = id;
-            for (const el of listEl.querySelectorAll('[data-id]')) { el.classList.toggle('selected', el.dataset.id === id); el.setAttribute('aria-pressed', String(el.dataset.id === id)); }
-            for (const el of document.querySelectorAll('.quick-country')) el.setAttribute('aria-pressed', String(el.dataset.id === id));
+        const renderList = () => {
+            const query = searchEl.value.trim().toLowerCase();
+            const matches = query ? playable.filter(id => CountriesDB[id].name.toLowerCase().includes(query)) : playable;
+            const shown = query || expanded ? matches : matches.slice(0, LIST_PREVIEW);
+            $('featured-block').hidden = !!query;
+            $('list-label').textContent = query ? `Найдено: ${matches.length}` : `Все страны · ${playable.length}`;
+            listEl.innerHTML = shown.length ? shown.map(id => {
+                const a = assess(id);
+                return `<button class="country-list-item${id === selectedId ? ' selected' : ''}" type="button" data-id="${id}" aria-pressed="${id === selectedId}">
+                    ${flagImg(id, 40)}
+                    <span class="name">${escape(CountriesDB[id].name)}</span>
+                    <span class="list-regions">${a.regions} обл.</span>
+                    ${bars(a.level)}<span class="sr-only">${LEVELS[a.level]}</span>
+                </button>`;
+            }).join('') : '<div class="country-list-empty">Такой страны нет. Попробуйте другое название.</div>';
+            moreBtn.hidden = !!query || expanded || matches.length <= LIST_PREVIEW;
+            moreBtn.textContent = `Показать все страны (${playable.length})`;
+        };
+
+        const renderDossier = () => {
+            const id = selectedId;
             const country = CountriesDB[id];
-            document.getElementById('info-name').textContent = country.name;
-            const set = (elId, value) => { document.getElementById(elId).querySelector('span').textContent = value; };
-            set('info-pop', country.population ? formatMillions(country.population) : 'нет данных');
-            set('info-area', country.area.toLocaleString('ru-RU') + ' км²');
-            set('info-regions', String(country.regions));
-            const regions = Object.keys(RegionsDB).filter(r => RegionsDB[r].cc === id);
+            const a = assess(id);
             const capital = CitiesDB.find(c => c.cc === id && c.isCapital);
-            set('info-capital', capital ? capital.name : (regions.length ? RegionsDB[regions[0]].name : '—'));
-            document.getElementById('info-visuals').style.visibility = 'visible';
-            document.getElementById('info-flag').src = `https://flagcdn.com/w160/${id.toLowerCase()}.png`;
+            const regions = Object.keys(RegionsDB).filter(r => RegionsDB[r].cc === id);
+            $('info-name').textContent = country.name;
+            $('info-capital').textContent = 'Столица: ' + (capital ? capital.name : (regions.length ? RegionsDB[regions[0]].name : '—'));
+            $('info-flag').outerHTML = flagImg(id, 160, 'flag flag-lg').replace('<img', '<img id="info-flag"');
+            $('info-difficulty').className = `difficulty lvl-${a.level}`;
+            $('info-difficulty').innerHTML = `Сложность${bars(a.level)}<b>${LEVELS[a.level]}</b>`;
+            const stat = (label, value, cls = '') => `<div class="stat"><span>${label}</span><b class="${cls}">${value}</b></div>`;
+            $('info-stats').innerHTML = [
+                stat('Население', country.population ? formatMillions(country.population) : '—'),
+                stat('Областей', a.regions),
+                stat('Соседей', a.neighbours),
+                stat('Казна', money(a.money)),
+                stat('Доход / нед.', (a.net >= 0 ? '+' : '−') + money(a.net), a.net >= 0 ? 'pos' : 'neg'),
+                stat('Армия', a.army.toLocaleString('ru-RU')),
+            ].join('');
+            const advice = $('info-advice');
+            advice.className = `advice lvl-${a.level}`;
+            advice.textContent = a.advice;
             drawMinimap(regions, country.color);
-            const preview = new GameData(id);
-            const balance = preview.countryBalance(id);
-            const net = balance.income - balance.expense;
-            const money = n => '$' + new Intl.NumberFormat('ru-RU', { notation: 'compact', maximumFractionDigits: 1 }).format(Math.abs(n));
-            const neighbours = preview.neighbourCountries(id).filter(cc => preview.countries[cc].playable);
-            document.getElementById('start-economy').innerHTML = `<div class="start-metrics"><div class="start-metric"><small>Стартовая казна</small><strong>${money(preview.countries[id].money)}</strong></div><div class="start-metric"><small>Баланс за неделю</small><strong class="${net >= 0 ? 'pos' : 'neg'}">${net >= 0 ? '+' : '−'}${money(net)}</strong></div></div><p class="hint">${neighbours.length} соседних государств · ${Object.values(preview.getCountryStats(id).army).reduce((a,b) => a+b,0)} подразделений.${net < 0 ? ' Дефицит: сначала сократите расходы или развивайте экономику.' : ' Есть средства для первых инвестиций.'}</p>`;
-            startBtn.textContent = `Возглавить: ${country.name}`;
+            updateCta();
             startBtn.disabled = false;
         };
 
-        listEl.addEventListener('click', e => {
-            const item = e.target.closest('.country-list-item');
-            if (item) select(item.dataset.id);
+        // Кнопка говорит, что именно начнётся: страна и режим.
+        const updateCta = () => {
+            if (!selectedId) return;
+            const mode = scenario() === 'war2024' ? 'Сценарий 2024' : 'Мирный старт';
+            startBtn.innerHTML = `<span>Начать игру ▶</span><small>${escape(CountriesDB[selectedId].name)} · ${mode}</small>`;
+        };
+
+        // Нет сети — вместо флага плашка цвета страны на карте.
+        $('start-screen').addEventListener('error', e => {
+            const img = e.target;
+            if (img.tagName !== 'IMG' || !img.dataset.cc) return;
+            const stub = document.createElement('span');
+            stub.className = img.className + ' flag-stub';
+            if (img.id) stub.id = img.id;
+            stub.style.background = (CountriesDB[img.dataset.cc] || {}).color || 'var(--s3)';
+            img.replaceWith(stub);
+        }, true);
+
+        const select = (id, fromTap) => {
+            selectedId = id;
+            for (const el of document.querySelectorAll('#start-screen [data-id]')) {
+                const on = el.dataset.id === id;
+                el.setAttribute('aria-pressed', String(on));
+                el.classList.toggle('selected', on && el.classList.contains('country-list-item'));
+            }
+            renderDossier();
+            // На телефоне досье ниже списка — показываем его после выбора.
+            if (fromTap && window.matchMedia('(max-width: 899px)').matches) {
+                $('step-dossier').scrollIntoView({ behavior: 'smooth', block: 'start' });
+            }
+        };
+
+        const pick = e => {
+            const btn = e.target.closest('[data-id]');
+            if (btn) select(btn.dataset.id, true);
+        };
+        listEl.addEventListener('click', pick);
+        $('quick-countries').addEventListener('click', pick);
+        searchEl.addEventListener('input', renderList);
+        searchEl.addEventListener('keydown', e => {
+            if (e.key !== 'Enter') return;
+            const first = listEl.querySelector('[data-id]');
+            if (first) { searchEl.blur(); select(first.dataset.id, true); }
         });
-        searchEl.addEventListener('input', () => render(searchEl.value));
-        const quick = document.getElementById('quick-countries');
-        quick.innerHTML = [['BR','Большая экономика'],['FR','Компактная держава'],['UA','Пять областей']].map(([id, note]) => `<button class="quick-country" data-id="${id}" aria-pressed="false"><b>${CountriesDB[id].name}</b><small>${note}</small></button>`).join('');
-        quick.addEventListener('click', e => { const btn = e.target.closest('[data-id]'); if (btn) select(btn.dataset.id); });
+        moreBtn.addEventListener('click', () => { expanded = true; renderList(); });
+        for (const radio of document.querySelectorAll('input[name="scenario"]')) {
+            radio.addEventListener('change', () => { renderFeatured(); renderList(); if (selectedId) renderDossier(); });
+        }
 
         startBtn.addEventListener('click', () => {
             if (!selectedId || !CountriesDB[selectedId]) return;
             if ((saved || saveProblem) && !confirm('Начать новую игру? Сохранённая партия будет удалена.')) return;
             SaveGame.clear();
-            launch(new GameData(selectedId, {
-                cheat: document.getElementById('cheat-toggle').checked,
-                scenario: document.getElementById('scenario-toggle').checked ? 'war2024' : 'peace',
-            }));
+            launch(new GameData(selectedId, { cheat: $('cheat-toggle').checked, scenario: scenario() }));
         });
 
-        render('');
-        select(playable.includes('UA') ? 'UA' : playable[0]);
+        drawHeroArt($('hero-art'));
+        const initial = saved && playable.includes(saved.game.player) ? saved.game.player
+            : (playable.includes('UA') ? 'UA' : playable[0]);
+        selectedId = initial;
+        renderFeatured();
+        renderList();
+        select(initial, false);
     };
 
     function formatMillions(n) {
@@ -624,8 +753,9 @@ class GameCore {
             const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
             path.setAttribute('d', info.path);
             path.setAttribute('fill', color);
-            path.setAttribute('stroke', 'rgba(255,255,255,0.65)');
+            path.setAttribute('stroke', 'rgba(10,11,13,0.85)');
             path.setAttribute('stroke-width', '0.3');
+            path.setAttribute('vector-effect', 'non-scaling-stroke');
             svg.appendChild(path);
             minX = Math.min(minX, info.bx); maxX = Math.max(maxX, info.bx + info.bw);
             minY = Math.min(minY, info.by); maxY = Math.max(maxY, info.by + info.bh);
@@ -633,6 +763,46 @@ class GameCore {
         if (minX === Infinity) return;
         const pad = Math.max(maxX - minX, maxY - minY) * 0.08;
         svg.setAttribute('viewBox', `${minX - pad} ${minY - pad} ${maxX - minX + pad * 2} ${maxY - minY + pad * 2}`);
+    }
+
+    // Заставка: изометрический квартал из графитовых блоков с одним красным.
+    function drawHeroArt(svg) {
+        const S = 14, cos = Math.cos(Math.PI / 6), sin = 0.5;
+        const pt = (i, j, z) => [(i - j) * cos * S, (i + j) * sin * S - z * S];
+        const poly = (pts, fill) => `<polygon points="${pts.map(p => p.map(v => v.toFixed(1)).join(',')).join(' ')}" fill="${fill}"/>`;
+        const palette = {
+            dark: ['#2e333b', '#1c1f24', '#15171b'],
+            mid: ['#3b414a', '#252930', '#1a1d22'],
+            red: ['#ff3b2f', '#c9261c', '#8e1811'],
+            white: ['#eceef1', '#c5c9cf', '#9aa0a8'],
+        };
+        // [i, j, ширина, глубина, высота, цвет]
+        const blocks = [
+            [0, 0, 4, 3, 5, 'dark'], [5, -1, 3, 3, 9, 'mid'], [9, 0, 3, 4, 6, 'dark'],
+            [1, 4, 3, 3, 3, 'mid'], [5, 3, 2, 2, 12, 'dark'], [8, 5, 4, 2, 2, 'white'],
+            [13, 1, 2, 5, 4, 'red'], [0, 8, 5, 2, 2, 'dark'], [6, 8, 3, 3, 7, 'mid'],
+            [10, 8, 2, 2, 4, 'dark'], [3, 12, 3, 2, 1, 'white'],
+        ].sort((a, b) => (a[0] + a[1]) - (b[0] + b[1]));
+        let out = '';
+        // сетка «земли»
+        for (let k = -2; k <= 16; k += 2) {
+            const a = pt(k, -3, 0), b = pt(k, 16, 0), c = pt(-3, k, 0), d = pt(18, k, 0);
+            out += `<line x1="${a[0]}" y1="${a[1]}" x2="${b[0]}" y2="${b[1]}" stroke="rgba(255,255,255,0.05)"/>`;
+            out += `<line x1="${c[0]}" y1="${c[1]}" x2="${d[0]}" y2="${d[1]}" stroke="rgba(255,255,255,0.05)"/>`;
+        }
+        for (const [i, j, w, dpt, h, tone] of blocks) {
+            const [top, left, right] = palette[tone];
+            out += poly([pt(i, j + dpt, 0), pt(i + w, j + dpt, 0), pt(i + w, j + dpt, h), pt(i, j + dpt, h)], left);
+            out += poly([pt(i + w, j, 0), pt(i + w, j + dpt, 0), pt(i + w, j + dpt, h), pt(i + w, j, h)], right);
+            out += poly([pt(i, j, h), pt(i + w, j, h), pt(i + w, j + dpt, h), pt(i, j + dpt, h)], top);
+            if (tone === 'red') {
+                const [x, y] = pt(i + w, j + dpt / 2, h / 2);
+                out += `<circle cx="${x}" cy="${y}" r="3" fill="#fff" opacity="0.9"/>`;
+            }
+        }
+        svg.setAttribute('viewBox', '-150 -110 360 330');
+        svg.setAttribute('preserveAspectRatio', 'xMaxYMid slice');
+        svg.innerHTML = out;
     }
 
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', ready);

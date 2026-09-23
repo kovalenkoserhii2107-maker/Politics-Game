@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>Grand Strategy</title>
-<meta name="theme-color" content="#0b1221">
+<meta name="theme-color" content="#0a0b0d">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -146,81 +146,6 @@ button { font-family: inherit; }
 .top-btn.warning { background: var(--ui-accent-country); color: #111; border-color: transparent; }
 .top-btn.primary { background: var(--ui-accent); border-color: transparent; }
 .top-btn:disabled { opacity: 0.5; cursor: progress; }
-
-/* ================= СТАРТОВЫЙ ЭКРАН ================= */
-#start-screen {
-    position: fixed; inset: 0; background: rgba(6, 13, 28, 0.9);
-    backdrop-filter: blur(8px); z-index: 2000;
-    display: flex; justify-content: center; align-items: center;
-}
-.start-window {
-    background: var(--ui-bg); border: 1px solid var(--ui-border); border-radius: 14px;
-    width: 900px; max-width: 95%; padding: 26px; max-height: 94vh;
-    box-shadow: 0 20px 60px rgba(0,0,0,0.85); display: flex; flex-direction: column;
-}
-.start-window h1 {
-    text-align: center; margin: 0 0 18px; color: var(--ui-accent-country);
-    letter-spacing: 3px; font-size: 1.9em;
-}
-.start-layout { display: grid; grid-template-columns: 1fr 1.5fr; gap: 26px; overflow: hidden; }
-.country-column { display: flex; flex-direction: column; gap: 10px; min-height: 0; }
-#start-search {
-    background: rgba(0,0,0,0.4); border: 1px solid var(--ui-border); color: var(--ui-text);
-    border-radius: 8px; padding: 10px 12px; font-size: 0.95em; outline: none;
-}
-#start-search:focus { border-color: var(--ui-accent); }
-.country-list {
-    border: 1px solid rgba(255,255,255,0.09); border-radius: 8px;
-    overflow-y: auto; max-height: 430px; background: rgba(0,0,0,0.3);
-    scrollbar-width: thin; scrollbar-color: #475569 transparent;
-}
-.country-list::-webkit-scrollbar { width: 6px; }
-.country-list::-webkit-scrollbar-thumb { background: #475569; border-radius: 3px; }
-.country-list-item {
-    padding: 11px 15px; border-bottom: 1px solid rgba(255,255,255,0.05);
-    cursor: pointer; transition: 0.12s; display: flex; justify-content: space-between; gap: 10px;
-}
-.country-list-item:hover { background: rgba(59,130,246,0.14); }
-.country-list-item.selected {
-    background: rgba(59,130,246,0.28); font-weight: 700;
-    box-shadow: inset 3px 0 0 var(--ui-accent);
-}
-.list-regions { color: var(--ui-muted); font-size: 0.85em; font-weight: 400; }
-.country-list-empty { padding: 20px; text-align: center; color: var(--ui-muted); }
-
-.country-info { display: flex; flex-direction: column; overflow-y: auto; padding-right: 6px; }
-.country-info h2 {
-    margin: 0 0 14px; color: #fff; font-size: 1.45em;
-    border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 10px;
-}
-.visual-header {
-    display: flex; gap: 18px; align-items: center; margin-bottom: 14px;
-    background: rgba(0,0,0,0.25); padding: 12px; border-radius: 8px;
-    border: 1px solid rgba(255,255,255,0.05); height: 88px; visibility: hidden;
-}
-.country-flag { width: 108px; border-radius: 4px; border: 1px solid rgba(255,255,255,0.2); background: #000; }
-.country-minimap { flex: 1; height: 100%; filter: drop-shadow(0 3px 6px rgba(0,0,0,0.6)); }
-.country-info-row {
-    display: flex; justify-content: space-between; margin-bottom: 8px;
-    color: #cbd5e1; border-bottom: 1px dashed rgba(255,255,255,0.06); padding-bottom: 6px;
-}
-.country-info-row strong { color: #fff; }
-.cheat-box {
-    margin-top: auto; margin-bottom: 14px; padding: 12px 15px;
-    background: rgba(239,68,68,0.06); border: 1px solid rgba(239,68,68,0.22); border-radius: 8px;
-}
-.cheat-label { cursor: pointer; display: flex; align-items: center; gap: 14px; color: #fca5a5; }
-.cheat-label input { width: 18px; height: 18px; accent-color: var(--ui-danger); cursor: pointer; }
-.cheat-text-wrap { display: flex; flex-direction: column; gap: 2px; }
-.cheat-text-wrap b { color: #f87171; text-transform: uppercase; letter-spacing: 0.5px; }
-.cheat-text-wrap span { font-size: 0.88em; opacity: 0.9; }
-#start-game-btn {
-    width: 100%; padding: 14px; font-size: 1.05em; font-weight: 700;
-    background: var(--ui-accent); color: #fff; border: none; border-radius: 8px;
-    cursor: pointer; text-transform: uppercase; letter-spacing: 1px; transition: 0.15s;
-}
-#start-game-btn:disabled { background: #334155; color: #64748b; cursor: not-allowed; }
-#start-game-btn:not(:disabled):hover { background: #2563eb; transform: translateY(-1px); }
 
 /* ================= БОКОВАЯ ПАНЕЛЬ ================= */
 #side-panel {
@@ -416,33 +341,6 @@ input[type=range] { width: 100%; cursor: pointer; accent-color: var(--ui-accent)
 }
 #toast.visible { opacity: 1; transform: translateX(-50%) translateY(0); }
 
-@media (max-width: 900px) {
-    /* Стартовый экран разворачивается на весь телефон: список стран получает
-       максимум высоты, кнопка старта всегда остаётся под пальцем. */
-    #start-screen { align-items: stretch; justify-content: stretch; }
-    .start-window {
-        width: 100%; max-width: 100%; height: 100vh; height: 100dvh; max-height: none;
-        border: none; border-radius: 0; padding: 10px 14px 0;
-    }
-    .start-window h1 { font-size: 1.3em; letter-spacing: 2px; margin: 2px 0 12px; }
-    .start-layout {
-        grid-template-columns: 1fr; gap: 12px;
-        align-content: start;   /* иначе грид растягивает строки и оставляет провал */
-        overflow-y: auto; overflow-x: hidden; flex: 1; min-height: 0;
-        -webkit-overflow-scrolling: touch;
-    }
-    .country-list { max-height: 34vh; }
-    .country-list-item { padding: 12px 14px; }
-    .country-info { overflow: visible; padding-right: 0; }
-    .country-info h2 { font-size: 1.25em; margin-bottom: 10px; padding-bottom: 8px; }
-    .visual-header { height: 74px; padding: 10px; gap: 14px; margin-bottom: 12px; }
-    .country-flag { width: 88px; }
-    .country-info-row { font-size: 0.92em; margin-bottom: 6px; padding-bottom: 5px; }
-    .cheat-box { margin-top: 12px; margin-bottom: 10px; padding: 10px 12px; }
-    .cheat-text-wrap b { font-size: 0.95em; }
-    .cheat-text-wrap span { font-size: 0.82em; }
-    #start-game-btn { position: sticky; bottom: 10px; padding: 13px; }
-}
 
 
 /* ================= НОВЫЕ ЭЛЕМЕНТЫ ================= */
@@ -573,18 +471,6 @@ body { overscroll-behavior: none; }
 #gov-tax-note { font-size: 0.82em; color: var(--ui-muted); margin-top: 6px; }
 .gov-menu { display: flex; gap: 10px; margin-top: 14px; }
 .gov-menu button { flex: 1; padding: 11px; border-radius: 8px; border: 1px solid var(--ui-border); background: rgba(255,255,255,0.06); color: #fff; font-weight: 700; cursor: pointer; }
-#continue-box {
-    display: none; margin-bottom: 14px; padding: 12px 14px; border-radius: 10px;
-    background: rgba(59,130,246,0.12); border: 1px solid rgba(59,130,246,0.4);
-}
-#continue-box .continue-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
-#continue-info { color: #cbd5e1; font-size: 0.9em; }
-#continue-btn { background: var(--ui-accent); color: #fff; border: none; border-radius: 8px; padding: 11px 16px; font-weight: 800; cursor: pointer; white-space: nowrap; }
-.scenario-box { margin-top: 0; background: rgba(251,191,36,0.06); border-color: rgba(251,191,36,0.25); }
-.scenario-box .cheat-label { color: #fde68a; }
-.scenario-box .cheat-text-wrap b { color: #fbbf24; }
-.scenario-box input { accent-color: #f59e0b; }
-
 /* территория противника обведена красным */
 #world-map .region.enemy { stroke: #ef4444 !important; stroke-width: calc(var(--sw) * 1.6); }
 
@@ -663,70 +549,112 @@ body { overscroll-behavior: none; }
 @media (max-width: 480px) {
     #top-bar { font-size: 11px; }
     .stat-item > span:first-child { font-size: 0.9em; }
-    .start-window h1 { font-size: 1.15em; }
-    .country-list { max-height: 30vh; }
 }
 </style>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Exo+2:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;700&display=swap">
 <link rel="stylesheet" href="css/campaign.css">
+<link rel="stylesheet" href="css/theme.css">
+<link rel="stylesheet" href="css/start.css">
 </head>
 <body>
 
 <!-- СТАРТОВЫЙ ЭКРАН -->
 <div id="start-screen">
-    <div class="start-window">
-        <div class="start-heading"><span class="eyebrow">ПОЛИТИКА · ЭКОНОМИКА · СТРАТЕГИЯ</span><h1>GRAND STRATEGY</h1><p>Постройте державу. Измените карту мира.</p></div>
-        <div class="start-layout">
-            <div class="country-column">
-                <div id="continue-box">
-                    <div class="continue-row">
-                        <div><b>Сохранённая партия</b><div id="continue-info"></div></div>
-                        <button id="continue-btn">Продолжить</button>
-                    </div>
-                </div>
-                <p id="save-warning" class="hint" role="status" hidden></p>
-                <h2 class="section-title">1. Выберите страну</h2>
-                <div id="quick-countries" class="quick-countries" aria-label="Быстрый выбор страны"></div>
-                <details id="all-countries"><summary>Все страны мира</summary>
+    <div class="start-shell">
+        <header class="start-hero">
+            <svg id="hero-art" class="hero-art" aria-hidden="true"></svg>
+            <div class="hero-text">
+                <div class="kicker"><span class="kicker-dot"></span>Геополитический симулятор · 2024</div>
+                <h1 class="brand">GRAND<span>STRATEGY</span></h1>
+                <p class="hero-lead">Выберите страну, развивайте экономику, собирайте армию и объедините мир под своим флагом.</p>
+            </div>
+            <ol class="howto" aria-label="Как играть">
+                <li><span class="howto-ico">💰</span><b>Экономика</b><small>Налоги и стройки дают деньги</small></li>
+                <li><span class="howto-ico">🪖</span><b>Армия</b><small>Набирайте войска в областях</small></li>
+                <li><span class="howto-ico">🤝</span><b>Дипломатия</b><small>Объявляйте войну и мир</small></li>
+                <li><span class="howto-ico">🚩</span><b>Победа</b><small>Захватите все области мира</small></li>
+            </ol>
+        </header>
+
+        <section id="continue-box" class="continue-card hud" hidden>
+            <img id="continue-flag" class="flag" alt="" width="48" height="32">
+            <div class="continue-text">
+                <span class="label">Сохранённая партия</span>
+                <b id="continue-name"></b>
+                <small id="continue-info"></small>
+            </div>
+            <button id="continue-btn" class="btn btn-light" type="button">Продолжить ▶</button>
+        </section>
+        <div id="save-warning" class="notice" role="status" hidden>
+            <span>Старое сохранение не подходит к новой версии игры. Начните новую партию.</span>
+            <button id="save-delete-btn" class="btn btn-ghost btn-sm" type="button">Удалить</button>
+        </div>
+
+        <div class="start-grid">
+            <section class="start-col picker" aria-labelledby="step-country">
+                <h2 class="step-title" id="step-country"><span class="step-no">01</span>Выберите страну</h2>
+                <div class="search">
                     <label class="sr-only" for="start-search">Поиск страны</label>
-                    <input id="start-search" type="search" placeholder="Название страны…" autocomplete="off">
-                    <div class="country-list" id="start-country-list" aria-label="Страны"></div>
-                </details>
-            </div>
-            <div class="country-info">
-                <h2 id="info-name">Выберите страну</h2>
-                <div class="visual-header" id="info-visuals">
-                    <img id="info-flag" src="" alt="Флаг" class="country-flag">
-                    <svg id="info-minimap" class="country-minimap"></svg>
+                    <input id="start-search" type="search" placeholder="Найти страну…" autocomplete="off" enterkeyhint="search">
                 </div>
-                <div class="country-info-row" id="info-capital"><strong>Столица:</strong> <span>—</span></div>
-                <div class="country-info-row" id="info-pop"><strong>Население:</strong> <span>—</span></div>
-                <div class="country-info-row" id="info-area"><strong>Площадь:</strong> <span>—</span></div>
-                <div class="country-info-row" id="info-regions"><strong>Областей:</strong> <span>—</span></div>
-                <div id="start-economy" aria-live="polite"></div>
-                <p class="start-goal">Цель кампании — контроль всех областей суверенных стран. Один ход — одна неделя.</p>
-                <details class="start-options"><summary>2. Сценарий и режим игры</summary>
-                <p class="hint">По умолчанию — мирный старт. Сначала укрепите бюджет и производство.</p>
-                <div class="cheat-box scenario-box">
-                    <label class="cheat-label">
-                        <input type="checkbox" id="scenario-toggle">
-                        <span class="cheat-text-wrap">
-                            <b>Сценарий 2024</b>
-                            <span>С первого хода идёт война России и Украины</span>
-                        </span>
+                <div id="featured-block">
+                    <div class="label">Для первой игры</div>
+                    <div id="quick-countries" class="featured"></div>
+                </div>
+                <div class="list-head">
+                    <span class="label" id="list-label">Все страны</span>
+                    <span class="legend"><i class="lvl-1"></i>легко <i class="lvl-2"></i>средне <i class="lvl-3"></i>сложно</span>
+                </div>
+                <div class="country-list" id="start-country-list" aria-label="Страны"></div>
+                <button id="list-more" class="btn btn-ghost list-more" type="button"></button>
+            </section>
+
+            <section class="start-col setup" aria-labelledby="step-dossier">
+                <h2 class="step-title" id="step-dossier"><span class="step-no">02</span>Ваша страна</h2>
+                <div class="dossier hud" id="dossier">
+                    <div class="dossier-head">
+                        <img id="info-flag" class="flag flag-lg" alt="" width="72" height="48">
+                        <div class="dossier-name">
+                            <b id="info-name">—</b>
+                            <small id="info-capital">—</small>
+                        </div>
+                        <div id="info-difficulty" class="difficulty"></div>
+                    </div>
+                    <div class="dossier-body">
+                        <svg id="info-minimap" class="minimap" aria-hidden="true"></svg>
+                        <div class="stats" id="info-stats"></div>
+                    </div>
+                    <p id="info-advice" class="advice"></p>
+                </div>
+
+                <h2 class="step-title"><span class="step-no">03</span>Режим игры</h2>
+                <div class="modes" role="radiogroup" aria-label="Режим игры">
+                    <label class="mode">
+                        <input type="radio" name="scenario" value="peace" id="scenario-peace" checked>
+                        <span class="mode-ico">🕊️</span>
+                        <span class="mode-text"><b>Мирный старт</b><small>Все страны живут в мире. Спокойно развивайтесь.</small></span>
+                    </label>
+                    <label class="mode">
+                        <input type="radio" name="scenario" value="war2024" id="scenario-toggle">
+                        <span class="mode-ico">⚔️</span>
+                        <span class="mode-text"><b>Сценарий 2024</b><small>С первого хода идёт война России и Украины.</small></span>
                     </label>
                 </div>
-                <div class="cheat-box">
-                    <label class="cheat-label">
+                <details class="extra">
+                    <summary>Дополнительно</summary>
+                    <label class="switch">
                         <input type="checkbox" id="cheat-toggle">
-                        <span class="cheat-text-wrap">
-                            <b>Чит-код: режим бога</b>
-                            <span>Ваши атаки всегда успешны и без потерь</span>
-                        </span>
+                        <span class="switch-track" aria-hidden="true"></span>
+                        <span class="switch-text"><b>Режим бога</b><small>Ваши атаки всегда успешны и без потерь</small></span>
                     </label>
-                </div>
                 </details>
-                <button id="start-game-btn" disabled>Начать кампанию</button>
-            </div>
+
+            </section>
+        </div>
+        <div class="start-cta">
+            <button id="start-game-btn" class="btn-cta" type="button" disabled>Выберите страну</button>
         </div>
     </div>
 </div>
@@ -745,7 +673,7 @@ body { overscroll-behavior: none; }
         </div>
         <div class="stat-group" id="action-bar">
             <button id="diplo-btn" class="top-btn nav-btn"><span class="ico">🤝</span><span class="lbl">Дипломатия</span><span id="war-badge" class="war-badge"></span></button>
-            <button id="campaign-btn" class="top-btn nav-btn"><span class="lbl">Кампания</span><small id="campaign-count"></small></button>
+            <button id="campaign-btn" class="top-btn nav-btn"><span class="ico">🎯</span><span class="lbl">Кампания</span><small id="campaign-count"></small></button>
             <button id="gov-btn" class="top-btn nav-btn warning"><span class="ico">🏛️</span><span class="lbl">Правительство</span></button>
             <button id="end-turn-btn" class="top-btn nav-btn primary"><span class="ico">⏭️</span><span class="lbl">Конец хода</span></button>
         </div>
