@@ -41,6 +41,8 @@ class MapEngine {
         this.cullRegions = [];
         this.cullLabels = [];
         this.cullCities = [];
+        this.cullBadges = [];
+        this.badges = [];
 
         this.buildLayers();
         this.initEvents();
@@ -232,14 +234,10 @@ class MapEngine {
     focusRegion(id) {
         const region = this.data.getRegion(id), bounds = RegionsDB[id];
         if (!region || !bounds) return;
-        cancelAnimationFrame(this.animFrame);
         this.measure();
         const width = Math.max(bounds.bw * 1.4, bounds.bh * 1.4 * this.rect.width / this.rect.height, this.minView);
-        this.scale = this.clampScale(this.rect.width / (Math.min(width, this.interactiveView * 0.9) * this.baseScale));
-        this.centerOn(region.cx, region.cy);
-        this.updateLOD();
-        this.updateLabelVisibility();
-        document.dispatchEvent(new CustomEvent('zoomLevelChanged', { detail: { isRegional: this.isRegionalZoom } }));
+        const scale = this.clampScale(this.rect.width / (Math.min(width, this.interactiveView * 0.9) * this.baseScale));
+        this.flyTo({ x: region.lx, y: region.ly }, scale);
     }
 
     // Вся страна на экране, но не дальше уровня, где кликаются области.
@@ -252,18 +250,20 @@ class MapEngine {
             minX = Math.min(minX, b.bx); minY = Math.min(minY, b.by);
             maxX = Math.max(maxX, b.bx + b.bw); maxY = Math.max(maxY, b.by + b.bh);
         }
-        cancelAnimationFrame(this.animFrame);
         this.measure();
         const w = maxX - minX, h = maxY - minY;
         const width = Math.max(w * 1.15, h * 1.15 * this.rect.width / this.rect.height, this.minView * 2);
-        this.scale = this.clampScale(this.rect.width / (Math.min(width, this.interactiveView * 0.9) * this.baseScale));
+        const scale = this.clampScale(this.rect.width / (Math.min(width, this.interactiveView * 0.9) * this.baseScale));
         const capital = this.data.getRegion(this.data.countries[countryId].capital);
         // Страна не влезла — центрируем на столице, иначе на середине страны.
-        if (width > this.interactiveView * 0.9 && capital) this.centerOn(capital.cx, capital.cy);
-        else this.centerOn(minX + w / 2, minY + h / 2);
-        this.updateLOD();
-        this.updateLabelVisibility();
-        document.dispatchEvent(new CustomEvent('zoomLevelChanged', { detail: { isRegional: this.isRegionalZoom } }));
+        const target = width > this.interactiveView * 0.9 && capital ? { x: capital.lx, y: capital.ly } : { x: minX + w / 2, y: minY + h / 2 };
+        this.flyTo(target, scale);
+    }
+
+    // Перелёт к точке: она встаёт в центр видимой части экрана.
+    flyTo(point, scale, ms = 420) {
+        const safe = this.safeRect();
+        this.animateTo(point, { x: (safe.left + safe.right) / 2, y: (safe.top + safe.bottom) / 2 }, scale, ms);
     }
 
     safeRect() {
@@ -290,6 +290,8 @@ class MapEngine {
 
     // Если точка карты спрятана под панелью — плавно выводим её в видимую часть.
     ensureVisible(x, y) {
+        // Идёт перелёт (например, приближение двойным касанием) — не сбиваем его.
+        if (this.animating) return;
         this.measure();
         const safe = this.safeRect();
         const p = this.screenOf(x, y);
@@ -316,6 +318,7 @@ class MapEngine {
     // масштаб меняется геометрически — так движение выглядит равномерным.
     animateTo(point, screen, targetScale, ms = 280) {
         cancelAnimationFrame(this.animFrame);
+        this.animating = true;
         const from = this.screenOf(point.x, point.y);
         const s0 = this.scale, s1 = targetScale;
         const wasRegional = this.isRegionalZoom;
@@ -332,8 +335,9 @@ class MapEngine {
             this.applyCamera();
             this.applyDetail();
             this.scheduleLabelUpdate();
-            if (t < 1) this.animFrame = requestAnimationFrame(step);
-            else if (wasRegional !== this.isRegionalZoom) {
+            if (t < 1) { this.animFrame = requestAnimationFrame(step); return; }
+            this.animating = false;
+            if (wasRegional !== this.isRegionalZoom) {
                 this.updateLOD();
                 document.dispatchEvent(new CustomEvent('zoomLevelChanged', { detail: { isRegional: this.isRegionalZoom } }));
             }
@@ -349,6 +353,7 @@ class MapEngine {
     }
 
     applyCamera() {
+        this.clampCamera();
         const k = this.pxPerUnit;
         const viewW = this.rect.width / k;
         const viewH = this.rect.height / k;
@@ -356,8 +361,25 @@ class MapEngine {
             `${this.camX.toFixed(3)} ${this.camY.toFixed(3)} ${viewW.toFixed(3)} ${viewH.toFixed(3)}`);
         // Толщина линий и подписи заданы в единицах карты — держим их
         // постоянными на экране: один экранный пиксель = 1/k единиц.
-        this.svg.style.setProperty('--sw', (1 / k).toFixed(5) + 'px');
+        // При простом сдвиге масштаб не меняется — и пересчитывать стили
+        // тысяч подписей на каждом кадре незачем.
+        if (k !== this.lastK) {
+            this.lastK = k;
+            this.svg.style.setProperty('--sw', (1 / k).toFixed(5) + 'px');
+            this.svg.style.setProperty('--k', (1 / k).toFixed(5));
+        }
         this.cull();
+        this.scheduleDeclutter();
+    }
+
+    // Карту нельзя утащить за край: центр экрана остаётся над миром.
+    clampCamera() {
+        const k = this.pxPerUnit;
+        const halfW = this.rect.width / (2 * k), halfH = this.rect.height / (2 * k);
+        const cx = Math.min(Math.max(this.camX + halfW, 0), 1200);
+        const cy = Math.min(Math.max(this.camY + halfH, 40), 760);
+        this.camX = cx - halfW;
+        this.camY = cy - halfH;
     }
 
     // Всё, что за краем экрана, из отрисовки убираем: при камере на viewBox
@@ -369,7 +391,7 @@ class MapEngine {
         const x1 = this.camX - padX, x2 = this.camX + this.rect.width / k + padX;
         const y1 = this.camY - padY, y2 = this.camY + this.rect.height / k + padY;
 
-        for (const list of [this.cullRegions, this.cullLabels, this.cullCities]) {
+        for (const list of [this.cullRegions, this.cullLabels, this.cullCities, this.cullBadges]) {
             for (const item of list) {
                 const visible = item.x + item.w >= x1 && item.x <= x2
                              && item.y + item.h >= y1 && item.y <= y2;
@@ -381,30 +403,37 @@ class MapEngine {
         }
     }
 
-    // Меняем масштаб, удерживая точку под курсором на месте.
-    zoomAt(newScale, pivotX, pivotY) {
-        cancelAnimationFrame(this.animFrame);
-        const minScale = this.rect.width / (this.maxView * this.baseScale);
-        const maxScale = this.rect.width / (this.minView * this.baseScale);
-        const clamped = Math.min(Math.max(newScale, minScale), maxScale);
-        if (clamped === this.scale) return;
+    // Ставит масштаб так, чтобы точка карты `anchor` оказалась под экранной
+    // точкой `screen`. На этом держатся колесо, щипок и все анимации.
+    placeCamera(scale, anchor, screen) {
         const wasRegional = this.isRegionalZoom;
-        const anchor = this.clientToMap(pivotX, pivotY);
-
-        this.scale = clamped;
+        this.scale = this.clampScale(scale);
         const k = this.pxPerUnit;
-        this.camX = anchor.x - (pivotX - this.rect.left) / k;
-        this.camY = anchor.y - (pivotY - this.rect.top) / k;
-
+        this.camX = anchor.x - (screen.x - this.rect.left) / k;
+        this.camY = anchor.y - (screen.y - this.rect.top) / k;
         this.applyCamera();
         this.applyDetail();
         this.scheduleLabelUpdate();
         if (wasRegional !== this.isRegionalZoom) {
             this.updateLOD();
-            document.dispatchEvent(new CustomEvent('zoomLevelChanged', {
-                detail: { isRegional: this.isRegionalZoom },
-            }));
+            document.dispatchEvent(new CustomEvent('zoomLevelChanged', { detail: { isRegional: this.isRegionalZoom } }));
         }
+    }
+
+    // Меняем масштаб, удерживая точку под курсором на месте.
+    zoomAt(newScale, pivotX, pivotY) {
+        this.stopMotion();
+        if (this.clampScale(newScale) === this.scale) return;
+        this.placeCamera(newScale, this.clientToMap(pivotX, pivotY), { x: pivotX, y: pivotY });
+    }
+
+    // Любое касание останавливает перелёт, инерцию и плавный зум колесом.
+    stopMotion() {
+        this.animating = false;
+        cancelAnimationFrame(this.animFrame);
+        cancelAnimationFrame(this.inertiaFrame);
+        cancelAnimationFrame(this.wheelFrame);
+        this.wheelTarget = null;
     }
 
     // --- события -------------------------------------------------------
@@ -445,52 +474,68 @@ class MapEngine {
             }
         });
 
+        // Колесо: не прыжками, а плавно догоняем целевой масштаб. Щипок на
+        // тачпаде приходит как wheel с ctrlKey — он и так плавный.
         this.container.addEventListener('wheel', e => {
             e.preventDefault();
             this.measure();
-            const factor = Math.exp(-e.deltaY * 0.0016);
-            this.zoomAt(this.scale * factor, e.clientX, e.clientY);
+            const delta = e.deltaY * (e.deltaMode === 1 ? 16 : 1);
+            if (e.ctrlKey) { this.zoomAt(this.scale * Math.exp(-delta * 0.01), e.clientX, e.clientY); return; }
+            cancelAnimationFrame(this.animFrame);
+            cancelAnimationFrame(this.inertiaFrame);
+            this.wheelTarget = this.clampScale((this.wheelTarget || this.scale) * Math.exp(-delta * 0.0018));
+            this.wheelPivot = { x: e.clientX, y: e.clientY };
+            if (!this.wheelFrame) this.wheelFrame = requestAnimationFrame(() => this.wheelStep());
         }, { passive: false });
+
+        this.container.addEventListener('dblclick', e => {
+            e.preventDefault();
+            this.zoomToward(e.clientX, e.clientY, 2);
+        });
 
         // Указатели покрывают мышь, тач и перо одним кодом.
         this.pointers = new Map();
         this.container.addEventListener('pointerdown', e => {
             if (e.pointerType === 'mouse' && e.button !== 0) return;
-            cancelAnimationFrame(this.animFrame);
-            // Capture only an actual drag. Capturing a mouse press here
-            // retargets its click to the container instead of the region.
-            this.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+            this.stopMotion();
+            this.measure();
+            this.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY, type: e.pointerType });
             if (this.pointers.size === 1) {
-                this.measure();
-                this.isDragging = true;
+                this.startDrag(e.clientX, e.clientY);
                 this.wasDragging = false;
-                this.dragCamX = this.camX;
-                this.dragCamY = this.camY;
-                this.downX = e.clientX;
-                this.downY = e.clientY;
-            } else {
+                this.tapStart = { x: e.clientX, y: e.clientY, t: performance.now() };
+            } else if (this.pointers.size === 2) {
+                // Второй палец — щипок. Захватываем оба указателя, чтобы
+                // жест не потерялся, если палец уйдёт на панель.
                 this.isDragging = false;
                 this.wasDragging = true;
-                for (const id of this.pointers.keys()) this.container.setPointerCapture(id);
-                this.pinchStart = this.pinchState();
+                for (const id of this.pointers.keys()) {
+                    try { this.container.setPointerCapture(id); } catch (err) { /* указатель уже отпущен */ }
+                }
+                const p = this.pinchState();
+                this.pinch = { dist: p.dist, scale: this.scale, anchor: this.clientToMap(p.x, p.y) };
             }
         });
 
         this.container.addEventListener('pointermove', e => {
-            if (!this.pointers.has(e.pointerId)) return;
-            this.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+            const pointer = this.pointers.get(e.pointerId);
+            if (!pointer) return;
+            pointer.x = e.clientX;
+            pointer.y = e.clientY;
 
-            if (this.pointers.size >= 2 && this.pinchStart) {
+            if (this.pointers.size >= 2 && this.pinch) {
+                // Масштаб — по расстоянию между пальцами, сдвиг — по их
+                // середине: карта ведёт себя как фото в галерее.
                 const now = this.pinchState();
-                if (now.dist > 0 && this.pinchStart.dist > 0) {
-                    this.wasDragging = true;
-                    this.zoomAt(this.scale * (now.dist / this.pinchStart.dist), now.x, now.y);
-                    this.pinchStart = now;
+                if (now.dist > 0 && this.pinch.dist > 0) {
+                    this.placeCamera(this.pinch.scale * (now.dist / this.pinch.dist), this.pinch.anchor, now);
                 }
                 return;
             }
             if (!this.isDragging) return;
-            if (Math.abs(e.clientX - this.downX) > 4 || Math.abs(e.clientY - this.downY) > 4) {
+            // У пальца дрожь больше, чем у мыши: малый сдвиг — ещё касание.
+            const threshold = e.pointerType === 'mouse' ? 4 : 9;
+            if (!this.wasDragging && Math.hypot(e.clientX - this.downX, e.clientY - this.downY) > threshold) {
                 this.wasDragging = true;
                 if (!this.container.hasPointerCapture(e.pointerId)) this.container.setPointerCapture(e.pointerId);
             }
@@ -499,19 +544,48 @@ class MapEngine {
             this.camX = this.dragCamX - (e.clientX - this.downX) / k;
             this.camY = this.dragCamY - (e.clientY - this.downY) / k;
             this.applyCamera();
+            const t = performance.now();
+            this.samples.push({ x: e.clientX, y: e.clientY, t });
+            while (this.samples.length > 2 && t - this.samples[0].t > 100) this.samples.shift();
         });
 
         const release = e => {
+            const pointer = this.pointers.get(e.pointerId);
+            if (!pointer) return;
             this.pointers.delete(e.pointerId);
-            if (this.pointers.size < 2) this.pinchStart = null;
-            if (this.pointers.size === 0) {
-                this.isDragging = false;
-                // сбрасываем флаг после текущего клика, чтобы перетаскивание не считалось кликом
-                setTimeout(() => { this.wasDragging = false; }, 0);
+            if (this.pointers.size === 1) {
+                // Щипок закончился, один палец остался — продолжаем тянуть с
+                // его текущего места, без рывка.
+                this.pinch = null;
+                const [rest] = this.pointers.values();
+                this.startDrag(rest.x, rest.y);
+                this.wasDragging = true;
+                return;
             }
+            if (this.pointers.size > 0) return;
+            this.pinch = null;
+            const dragged = this.wasDragging && this.isDragging;
+            this.isDragging = false;
+            if (dragged && e.type === 'pointerup') this.startInertia();
+            if (!this.wasDragging && e.type === 'pointerup' && pointer.type !== 'mouse') this.checkDoubleTap(e);
+            // сбрасываем флаг после текущего клика, чтобы перетаскивание не считалось кликом
+            setTimeout(() => { this.wasDragging = false; }, 0);
         };
         this.container.addEventListener('pointerup', release);
         this.container.addEventListener('pointercancel', release);
+
+        // Клавиатура на компьютере: + и − масштаб, стрелки — сдвиг.
+        window.addEventListener('keydown', e => {
+            if (e.target.closest && e.target.closest('input, textarea, select')) return;
+            if (!document.body.classList.contains('in-game') || document.querySelector('.modal.active')) return;
+            const step = 120;
+            const pan = { ArrowLeft: [-step, 0], ArrowRight: [step, 0], ArrowUp: [0, -step], ArrowDown: [0, step] }[e.key];
+            if (e.key === '+' || e.key === '=') this.zoomBy(1.6);
+            else if (e.key === '-' || e.key === '_') this.zoomBy(1 / 1.6);
+            else if (pan) this.panBy(pan[0], pan[1]);
+            else return;
+            e.preventDefault();
+        });
 
         window.addEventListener('resize', () => {
             const cx = this.camX + this.rect.width / (2 * this.pxPerUnit);
@@ -525,14 +599,82 @@ class MapEngine {
         });
     }
 
-    pinchState() {
-        const pts = [...this.pointers.values()];
-        const [a, b] = pts;
-        return {
-            dist: Math.hypot(a.x - b.x, a.y - b.y),
-            x: (a.x + b.x) / 2,
-            y: (a.y + b.y) / 2,
+    startDrag(x, y) {
+        this.isDragging = true;
+        this.dragCamX = this.camX;
+        this.dragCamY = this.camY;
+        this.downX = x;
+        this.downY = y;
+        this.samples = [{ x, y, t: performance.now() }];
+    }
+
+    // Отпустили палец на ходу — карта катится дальше и плавно тормозит.
+    startInertia() {
+        const samples = this.samples || [];
+        if (samples.length < 2) return;
+        const first = samples[0], last = samples[samples.length - 1];
+        const dt = last.t - first.t;
+        if (dt <= 0 || performance.now() - last.t > 60) return;   // палец успел остановиться
+        let vx = (last.x - first.x) / dt, vy = (last.y - first.y) / dt;   // px/мс
+        const speed = Math.hypot(vx, vy);
+        if (speed < 0.15) return;
+        const cap = 4;
+        if (speed > cap) { vx *= cap / speed; vy *= cap / speed; }
+        let prev = performance.now();
+        const step = now => {
+            const elapsed = Math.min(now - prev, 40);
+            prev = now;
+            const k = this.pxPerUnit;
+            this.camX -= (vx * elapsed) / k;
+            this.camY -= (vy * elapsed) / k;
+            this.applyCamera();
+            const decay = Math.exp(-elapsed / 280);
+            vx *= decay; vy *= decay;
+            if (Math.hypot(vx, vy) > 0.02) this.inertiaFrame = requestAnimationFrame(step);
         };
+        this.inertiaFrame = requestAnimationFrame(step);
+    }
+
+    wheelStep() {
+        this.wheelFrame = null;
+        if (!this.wheelTarget) return;
+        const ratio = this.wheelTarget / this.scale;
+        const next = Math.abs(Math.log(ratio)) < 0.004 ? this.wheelTarget : this.scale * Math.pow(ratio, 0.28);
+        this.placeCamera(next, this.clientToMap(this.wheelPivot.x, this.wheelPivot.y), this.wheelPivot);
+        if (next === this.wheelTarget) { this.wheelTarget = null; return; }
+        this.wheelFrame = requestAnimationFrame(() => this.wheelStep());
+    }
+
+    // Двойное касание — приблизить в этой точке.
+    checkDoubleTap(e) {
+        const now = performance.now();
+        const last = this.lastTap;
+        this.lastTap = { x: e.clientX, y: e.clientY, t: now };
+        if (last && now - last.t < 320 && Math.hypot(e.clientX - last.x, e.clientY - last.y) < 30) {
+            this.lastTap = null;
+            this.zoomToward(e.clientX, e.clientY, 2);
+        }
+    }
+
+    // Плавно приблизить в 'factor' раз, подтянув точку касания к центру.
+    zoomToward(clientX, clientY, factor) {
+        this.measure();
+        const safe = this.safeRect();
+        const anchor = this.clientToMap(clientX, clientY);
+        const screen = { x: (clientX + (safe.left + safe.right) / 2) / 2, y: (clientY + (safe.top + safe.bottom) / 2) / 2 };
+        this.animateTo(anchor, screen, this.clampScale(this.scale * factor), 320);
+    }
+
+    panBy(dx, dy) {
+        this.measure();
+        const center = { x: this.rect.left + this.rect.width / 2, y: this.rect.top + this.rect.height / 2 };
+        const anchor = this.clientToMap(center.x + dx, center.y + dy);
+        this.animateTo(anchor, center, this.scale, 220);
+    }
+
+    pinchState() {
+        const [a, b] = [...this.pointers.values()];
+        return { dist: Math.hypot(a.x - b.x, a.y - b.y), x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
     }
 
     // --- подписи стран ---------------------------------------------------
@@ -551,9 +693,9 @@ class MapEngine {
             let sumX = 0, sumY = 0;
             let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
             for (const region of component) {
-                sumX += region.cx; sumY += region.cy;
-                minX = Math.min(minX, region.cx); maxX = Math.max(maxX, region.cx);
-                minY = Math.min(minY, region.cy); maxY = Math.max(maxY, region.cy);
+                sumX += region.lx; sumY += region.ly;
+                minX = Math.min(minX, region.lx); maxX = Math.max(maxX, region.lx);
+                minY = Math.min(minY, region.ly); maxY = Math.max(maxY, region.ly);
             }
             const name = this.data.getCountry(countryId).name;
             const width = Math.max(maxX - minX, 4);
@@ -600,26 +742,32 @@ class MapEngine {
         return best;
     }
 
+    // Подпись в центре области нужна только там, где нет города с её
+    // именем: такую область и так называет город, стоящий на своём месте.
     createRegionLabels() {
         this.regionLabelLayer.innerHTML = '';
         this.regionLabels = [];
         this.cullLabels = [];
+        const named = new Set(CitiesDB.map(c => c.regionId + '|' + c.name));
         const fragment = document.createDocumentFragment();
 
         for (const region of Object.values(this.data.regions)) {
+            if (named.has(region.id + '|' + region.name)) continue;
             const info = RegionsDB[region.id];
-            // Подпись не должна вылезать за пределы своей области, поэтому
-            // её размер ограничен шириной области (в единицах карты).
-            const fitByWidth = (info.r * 1.7) / Math.max(region.name.length * 0.5, 1);
+            // Подпись не должна вылезать за пределы своей области: размер
+            // ограничен вписанной окружностью (в единицах карты).
+            const radius = info.lr || info.r;
+            const fit = (radius * 1.8) / Math.max(region.name.length * 0.62, 1);
             const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-            text.setAttribute('x', region.cx);
-            text.setAttribute('y', region.cy);
+            text.setAttribute('x', region.lx);
+            text.setAttribute('y', region.ly);
             text.setAttribute('class', 'region-label');
-            text.style.fontSize = `min(calc(var(--sw) * 14), ${fitByWidth.toFixed(3)}px)`;
+            text.style.fontSize = `min(calc(var(--sw) * 11), ${fit.toFixed(3)}px)`;
             text.textContent = region.name;
             fragment.appendChild(text);
-            this.regionLabels.push({ el: text, fit: fitByWidth });
-            this.cullLabels.push({ el: text, x: region.cx, y: region.cy, w: 0, h: 0, vis: true });
+            const item = { el: text, fit, x: region.lx, y: region.ly, text: region.name, kind: 'region' };
+            this.regionLabels.push(item);
+            this.cullLabels.push({ el: text, x: region.lx, y: region.ly, w: 0, h: 0, vis: true });
         }
         this.regionLabelLayer.appendChild(fragment);
         this.updateLabelVisibility();
@@ -632,10 +780,11 @@ class MapEngine {
             if (!list) return;
             for (const label of list) {
                 const rendered = Math.min(cap, label.fit * k);
-                label.el.classList.toggle('too-small', rendered < minPx);
+                label.small = rendered < minPx;
+                label.el.classList.toggle('too-small', label.small);
             }
         };
-        hide(this.regionLabels, 14, 8);
+        hide(this.regionLabels, 11, 8);
         hide(this.countryLabels, 40, 10);
     }
 
@@ -648,36 +797,129 @@ class MapEngine {
     }
 
     // --- города ------------------------------------------------------------
+    // Первый ярус — столицы и города, давшие имя области: видны, как только
+    // карта переходит к областям. Второй ярус — остальные, при сильном
+    // приближении. Точка стоит на реальном месте города.
     drawCities() {
         this.cityLayer.innerHTML = '';
         this.cullCities = [];
+        this.cityItems = [];
         const fragment = document.createDocumentFragment();
+        const ns = 'http://www.w3.org/2000/svg';
         for (const city of CitiesDB) {
-            const group = document.createElementNS('http://www.w3.org/2000/svg', 'g');
-            const major = city.isCapital || city.population >= 700000;
-            group.setAttribute('class', (city.isCapital ? 'capital' : 'city') + (major ? ' major' : ''));
+            const region = this.data.getRegion(city.regionId);
+            const main = city.isCapital || (region && region.name === city.name);
+            const group = document.createElementNS(ns, 'g');
+            group.setAttribute('class', `city-group ${main ? 'tier-1' : 'tier-2'}${city.isCapital ? ' capital' : ''}`);
             group.setAttribute('transform', `translate(${city.x},${city.y})`);
 
-            const dot = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-            dot.setAttribute('r', city.isCapital ? 0.45 : 0.28);
+            const dot = document.createElementNS(ns, 'circle');
             dot.setAttribute('class', city.isCapital ? 'capital-marker' : 'city-marker');
-
             group.appendChild(dot);
 
-            // Область уже подписана именем этого города — второй раз не пишем.
-            const region = this.data.getRegion(city.regionId);
-            if (!region || region.name !== city.name) {
-                const label = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-                label.setAttribute('x', 0.8);
-                label.setAttribute('y', 0.35);
-                label.setAttribute('class', city.isCapital ? 'capital-label' : 'city-label');
-                label.textContent = city.name;
-                group.appendChild(label);
-            }
+            const label = document.createElementNS(ns, 'text');
+            label.setAttribute('class', `${city.isCapital ? 'capital-label' : 'city-label'} right`);
+            label.textContent = city.name;
+            group.appendChild(label);
+
             fragment.appendChild(group);
-            this.cullCities.push({ el: group, x: city.x, y: city.y, w: 0, h: 0, vis: true });
+            const cull = { el: group, x: city.x, y: city.y, w: 0, h: 0, vis: true };
+            this.cullCities.push(cull);
+            this.cityItems.push({
+                cull, label, x: city.x, y: city.y, text: city.name, tier: main ? 1 : 2,
+                size: city.isCapital ? 12 : 11,
+                priority: (city.isCapital ? 3e9 : 0) + (main ? 1e9 : 0) + city.population,
+            });
         }
+        this.cityItems.sort((a, b) => b.priority - a.priority);
         this.cityLayer.appendChild(fragment);
+    }
+
+    // --- раскладка подписей без наложений -----------------------------------
+    // Значки войск важнее всего и стоят всегда; подписи городов обходят их
+    // (справа от точки, иначе слева), а если места нет — прячутся до
+    // следующего приближения. Считается, когда камера остановилась.
+    scheduleDeclutter() {
+        clearTimeout(this.declutterTimer);
+        this.declutterTimer = setTimeout(() => this.declutter(), 90);
+    }
+
+    declutter() {
+        if (!this.rect || !this.cityItems) return;
+        const k = this.pxPerUnit, lod = this.detailLevel;
+        const W = this.rect.width, H = this.rect.height;
+        const screen = (x, y) => ({ x: (x - this.camX) * k, y: (y - this.camY) * k });
+        const onScreen = p => p.x > -80 && p.x < W + 80 && p.y > -30 && p.y < H + 30;
+
+        // Занятые прямоугольники храним в сетке 64×64 px: проверка — только соседние ячейки.
+        const CELL = 64, grid = new Map();
+        const cells = (b, fn) => {
+            for (let gx = Math.floor(b.x1 / CELL); gx <= Math.floor(b.x2 / CELL); gx++) {
+                for (let gy = Math.floor(b.y1 / CELL); gy <= Math.floor(b.y2 / CELL); gy++) fn(gx + ':' + gy);
+            }
+        };
+        const hit = b => {
+            let found = false;
+            cells(b, key => {
+                if (found) return;
+                for (const o of grid.get(key) || []) {
+                    if (b.x1 < o.x2 && b.x2 > o.x1 && b.y1 < o.y2 && b.y2 > o.y1) { found = true; return; }
+                }
+            });
+            return found;
+        };
+        const occupy = b => cells(b, key => { if (!grid.has(key)) grid.set(key, []); grid.get(key).push(b); });
+
+        if (this.isRegionalZoom) {
+            for (const badge of this.badges) {
+                const p = screen(badge.x, badge.y);
+                if (!onScreen(p)) continue;
+                occupy({ x1: p.x - badge.w / 2 - 2, x2: p.x + badge.w / 2 + 2, y1: p.y - 10, y2: p.y + 10 });
+            }
+        }
+        const shownCities = this.cityItems.filter(c => c.cull.vis && (lod === 2 || (lod === 1 && c.tier === 1)));
+        for (const c of shownCities) {
+            const p = screen(c.x, c.y);
+            c.p = p;
+            if (onScreen(p)) occupy({ x1: p.x - 4, x2: p.x + 4, y1: p.y - 4, y2: p.y + 4 });
+        }
+
+        const place = (item, p, centered) => {
+            const w = item.text.length * item.size * 0.56 + 2, h = item.size + 2;
+            const boxes = centered
+                ? [['center', { x1: p.x - w / 2, x2: p.x + w / 2, y1: p.y - h / 2, y2: p.y + h / 2 }]]
+                : [['right', { x1: p.x + 5, x2: p.x + 5 + w, y1: p.y - h / 2, y2: p.y + h / 2 }],
+                   ['left', { x1: p.x - 5 - w, x2: p.x - 5, y1: p.y - h / 2, y2: p.y + h / 2 }]];
+            for (const [side, box] of boxes) {
+                if (!hit(box)) { occupy(box); return side; }
+            }
+            return null;
+        };
+
+        // сначала столицы и главные города, потом подписи областей, потом остальное
+        const regionItems = lod >= 1 ? this.regionLabels.filter(r => !r.small) : [];
+        const queue = [
+            ...shownCities.filter(c => c.tier === 1).map(c => ['city', c]),
+            ...regionItems.map(r => ['region', r]),
+            ...shownCities.filter(c => c.tier === 2).map(c => ['city', c]),
+        ];
+        const decided = new Set();
+        for (const [kind, item] of queue) {
+            decided.add(item);
+            if (kind === 'city') {
+                if (!onScreen(item.p)) continue;
+                const side = place(item, item.p, false);
+                item.label.classList.toggle('left', side === 'left');
+                item.label.classList.toggle('right', side !== 'left');
+                item.label.classList.toggle('crowded', !side);
+            } else {
+                const p = screen(item.x, item.y);
+                p.y -= 16;   // подпись стоит над значком войск (см. .region-label)
+                if (!onScreen(p)) continue;
+                item.size = 11;
+                item.el.classList.toggle('crowded', !place(item, p, true));
+            }
+        }
     }
 
     // --- выбор цели ---------------------------------------------------------
@@ -721,11 +963,11 @@ class MapEngine {
             if (!a || !b) continue;
             // Дуга, чтобы встречные стрелки не сливались; концы отступают от
             // центров, где стоят маркеры войск.
-            const dx = b.cx - a.cx, dy = b.cy - a.cy;
-            const c = { x: (a.cx + b.cx) / 2 - dy * 0.18, y: (a.cy + b.cy) / 2 + dx * 0.18 };
+            const dx = b.lx - a.lx, dy = b.ly - a.ly;
+            const c = { x: (a.lx + b.lx) / 2 - dy * 0.18, y: (a.ly + b.ly) / 2 + dx * 0.18 };
             const at = t => ({
-                x: (1 - t) * (1 - t) * a.cx + 2 * (1 - t) * t * c.x + t * t * b.cx,
-                y: (1 - t) * (1 - t) * a.cy + 2 * (1 - t) * t * c.y + t * t * b.cy,
+                x: (1 - t) * (1 - t) * a.lx + 2 * (1 - t) * t * c.x + t * t * b.lx,
+                y: (1 - t) * (1 - t) * a.ly + 2 * (1 - t) * t * c.y + t * t * b.ly,
             });
             const p0 = at(0.12), p1 = at(0.86);
             const d = `M${p0.x.toFixed(2)},${p0.y.toFixed(2)} Q${c.x.toFixed(2)},${c.y.toFixed(2)} ${p1.x.toFixed(2)},${p1.y.toFixed(2)}`;
@@ -753,42 +995,49 @@ class MapEngine {
     showRegion(id) {
         const region = this.data.getRegion(id);
         if (!region) return;
-        if (this.isRegionalZoom) this.ensureVisible(region.cx, region.cy);
+        if (this.isRegionalZoom) this.ensureVisible(region.lx, region.ly);
         else this.focusRegion(id);
     }
 
-    // --- маркеры войск --------------------------------------------------------
+    // --- значки войск --------------------------------------------------------
+    // Плашка с числом в визуальном центре области. Размер постоянный на
+    // экране: внутренняя группа масштабируется на --k (1 px в единицах карты).
     drawArmyMarkers() {
         this.armyLayer.innerHTML = '';
+        this.badges = [];
+        this.cullBadges = [];
         const player = this.data.playerCountry;
+        const ns = 'http://www.w3.org/2000/svg';
         const fragment = document.createDocumentFragment();
 
         for (const region of Object.values(this.data.regions)) {
             const power = this.data.calculateRegionMilitaryPower(region.id);
-            if (power <= 0) continue;
-
             const isOwner = region.owner === player;
             const reconActive = region.reconActiveUntil && region.reconActiveUntil >= this.data.currentDate;
-            let icon, label, color;
-
+            let kind, label;
             if (isOwner) {
-                icon = '🛡️'; label = ' ' + this.formatPower(power); color = '#4ade80';
+                if (power <= 0) continue;
+                kind = 'own'; label = this.formatPower(power);
             } else if (reconActive) {
-                icon = '⚔️'; label = ' ' + this.formatPower(power); color = '#f87171';
+                kind = 'enemy'; label = this.formatPower(power);
             } else if (this.data.isNeighborToPlayer(region.id)) {
-                icon = '⚔️'; label = ''; color = '#fca5a5';
+                kind = 'unknown'; label = '?';
             } else {
                 continue;
             }
-
-            const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-            text.setAttribute('x', region.cx);
-            text.setAttribute('y', region.cy);
-            text.setAttribute('class', 'army-marker');
-            text.setAttribute('fill', color);
-            text.textContent = icon + label;
-            fragment.appendChild(text);
+            const w = 20 + label.length * 6.6;
+            const outer = document.createElementNS(ns, 'g');
+            outer.setAttribute('class', `army-badge ${kind}`);
+            outer.setAttribute('transform', `translate(${region.lx},${region.ly})`);
+            outer.innerHTML = `<g class="badge-inner"><rect x="${-w / 2}" y="-8" width="${w}" height="16" rx="2"/>`
+                + `<rect class="badge-tick" x="${-w / 2 + 4}" y="-4" width="4" height="8"/>`
+                + `<text x="${-w / 2 + 12}" y="0.5">${label}</text></g>`;
+            fragment.appendChild(outer);
+            this.badges.push({ x: region.lx, y: region.ly, w });
+            this.cullBadges.push({ el: outer, x: region.lx, y: region.ly, w: 0, h: 0, vis: true });
         }
         this.armyLayer.appendChild(fragment);
+        this.cull();
+        this.scheduleDeclutter();
     }
 }

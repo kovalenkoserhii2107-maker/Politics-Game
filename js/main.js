@@ -154,7 +154,7 @@ class GameCore {
         this.map.selectRegion(regionId);
         this.ui.showRegionInfo(region, this.data.getCountry(region.owner), this.data);
         this.updateActionButtons(regionId);
-        this.map.ensureVisible(region.cx, region.cy);
+        this.map.ensureVisible(region.lx, region.ly);
     }
 
     showCountry(countryId) {

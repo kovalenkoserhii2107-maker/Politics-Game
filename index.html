@@ -81,42 +81,7 @@ button { font-family: inherit; }
     paint-order: stroke; stroke: rgba(0,0,0,0.55); stroke-width: 0.35;
 }
 
-.city-marker { fill: #e2e8f0; r: calc(var(--sw) * 2.6); }
-.capital-marker { fill: #f87171; stroke: #fff; stroke-width: var(--sw); r: calc(var(--sw) * 4); }
-.city-label, .capital-label {
-    fill: #dbe4f0; pointer-events: none; dominant-baseline: middle;
-    font-size: calc(var(--sw) * 11);
-    paint-order: stroke; stroke: rgba(0,0,0,0.8); stroke-width: calc(var(--sw) * 2.6);
-}
-.capital-label { fill: var(--ui-accent-country); font-weight: 700; font-size: calc(var(--sw) * 13); }
-
-.region-label {
-    fill: rgba(255,255,255,0.94); font-weight: 600; text-anchor: middle;
-    dominant-baseline: middle; pointer-events: none;
-    paint-order: stroke; stroke: rgba(0,0,0,0.65); stroke-width: calc(var(--sw) * 3);
-}
-.region-label.too-small, .country-label.too-small { display: none; }
-.army-marker {
-    font-family: 'Segoe UI', sans-serif; font-weight: 700; text-anchor: middle;
-    dominant-baseline: central; pointer-events: none;
-    font-size: calc(var(--sw) * 13);
-    paint-order: stroke; stroke: rgba(0,0,0,0.85); stroke-width: calc(var(--sw) * 3);
-    transform: translateY(calc(var(--sw) * 15));
-}
-
-#layer-cities, #layer-armies, #layer-region-labels, #layer-labels { pointer-events: none; }
-/* Ступени детализации: страны -> области -> города.
-   Скрытое именно display:none, а не opacity — иначе браузер продолжает
-   рисовать невидимые слои на каждом кадре панорамирования. */
-#world-map.lod-0 #layer-cities,
-#world-map.lod-1 #layer-cities { display: none; }
-#world-map.lod-0 #layer-region-labels,
-#world-map.lod-2 #layer-region-labels { display: none; }
-#world-map.lod-1 .country-label,
-#world-map.lod-2 .country-label { display: none; }
-/* Маркеры войск привязаны к уровню взаимодействия, а не к подписям:
-   пропадать вместе с названиями областей они не должны. */
-#world-map.global-view #layer-armies { display: none; }
+/* Подписи, города, значки войск и ступени детализации — в css/map.css */
 
 /* ================= ОБЩИЙ UI ================= */
 #ui-layer { position: fixed; inset: 0; pointer-events: none; z-index: 10; }
@@ -556,6 +521,7 @@ body { overscroll-behavior: none; }
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Exo+2:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;700&display=swap">
 <link rel="stylesheet" href="css/campaign.css">
 <link rel="stylesheet" href="css/theme.css">
+<link rel="stylesheet" href="css/map.css">
 <link rel="stylesheet" href="css/start.css">
 </head>
 <body>

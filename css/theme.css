@@ -92,9 +92,6 @@ summary {
         radial-gradient(circle at 50% 42%, #1a1d23 0%, #0a0b0d 78%);
     background-size: 48px 48px, 48px 48px, 100% 100%;
 }
-.capital-label { fill: var(--warn); }
-.capital-marker { fill: var(--accent); }
-.army-marker { font-family: var(--font); }
 
 /* стрелки приказов */
 #layer-orders { pointer-events: none; }
@@ -109,7 +106,6 @@ summary {
 #world-map .region.lost { stroke: var(--accent) !important; stroke-width: calc(var(--sw) * 3) !important; stroke-dasharray: calc(var(--sw) * 4) calc(var(--sw) * 3); animation: region-pulse 1.1s ease-in-out 3; }
 @keyframes region-pulse { 50% { filter: brightness(1.45); } }
 @media (prefers-reduced-motion: reduce) { #world-map .region.gained, #world-map .region.lost { animation: none; } }
-.country-label, .region-label, .city-label { font-family: var(--font); }
 
 /* ---------- верхняя панель ---------- */
 #top-bar {
