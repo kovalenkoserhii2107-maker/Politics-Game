@@ -35,11 +35,28 @@ const POLICIES = {
     production: { name: 'Промышленный курс', description: '+20% дохода промышленности. −5 п.п. к целевой лояльности.', industry: 1.2, loyalty: -0.05, socialCost: 0 },
 };
 
+// Уровни игры: сколько денег у игрока на старте и насколько смел ИИ.
+// Ключи ai перекрывают одноимённые AI_RULES.
+const DIFFICULTY = {
+    easy: {
+        name: 'Лёгкий', note: 'Казна в полтора раза больше, соседи осторожны и долго не нападают.',
+        playerMoney: 1.5,
+        ai: { ATTACK_MARGIN: 1.6, WAR_ON_PLAYER_RATIO: 2.2, WAR_ON_PLAYER_CHANCE: 0.006, PEACEFUL_START_TURNS: 20, FIRST_ATTACK_TURN: 4 },
+    },
+    normal: { name: 'Обычный', note: 'Как задумано: соседи нападают, если заметно сильнее вас.', playerMoney: 1, ai: {} },
+    hard: {
+        name: 'Тяжёлый', note: 'Казна меньше, соседи смелее и начинают войны раньше.',
+        playerMoney: 0.8,
+        ai: { ATTACK_MARGIN: 1.2, WAR_ON_PLAYER_RATIO: 1.3, WAR_ON_PLAYER_CHANCE: 0.03, PEACEFUL_START_TURNS: 5, FIRST_ATTACK_TURN: 1 },
+    },
+};
+
 class GameData {
     constructor(playerCountryId, options = {}) {
         this.playerCountry = playerCountryId;
         this.cheatMode = !!options.cheat;
         this.scenario = options.scenario || 'peace';
+        this.difficulty = DIFFICULTY[options.difficulty] ? options.difficulty : 'normal';
 
         this.currentDate = new Date(2024, 0, 1);
         this.turn = 0;
@@ -57,7 +74,11 @@ class GameData {
         this.campaign = { budget: false, investment: false, recruited: false, diplomacy: false, conquest: false };
 
         this.build();
-        if (!options.restoring) this.setupScenario();
+        if (!options.restoring) {
+            this.setupScenario();
+            const player = this.countries[playerCountryId];
+            if (player) player.money = Math.round(player.money * DIFFICULTY[this.difficulty].playerMoney);
+        }
     }
 
     emptyOrders() {
@@ -1036,6 +1057,7 @@ class GameData {
             player: this.playerCountry,
             cheat: this.cheatMode,
             scenario: this.scenario,
+            difficulty: this.difficulty,
             date: +this.currentDate,
             turn: this.turn,
             regions, countries,
@@ -1054,6 +1076,7 @@ class GameData {
         const count = n => Number.isSafeInteger(n) && n >= 0;
         if (!save || save.v !== 3 || !CountriesDB[save.player]?.playable || !count(save.turn) || !finite(save.date) || !Number.isFinite(+new Date(save.date))) fail();
         if (JSON.stringify(save.units) !== JSON.stringify(Object.keys(UnitsDB))) fail();
+        if (save.difficulty !== undefined && !DIFFICULTY[save.difficulty]) fail();
         if (!save.regions || !save.countries || !save.campaign || !Array.isArray(save.projects)) fail();
         if (Object.keys(save.regions).length !== Object.keys(RegionsDB).length || Object.keys(save.countries).length !== Object.keys(CountriesDB).length) fail();
         for (const id of Object.keys(RegionsDB)) {
@@ -1088,7 +1111,7 @@ class GameData {
 
     static restore(save) {
         GameData.validateSave(save);
-        const data = new GameData(save.player, { cheat: save.cheat, scenario: save.scenario, restoring: true });
+        const data = new GameData(save.player, { cheat: save.cheat, scenario: save.scenario, difficulty: save.difficulty, restoring: true });
         const units = Object.keys(UnitsDB);
 
         // сначала вернём всех владельцев, потом пересоберём индекс областей
@@ -1122,5 +1145,94 @@ class GameData {
         data.projects = structuredClone(save.projects);
         data.campaign = { ...save.campaign };
         return data;
+    }
+
+    // Перенос партии из прошлой версии игры или со слегка другой нарезкой
+    // карты. Берём свежий мир как основу и переносим поверх него всё, что
+    // в старой партии выглядит правдоподобно; сомнительное — отбрасываем.
+    // Если совпало меньше 90% областей, партия относится к другой карте.
+    static migrateSave(old) {
+        const fail = why => { throw new Error(why); };
+        if (!old || typeof old !== 'object') fail('Пустое сохранение');
+        if (!CountriesDB[old.player]?.playable) fail('Неизвестная страна игрока');
+        const finite = n => typeof n === 'number' && Number.isFinite(n);
+        const count = n => Number.isSafeInteger(n) && n >= 0;
+        const clamp = (n, lo, hi) => Math.min(hi, Math.max(lo, n));
+        const isObj = o => !!o && typeof o === 'object' && !Array.isArray(o);
+
+        const fresh = new GameData(old.player, {
+            cheat: !!old.cheat,
+            scenario: old.scenario === 'war2024' ? 'war2024' : 'peace',
+            difficulty: old.difficulty,
+            restoring: true,
+        });
+        const save = fresh.serialize();
+        const units = save.units;
+        const oldUnits = Array.isArray(old.units) ? old.units : units;
+
+        const oldRegions = isObj(old.regions) ? old.regions : {};
+        const ids = Object.keys(save.regions);
+        const matched = ids.filter(id => Array.isArray(oldRegions[id])).length;
+        if (matched < ids.length * 0.9) fail('Карта слишком сильно изменилась');
+
+        for (const id of ids) {
+            const o = oldRegions[id], r = save.regions[id];
+            if (!Array.isArray(o)) continue;
+            if (CountriesDB[o[0]]) r[0] = o[0];
+            if (Array.isArray(o[1])) r[1] = units.map(u => { const i = oldUnits.indexOf(u); return i >= 0 && count(o[1][i]) ? o[1][i] : 0; });
+            if (finite(o[2])) r[2] = clamp(o[2], 0, 1);
+            if (finite(o[3])) r[3] = o[3];
+            for (const key of ['industry', 'agro', 'oil']) {
+                if (isObj(o[4]) && count(o[4][key])) r[4][key] = o[4][key];
+                if (isObj(o[5]) && count(o[5][key])) r[5][key] = Math.min(5, o[5][key]);
+            }
+        }
+
+        const owned = {};
+        for (const [id, r] of Object.entries(save.regions)) (owned[r[0]] = owned[r[0]] || []).push(id);
+        const oldCountries = isObj(old.countries) ? old.countries : {};
+        for (const [id, c] of Object.entries(save.countries)) {
+            const o = oldCountries[id];
+            if (Array.isArray(o)) {
+                if (finite(o[0])) c[0] = Math.round(o[0]);
+                if (finite(o[1])) c[1] = clamp(o[1], 0.01, 0.3);
+                if (finite(o[2])) c[2] = clamp(Math.round(o[2]), 0, RULES.INFLUENCE_MAX);
+                if (isObj(o[3])) for (const key of [...units, 'marchSpeed']) {
+                    if (count(o[3][key])) c[3][key] = clamp(o[3][key], 1, key === 'marchSpeed' ? 3 : RULES.TECH_MAX);
+                }
+                if (finite(o[4])) c[4] = Math.round(o[4]);
+                if (RegionsDB[o[6]]) c[6] = o[6];
+                if (POLICIES[o[7]]) c[7] = o[7];
+                if (Number.isInteger(o[8])) c[8] = o[8];
+            }
+            // столица — только своя область, иначе самая населённая из своих
+            const mine = owned[id] || [];
+            if (!c[6] || save.regions[c[6]][0] !== id) {
+                c[6] = mine.length ? mine.reduce((a, b) => (RegionsDB[b].population > RegionsDB[a].population ? b : a)) : null;
+            }
+            c[5] = mine.length > 0;
+        }
+
+        const pair = key => typeof key === 'string' && key.split('|').length === 2 && key.split('|').every(cc => CountriesDB[cc]);
+        if (count(old.turn)) save.turn = old.turn;
+        if (finite(old.date) && Number.isFinite(+new Date(old.date))) save.date = old.date;
+        if (Array.isArray(old.wars)) save.wars = old.wars.filter(x => Array.isArray(x) && pair(x[0]) && count(x[1]?.start) && CountriesDB[x[1]?.attacker]);
+        if (Array.isArray(old.truces)) save.truces = old.truces.filter(x => Array.isArray(x) && pair(x[0]) && count(x[1]));
+        if (Array.isArray(old.decisions)) save.decisions = old.decisions.filter(x => x && x.type === 'peace' && CountriesDB[x.from]);
+        if (Array.isArray(old.history)) save.history = old.history.filter(t => t && typeof t.date === 'string' && Array.isArray(t.logs) && t.financial && ['income', 'expense', 'net'].every(k => finite(t.financial[k])));
+        if (Array.isArray(old.projects)) save.projects = old.projects.filter(p => p && RegionsDB[p.regionId] && CountriesDB[p.country] && DEVELOPMENT[p.kind] && count(p.remaining) && p.remaining >= 1 && count(p.cost));
+        if (isObj(old.campaign)) for (const key of Object.keys(save.campaign)) save.campaign[key] = !!old.campaign[key];
+        save.gameOver = !!old.gameOver;
+        save.outcome = ['victory', 'defeat'].includes(old.outcome) ? old.outcome : null;
+        if (isObj(old.orders)) save.orders = old.orders;
+
+        try {
+            GameData.validateSave(save);
+        } catch (e) {
+            // Приказы — самая хрупкая часть: при сомнении начинаем ход с чистого листа.
+            save.orders = fresh.emptyOrders();
+            GameData.validateSave(save);
+        }
+        return save;
     }
 }

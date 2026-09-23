@@ -95,6 +95,20 @@ summary {
 .capital-label { fill: var(--warn); }
 .capital-marker { fill: var(--accent); }
 .army-marker { font-family: var(--font); }
+
+/* стрелки приказов */
+#layer-orders { pointer-events: none; }
+.order-halo, .order-arrow { fill: none; stroke-linecap: round; }
+.order-halo { stroke: rgba(0, 0, 0, 0.55); stroke-width: calc(var(--sw) * 6); }
+.order-arrow { stroke-width: calc(var(--sw) * 3.2); }
+.order-arrow.attack { stroke: var(--accent); }
+.order-arrow.move { stroke: var(--light); stroke-dasharray: calc(var(--sw) * 6) calc(var(--sw) * 4); }
+
+/* итоги хода на карте */
+#world-map .region.gained { stroke: var(--good) !important; stroke-width: calc(var(--sw) * 3) !important; animation: region-pulse 1.1s ease-in-out 3; }
+#world-map .region.lost { stroke: var(--accent) !important; stroke-width: calc(var(--sw) * 3) !important; stroke-dasharray: calc(var(--sw) * 4) calc(var(--sw) * 3); animation: region-pulse 1.1s ease-in-out 3; }
+@keyframes region-pulse { 50% { filter: brightness(1.45); } }
+@media (prefers-reduced-motion: reduce) { #world-map .region.gained, #world-map .region.lost { animation: none; } }
 .country-label, .region-label, .city-label { font-family: var(--font); }
 
 /* ---------- верхняя панель ---------- */
@@ -183,6 +197,48 @@ input[type=range] { accent-color: var(--accent); }
 .map-btn:active { background: var(--light); color: var(--ink); }
 #target-banner { background: rgba(17, 19, 23, 0.97); border-color: var(--accent); border-radius: var(--r); }
 #target-cancel { background: var(--s3); border-radius: var(--r); }
+#target-list-btn {
+    background: var(--light); color: var(--ink); border: 0; border-radius: var(--r);
+    padding: 8px 12px; font-weight: 700; cursor: pointer; white-space: nowrap;
+}
+
+/* обучение */
+.coach {
+    position: absolute; left: 50%; bottom: 24px; transform: translateX(-50%); z-index: 160;
+    width: min(460px, calc(100vw - 24px)); box-sizing: border-box; padding: 12px 14px;
+    background: rgba(17, 19, 23, 0.98); border: 1px solid var(--line-2); border-radius: var(--r);
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.6);
+}
+.coach[hidden] { display: none; }
+.coach .label { color: var(--accent-2); }
+.coach p { margin: 6px 0 6px; font-size: 0.93rem; line-height: 1.4; }
+.coach-actions { display: flex; justify-content: flex-end; gap: 8px; margin-bottom: -6px; }
+#coach-skip { background: none; border: 0; color: var(--text-3); font-size: 0.82rem; cursor: pointer; min-height: 36px; padding: 0 6px; }
+#coach-next { background: var(--accent); color: #fff; border: 0; border-radius: var(--r); min-height: 40px; padding: 0 16px; font-weight: 800; cursor: pointer; }
+.coach-target { position: relative; animation: coach-pulse 1.4s ease-in-out infinite; }
+@keyframes coach-pulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(255, 59, 47, 0.75); }
+    50% { box-shadow: 0 0 0 6px rgba(255, 59, 47, 0); }
+}
+@media (prefers-reduced-motion: reduce) { .coach-target { animation: none; outline: 2px solid var(--accent); } }
+
+/* цели списком */
+.target-list { gap: 6px; }
+.target-row {
+    display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 10px;
+    width: 100%; min-height: 56px; padding: 8px 12px; text-align: left; cursor: pointer;
+    background: var(--s2); color: var(--text); border: 1px solid var(--line); border-radius: var(--r);
+    font: inherit; touch-action: manipulation;
+}
+.target-row:hover, .target-row:focus-visible { border-color: var(--line-2); background: var(--s3); }
+.target-row .swatch { width: 14px; height: 14px; border-radius: 2px; box-shadow: 0 0 0 1px rgba(255,255,255,0.2); }
+.target-row b { display: block; font-size: 0.98rem; }
+.target-row small { display: block; color: var(--text-2); font-size: 0.78rem; margin-top: 2px; }
+.odds { font-family: var(--mono); font-size: 0.72rem; letter-spacing: 0.06em; text-transform: uppercase; padding: 4px 8px; border-radius: 2px; white-space: nowrap; }
+.odds.high { background: var(--good-soft); color: var(--good); }
+.odds.even { background: var(--warn-soft); color: var(--warn); }
+.odds.low { background: var(--accent-soft); color: var(--accent-2); }
+.odds.move { background: var(--s3); color: var(--text-2); }
 #orders-count { background: var(--accent); border-radius: 2px; }
 .order-recruit { color: var(--light); }
 .order-move { color: var(--text-2); }
@@ -202,6 +258,11 @@ progress { accent-color: var(--accent); }
 
 /* ---------- телефон ---------- */
 @media (max-width: 768px) {
+    /* обучение на телефоне — под верхней панелью, сообщения сдвигаются ниже */
+    .coach { top: calc(60px + var(--safe-t)); bottom: auto; }
+    body.coach-on #toast { top: calc(190px + var(--safe-t)); }
+    body.coach-on #target-banner { top: calc(190px + var(--safe-t)); }
+
     /* телефон: подпись над значением, как на приборной панели */
     #top-bar .stats { align-items: flex-start; }
     .stat-item { line-height: 1.25; }

@@ -381,6 +381,7 @@ class UIManager {
 
     // --- план хода -------------------------------------------------------------------------
     updateOrdersPanel(data) {
+        document.dispatchEvent(new CustomEvent('ordersChanged'));
         const panel = document.getElementById('orders-panel');
         const list = document.getElementById('orders-list');
         const count = document.getElementById('orders-count');
