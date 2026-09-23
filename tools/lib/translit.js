@@ -71,4 +71,39 @@ function bestMatch(latinName, ruCandidates, minScore = 0.62) {
     return bestScore >= minScore ? { name: best, score: bestScore } : null;
 }
 
-module.exports = { translit, skeleton, ruSkeleton, similarity, bestMatch };
+// Обратное направление: латинское название города -> кириллица по правилам
+// практической транскрипции. Нужно только там, где русского названия нет
+// ни в одном справочнике: лучше «Хеганг», чем имя чужого города.
+const LAT_RU_MULTI = [
+    ['shch', 'щ'], ['sch', 'ш'], ['tch', 'ч'], ['dzh', 'дж'], ['ch', 'ч'], ['sh', 'ш'], ['zh', 'ж'],
+    ['kh', 'х'], ['ts', 'ц'], ['tz', 'ц'], ['ya', 'я'], ['yu', 'ю'], ['yo', 'ё'], ['ye', 'е'],
+    ['ph', 'ф'], ['th', 'т'], ['gh', 'г'], ['ck', 'к'], ['qu', 'кв'], ['ou', 'у'], ['oo', 'у'], ['ee', 'и'],
+];
+const LAT_RU = {
+    a: 'а', b: 'б', d: 'д', e: 'е', f: 'ф', g: 'г', h: 'х', i: 'и', j: 'дж', k: 'к', l: 'л', m: 'м',
+    n: 'н', o: 'о', p: 'п', q: 'к', r: 'р', s: 'с', t: 'т', u: 'у', v: 'в', w: 'в', x: 'кс', z: 'з',
+};
+const VOWELS = 'aeiouy';
+
+function latToRu(name) {
+    const word = w => {
+        const s = w.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+        let out = '';
+        for (let i = 0; i < s.length;) {
+            const multi = LAT_RU_MULTI.find(([lat]) => s.startsWith(lat, i));
+            if (multi) { out += multi[1]; i += multi[0].length; continue; }
+            const ch = s[i], next = s[i + 1] || '', prev = s[i - 1] || '';
+            if (ch === 'c') out += next && 'eiy'.includes(next) ? 'с' : 'к';
+            else if (ch === 'e' && i === 0) out += 'э';
+            else if (ch === 'y') out += i === 0 || VOWELS.includes(prev) ? 'й' : 'и';
+            else if (ch === 'l' && s.startsWith('sk', i + 1)) out += 'ль';
+            else if (LAT_RU[ch]) out += LAT_RU[ch];
+            else if (/[\-' ]/.test(ch)) out += ch === "'" ? '' : ch;
+            i++;
+        }
+        return out.charAt(0).toUpperCase() + out.slice(1);
+    };
+    return name.split(/(\s+|-)/).map(part => (/^(\s+|-)$/.test(part) ? part : word(part))).join('');
+}
+
+module.exports = { translit, skeleton, ruSkeleton, similarity, bestMatch, latToRu };

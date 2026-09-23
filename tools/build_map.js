@@ -204,7 +204,8 @@ function buildCityIndex() {
             for (let i = 0; i < pool.length; i++) {
                 if (used.has(i)) continue;
                 const s = T.similarity(sk, skeletons[i]);
-                if (s > bs) { bs = s; best = i; }
+                // при равном сходстве — более крупный город: одноимённых много
+                if (s > bs || (s === bs && best >= 0 && pool[i].population > pool[best].population)) { bs = s; best = i; }
             }
             if (best >= 0 && bs >= 0.62) {
                 used.add(best);
@@ -222,9 +223,21 @@ function buildCityIndex() {
         if (table) {
             const byFlat = new Map(Object.keys(table).map(k => [flat(k), table[k]]));
             const known = new Set(list.map(c => c.name));
-            for (const c of pool) {
+            // одноимённых городов в стране много — берём самый крупный
+            for (const c of [...pool].sort((a, b) => b.population - a.population)) {
                 const ru = byFlat.get(flat(c.name));
-                if (!ru || known.has(ru)) continue;
+                if (!ru) continue;
+                if (known.has(ru)) {
+                    // Выверенное соответствие сильнее догадки по написанию:
+                    // если догадка попала в городок, переносим на настоящий город.
+                    const guess = list.find(v => v.name === ru);
+                    if (guess && c.population > guess.population * 2) {
+                        guess.x = G.lonToX(c.loc.coordinates[0]);
+                        guess.y = G.latToY(c.loc.coordinates[1]);
+                        guess.population = c.population;
+                    }
+                    continue;
+                }
                 known.add(ru);
                 list.push({
                     name: ru,
@@ -245,10 +258,37 @@ function buildCityIndex() {
                 break;
             }
         }
+        const excluded = new Set((curated._exclude || {})[cc] || []);
+        for (let i = list.length - 1; i >= 0; i--) if (excluded.has(list[i].name)) list.splice(i, 1);
+        fixCapital(list, pool);
         list.sort((a, b) => b.population - a.population);
         out[cc] = list;
     }
     return out;
+}
+
+// Столица — по отметке PPLC в all-the-cities. Сопоставление по написанию
+// иногда уводило столицу в одноимённую деревню: Москва стояла на месте
+// посёлка на 9,6 тыс. жителей, Рим — на месте хутора на 33 человека.
+function fixCapital(list, pool) {
+    const pplc = pool.filter(c => c.featureCode === 'PPLC').sort((a, b) => b.population - a.population)[0];
+    if (!pplc) return;
+    const px = G.lonToX(pplc.loc.coordinates[0]), py = G.latToY(pplc.loc.coordinates[1]);
+    const psk = T.skeleton(pplc.name);
+    const sim = city => T.similarity(T.ruSkeleton(city.name), psk);
+    const caps = list.filter(c => c.isCapital).sort((a, b) => sim(b) - sim(a));
+    const cap = caps[0];
+    if (!cap) return;
+    // У страны одна столица (Ватикан в списке Италии столицей быть не должен).
+    for (const other of caps.slice(1)) other.isCapital = false;
+    const far = Math.hypot(cap.x - px, cap.y - py) > 0.3;
+    // Далёкую столицу переносим, только если она похожа на деревню или
+    // называется так же — иначе это осознанный выбор (Сукре, а не Ла-Пас).
+    if (far && (cap.population < 20000 || sim(cap) >= 0.4)) {
+        cap.x = px;
+        cap.y = py;
+        cap.population = Math.max(cap.population, pplc.population);
+    }
 }
 
 // --- запасные названия областей --------------------------------------
@@ -310,6 +350,10 @@ function main() {
         const list = [];
         items.forEach((it, idx) => {
             const anchor = G.pointOnSurface(it.mp);
+            // Визуальный центр для значков и подписей; anchor остаётся для
+            // расчётов генератора (морские переправы, раскраска), чтобы они
+            // не менялись от смены способа подписи.
+            const pole = G.poleOfInaccessibility(it.mp);
             list.push({
                 id: `${country.cc}-${idx + 1}`,
                 cc: country.cc,
@@ -318,6 +362,9 @@ function main() {
                 areaKm2: it.area,
                 cx: anchor[0],
                 cy: anchor[1],
+                lx: pole[0],
+                ly: pole[1],
+                lr: pole[2],
                 cells: it.cells,
                 bbox: G.bboxOf(it.mp),
                 labelRadius: Math.sqrt(G.polyAreaPx(it.mp) / Math.PI),
@@ -329,12 +376,13 @@ function main() {
     }
     console.log(`\r  готово: ${regions.length} областей в ${countries.length} странах        `);
 
-    console.log('Присваиваем названия по городам…');
-    nameRegions(countries, perCountry, cityIndex);
-
     console.log('Раскладываем города по областям…');
     const placement = collectCityPopulation(perCountry);
     console.log(`  ${placement.placed} городов внутри областей, ${placement.nearest} отнесены к ближайшей`);
+
+    console.log('Присваиваем названия по городам…');
+    const naming = nameRegions(countries, perCountry, cityIndex);
+    console.log(`  по справочнику: ${naming.indexed}, по крупнейшему городу внутри: ${naming.local}, по сторонам света: ${naming.directional}`);
 
     console.log('Считаем население и ресурсы…');
     distributeStats(countries, perCountry);
@@ -371,6 +419,7 @@ function reassignCrimea(countries) {
 }
 
 function nameRegions(countries, perCountry, cityIndex) {
+    const stats = { indexed: 0, local: 0, directional: 0 };
     for (const country of countries) {
         const list = perCountry[country.cc] || [];
         const cities = (cityIndex[country.cc] || []).slice();
@@ -386,16 +435,27 @@ function nameRegions(countries, perCountry, cityIndex) {
                 if (!G.pointInMulti([c.x, c.y], region.mp)) continue;
                 if (!best || c.population > best.population) best = c;
             }
-            if (best) { region.name = best.name; region.capitalCity = best; taken.add(best.name); }
+            if (best) { region.name = best.name; region.capitalCity = best; taken.add(best.name); stats.indexed++; }
         }
-        // 2. остальным — свободный крупный город страны, иначе сторона света
+        // 2. остальным — крупнейший реальный город ВНУТРИ области (без
+        // русского названия — в транскрипции). Раньше брался любой свободный
+        // город страны, и области назывались городами, которые лежат в другой
+        // части страны. 3. Городов нет — сторона света.
         const leftover = [];
         for (const region of list) {
             if (region.name) continue;
-            const free = cities.find(c => !taken.has(c.name));
-            if (free) { region.name = free.name; taken.add(free.name); }
-            else leftover.push(region);
+            const local = (region.localCities || []).find(c => !taken.has(T.latToRu(c.name)));
+            if (local) {
+                const name = T.latToRu(local.name);
+                region.name = name;
+                region.capitalCity = { name, x: local.x, y: local.y, population: local.population, isCapital: false };
+                taken.add(name);
+                stats.local++;
+                // NAMES_REPORT=1 — список транскрибированных имён, чтобы дополнить data/cities_ru.json
+                if (process.env.NAMES_REPORT) console.log(`\n  ${country.cc}\t${local.name}\t${name}`);
+            } else leftover.push(region);
         }
+        stats.directional += leftover.length;
         if (leftover.length === 1 && list.length === 1) leftover[0].name = country.name;
         else assignDirectional(leftover, country.name, bbox);
 
@@ -409,6 +469,7 @@ function nameRegions(countries, perCountry, cityIndex) {
             seen.add(name);
         }
     }
+    return stats;
 }
 
 // Раздаём сторонам света непересекающиеся ячейки 3x3: каждой безымянной
@@ -477,7 +538,13 @@ function collectCityPopulation(perCountry) {
                 if (x < region.bbox[0] || x > region.bbox[2] || y < region.bbox[1] || y > region.bbox[3]) continue;
                 if (G.pointInMulti([x, y], region.mp)) { target = region; break; }
             }
-            if (target) placed++;
+            if (target) {
+                placed++;
+                // крупные города внутри области — кандидаты в её название
+                if (city.population >= 10000) {
+                    (target.localCities = target.localCities || []).push({ name: city.name, x, y, population: city.population });
+                }
+            }
             else {
                 // приморские города иногда выпадают из полигона на пиксель —
                 // отдаём такой город ближайшей области страны
@@ -491,6 +558,9 @@ function collectCityPopulation(perCountry) {
             target.cityPop += city.population;
             target.cityCount++;
         }
+    }
+    for (const regions of Object.values(perCountry)) {
+        for (const region of regions) if (region.localCities) region.localCities.sort((a, b) => b.population - a.population);
     }
     return { placed, nearest };
 }
@@ -721,6 +791,7 @@ function writeOutput(countries, regions, perCountry, neighbors, cityIndex) {
     s = HEADER + 'const RegionsDB = {\n';
     for (const r of regions) {
         s += `  '${r.id}': { name: ${q(r.name)}, cc: '${r.cc}', cx: ${r.cx.toFixed(2)}, cy: ${r.cy.toFixed(2)},`
+           + ` lx: ${r.lx.toFixed(2)}, ly: ${r.ly.toFixed(2)}, lr: ${r.lr.toFixed(2)},`
            + ` area: ${Math.round(r.areaKm2)}, r: ${r.labelRadius.toFixed(2)},`
            + ` bx: ${r.bbox[0].toFixed(1)}, by: ${r.bbox[1].toFixed(1)},`
            + ` bw: ${(r.bbox[2] - r.bbox[0]).toFixed(1)}, bh: ${(r.bbox[3] - r.bbox[1]).toFixed(1)},`
@@ -745,6 +816,11 @@ function writeOutput(countries, regions, perCountry, neighbors, cityIndex) {
     for (const c of countries) {
         const list = perCountry[c.cc] || [];
         const cities = (cityIndex[c.cc] || []).slice(0, Math.max(6, list.length * 2));
+        // город, давший имя области, на карте должен быть всегда
+        for (const region of list) {
+            const named = region.capitalCity;
+            if (named && !cities.some(x => x.name === named.name)) cities.push(named);
+        }
         for (const city of cities) {
             const region = list.find(r =>
                 city.x >= r.bbox[0] && city.x <= r.bbox[2] && city.y >= r.bbox[1] && city.y <= r.bbox[3] &&

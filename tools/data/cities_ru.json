@@ -91,7 +91,9 @@
   "Arvaikheer": "Арвайхээр",
   "Bayankhongor": "Баянхонгор",
   "Altai": "Алтай",
-  "Suchbaatar": "Сухэ-Батор"
+  "Suchbaatar": "Сухэ-Батор",
+  "Bayanhongor": "Баянхонгор",
+  "Murun-kuren": "Мурэн"
  },
  "TM": {
   "Ashgabat": "Ашхабад",
@@ -124,7 +126,8 @@
   "Ambato": "Амбато",
   "Loja": "Лоха",
   "Esmeraldas": "Эсмеральдас",
-  "Puerto Baquerizo Moreno": "Пуэрто-Бакерисо-Морено"
+  "Puerto Baquerizo Moreno": "Пуэрто-Бакерисо-Морено",
+  "Puerto Francisco de Orellana": "Франсиско-де-Орельяна"
  },
  "MG": {
   "Antananarivo": "Антананариву",
@@ -252,7 +255,8 @@
   "Keetmanshoop": "Китмансхуп",
   "Luderitz": "Людериц",
   "Otjiwarongo": "Очиваронго",
-  "Grootfontein": "Грутфонтейн"
+  "Grootfontein": "Грутфонтейн",
+  "Gobabis": "Гобабис"
  },
  "BW": {
   "Gaborone": "Габороне",
@@ -275,7 +279,8 @@
   "Bria": "Бриа",
   "Birao": "Бирао",
   "Bossangoa": "Босангоа",
-  "Bouar": "Буар"
+  "Bouar": "Буар",
+  "Zemio": "Земио"
  },
  "SS": {
   "Juba": "Джуба",
@@ -308,7 +313,8 @@
   "Turkestan": "Туркестан",
   "Ekibastuz": "Экибастуз",
   "Zhezqazghan": "Жезказган",
-  "Kokshetau": "Кокшетау"
+  "Kokshetau": "Кокшетау",
+  "Baikonur": "Байконур"
  },
  "CA": {
   "Toronto": "Торонто",
@@ -334,7 +340,8 @@
   "Sudbury": "Садбери",
   "Prince George": "Принс-Джордж",
   "Sept-Iles": "Сет-Иль",
-  "Churchill": "Черчилл"
+  "Churchill": "Черчилл",
+  "Labrador City": "Лабрадор-Сити"
  },
  "AU": {
   "Sydney": "Сидней",
@@ -357,7 +364,8 @@
   "Geraldton": "Джералдтон",
   "Bunbury": "Банбери",
   "Toowoomba": "Тувумба",
-  "Ceduna": "Седуна"
+  "Ceduna": "Седуна",
+  "Palmerston": "Палмерстон"
  },
  "MA": {
   "Casablanca": "Касабланка",
@@ -370,7 +378,8 @@
   "Oujda": "Уджда",
   "Laayoune": "Эль-Аюн",
   "Dakhla": "Дахла",
-  "Errachidia": "Эр-Рашидия"
+  "Errachidia": "Эр-Рашидия",
+  "Guelmim": "Гельмим"
  },
  "EH": {
   "Laayoune": "Эль-Аюн",
@@ -414,7 +423,11 @@
   "Likasi": "Ликаси",
   "Matadi": "Матади",
   "Mbandaka": "Мбандака",
-  "Kindu": "Кинду"
+  "Kindu": "Кинду",
+  "Gemena": "Гемена",
+  "Isiro": "Исиро",
+  "Lodja": "Лоджа",
+  "Kalemie": "Калемие"
  },
  "AO": {
   "Luanda": "Луанда",
@@ -471,7 +484,10 @@
   "Potosi": "Потоси",
   "Tarija": "Тариха",
   "Trinidad": "Тринидад",
-  "Cobija": "Кобиха"
+  "Cobija": "Кобиха",
+  "Montero": "Монтеро",
+  "Riberalta": "Рибералта",
+  "Puerto Quijarro": "Пуэрто-Кихарро"
  },
  "PY": {
   "Asuncion": "Асунсьон",
@@ -493,7 +509,8 @@
   "Tete": "Тете",
   "Pemba": "Пемба",
   "Lichinga": "Лишинга",
-  "Xai-Xai": "Шай-Шай"
+  "Xai-Xai": "Шай-Шай",
+  "Montepuez": "Монтепуэш"
  },
  "ZM": {
   "Lusaka": "Лусака",
@@ -504,7 +521,8 @@
   "Livingstone": "Ливингстон",
   "Mongu": "Монгу",
   "Solwezi": "Солвези",
-  "Chipata": "Чипата"
+  "Chipata": "Чипата",
+  "Kasama": "Касама"
  },
  "TZ": {
   "Dar es Salaam": "Дар-эс-Салам",
@@ -538,7 +556,8 @@
   "Khon Kaen": "Кхонкэн",
   "Phuket": "Пхукет",
   "Pattaya": "Паттайя",
-  "Ubon Ratchathani": "Убонратчатхани"
+  "Ubon Ratchathani": "Убонратчатхани",
+  "Phitsanulok": "Пхитсанулок"
  },
  "PE": {
   "Lima": "Лима",
@@ -551,7 +570,8 @@
   "Huancayo": "Уанкайо",
   "Tacna": "Такна",
   "Pucallpa": "Пукальпа",
-  "Puerto Maldonado": "Пуэрто-Мальдонадо"
+  "Puerto Maldonado": "Пуэрто-Мальдонадо",
+  "Yurimaguas": "Юримагуас"
  },
  "VE": {
   "Caracas": "Каракас",
@@ -574,7 +594,8 @@
   "Bucaramanga": "Букараманга",
   "Villavicencio": "Вильявисенсио",
   "Leticia": "Летисия",
-  "Pasto": "Пасто"
+  "Pasto": "Пасто",
+  "Cumaribo": "Кумарибо"
  },
  "AR": {
   "Buenos Aires": "Буэнос-Айрес",
@@ -600,7 +621,9 @@
   "Puerto Montt": "Пуэрто-Монт",
   "Punta Arenas": "Пунта-Аренас",
   "La Serena": "Ла-Серена",
-  "Arica": "Арика"
+  "Arica": "Арика",
+  "Puerto Natales": "Пуэрто-Наталес",
+  "Coyhaique": "Коиайке"
  },
  "SE": {
   "Stockholm": "Стокгольм",
@@ -702,7 +725,8 @@
   "Sittwe": "Ситуэ",
   "Myitkyina": "Мьичина",
   "Taunggyi": "Таунджи",
-  "Monywa": "Монива"
+  "Monywa": "Монива",
+  "Kyain Seikgyi Township": "Чайнсейджи"
  },
  "AF": {
   "Kabul": "Кабул",
@@ -713,7 +737,8 @@
   "Jalalabad": "Джелалабад",
   "Lashkar Gah": "Лашкаргах",
   "Farah": "Фарах",
-  "Ghazni": "Газни"
+  "Ghazni": "Газни",
+  "Maymana": "Меймене"
  },
  "PK": {
   "Karachi": "Карачи",
@@ -725,7 +750,8 @@
   "Islamabad": "Исламабад",
   "Quetta": "Кветта",
   "Sukkur": "Суккур",
-  "Gilgit": "Гилгит"
+  "Gilgit": "Гилгит",
+  "Larkana": "Ларкана"
  },
  "IR": {
   "Tehran": "Тегеран",
@@ -739,7 +765,8 @@
   "Zahedan": "Захедан",
   "Bandar Abbas": "Бендер-Аббас",
   "Urmia": "Урмия",
-  "Yazd": "Йезд"
+  "Yazd": "Йезд",
+  "Sari": "Сари"
  },
  "SA": {
   "Riyadh": "Эр-Рияд",
@@ -752,7 +779,9 @@
   "Hail": "Хаиль",
   "Najran": "Наджран",
   "Sakakah": "Сакака",
-  "Buraydah": "Бурайда"
+  "Buraydah": "Бурайда",
+  "As Sulayyil": "Эс-Сулайиль",
+  "Arar": "Арар"
  },
  "OM": {
   "Muscat": "Маскат",
@@ -769,7 +798,8 @@
   "Al Hudaydah": "Ходейда",
   "Al Mukalla": "Эль-Мукалла",
   "Ibb": "Ибб",
-  "Sayyan": "Сайян"
+  "Sayyan": "Сайян",
+  "Mukalla": "Эль-Мукалла"
  },
  "SY": {
   "Damascus": "Дамаск",
@@ -790,7 +820,8 @@
   "Karbala": "Кербела",
   "Kirkuk": "Киркук",
   "Sulaymaniyah": "Сулеймания",
-  "Ramadi": "Эр-Рамади"
+  "Ramadi": "Эр-Рамади",
+  "Ar Ruţbah": "Эр-Рутба"
  },
  "VN": {
   "Ho Chi Minh City": "Хошимин",
@@ -825,7 +856,8 @@
   "Pontianak": "Понтианак",
   "Jayapura": "Джаяпура",
   "Manado": "Манадо",
-  "Banjarmasin": "Банджармасин"
+  "Banjarmasin": "Банджармасин",
+  "Ambon": "Амбон"
  },
  "MY": {
   "Kuala Lumpur": "Куала-Лумпур",
@@ -834,7 +866,8 @@
   "Johor Bahru": "Джохор-Бару",
   "Kuching": "Кучинг",
   "Kota Kinabalu": "Кота-Кинабалу",
-  "Malacca": "Малакка"
+  "Malacca": "Малакка",
+  "Miri": "Мири"
  },
  "NZ": {
   "Auckland": "Окленд",
@@ -843,7 +876,8 @@
   "Hamilton": "Гамильтон",
   "Dunedin": "Данидин",
   "Tauranga": "Тауранга",
-  "Invercargill": "Инверкаргилл"
+  "Invercargill": "Инверкаргилл",
+  "Nelson": "Нельсон"
  },
  "ZA": {
   "Johannesburg": "Йоханнесбург",
@@ -880,6 +914,298 @@
   "Aswan": "Асуан",
   "Asyut": "Асьют",
   "Marsa Matruh": "Мерса-Матрух",
-  "Hurghada": "Хургада"
+  "Hurghada": "Хургада",
+  "Mersa Matruh": "Мерса-Матрух"
+ },
+ "AE": {
+  "Ar Ruways": "Эр-Рувайс"
+ },
+ "AG": {
+  "Saint John’s": "Сент-Джонс"
+ },
+ "AT": {
+  "Salzburg": "Зальцбург"
+ },
+ "AW": {
+  "Oranjestad": "Ораньестад"
+ },
+ "AX": {
+  "Mariehamn": "Мариехамн"
+ },
+ "AZ": {
+  "Lankaran": "Ленкорань"
+ },
+ "BA": {
+  "Mostar": "Мостар"
+ },
+ "BD": {
+  "Shibganj": "Шибгандж",
+  "Chittagong": "Читтагонг"
+ },
+ "BF": {
+  "Ouahigouya": "Уахигуя",
+  "Fada N'gourma": "Фада-Нгурма"
+ },
+ "BG": {
+  "Plovdiv": "Пловдив"
+ },
+ "BH": {
+  "Ar Rifā‘": "Эр-Рифа"
+ },
+ "BR": {
+  "Coari": "Коари",
+  "Macapá": "Макапа",
+  "Sinop": "Синоп",
+  "Palmas": "Палмас",
+  "Parauapebas": "Парауапебас",
+  "Rio Branco": "Риу-Бранку"
+ },
+ "BT": {
+  "Pemagatshel": "Пемагацел"
+ },
+ "BY": {
+  "Homyel'": "Гомель",
+  "Mahilyow": "Могилёв"
+ },
+ "CG": {
+  "Owando": "Овандо",
+  "Pointe-Noire": "Пуэнт-Нуар",
+  "Impfondo": "Импфондо"
+ },
+ "CH": {
+  "Zürich": "Цюрих"
+ },
+ "CI": {
+  "Korhogo": "Корого",
+  "Odienné": "Одиенне"
+ },
+ "CM": {
+  "Ngaoundéré": "Нгаундере",
+  "Bertoua": "Бертуа"
+ },
+ "CN": {
+  "Jiayuguan": "Цзяюйгуань"
+ },
+ "CR": {
+  "San Isidro": "Сан-Исидро"
+ },
+ "CU": {
+  "Santiago de Cuba": "Сантьяго-де-Куба"
+ },
+ "CV": {
+  "Praia": "Прая"
+ },
+ "CY": {
+  "Nicosia": "Никосия"
+ },
+ "CZ": {
+  "Ostrava": "Острава"
+ },
+ "DJ": {
+  "'Ali Sabieh": "Али-Сабих"
+ },
+ "DM": {
+  "Roseau": "Розо"
+ },
+ "DO": {
+  "Santa Cruz de Barahona": "Бараона"
+ },
+ "EE": {
+  "Kuressaare": "Курессааре"
+ },
+ "ER": {
+  "Barentu": "Баренту"
+ },
+ "ES": {
+  "Valladolid": "Вальядолид",
+  "Móstoles": "Мостолес"
+ },
+ "FJ": {
+  "Lautoka": "Лаутока"
+ },
+ "GE": {
+  "Kutaisi": "Кутаиси"
+ },
+ "GH": {
+  "Koforidua": "Кофоридуа"
+ },
+ "GM": {
+  "Serekunda": "Серекунда"
+ },
+ "GQ": {
+  "Aconibe": "Акониве"
+ },
+ "GR": {
+  "Athens": "Афины",
+  "Pátra": "Патры"
+ },
+ "GW": {
+  "Bissau": "Бисау",
+  "Bafatá": "Бафата"
+ },
+ "GY": {
+  "Georgetown": "Джорджтаун"
+ },
+ "HN": {
+  "Tocoa": "Токоа"
+ },
+ "HR": {
+  "Šibenik": "Шибеник"
+ },
+ "HU": {
+  "Debrecen": "Дебрецен"
+ },
+ "IE": {
+  "Cork": "Корк"
+ },
+ "JE": {
+  "Saint Helier": "Сент-Хелиер"
+ },
+ "JM": {
+  "Kingston": "Кингстон"
+ },
+ "JO": {
+  "Rukban": "Рукбан"
+ },
+ "KG": {
+  "Jalal-Abad": "Джалал-Абад"
+ },
+ "KH": {
+  "Stung Treng": "Стынгтраенг",
+  "Battambang": "Баттамбанг"
+ },
+ "KP": {
+  "Pyongyang": "Пхеньян"
+ },
+ "KW": {
+  "Al Aḩmadī": "Эль-Ахмади"
+ },
+ "KY": {
+  "George Town": "Джорджтаун"
+ },
+ "LA": {
+  "Pakse": "Паксе",
+  "Muang Xay": "Муангсай"
+ },
+ "LB": {
+  "Tripoli": "Триполи"
+ },
+ "LK": {
+  "Anuradhapura": "Анурадхапура"
+ },
+ "LT": {
+  "Klaipėda": "Клайпеда"
+ },
+ "LV": {
+  "Ventspils": "Вентспилс"
+ },
+ "MP": {
+  "Saipan": "Сайпан"
+ },
+ "MW": {
+  "Mzuzu": "Мзузу"
+ },
+ "NC": {
+  "Mont-Dore": "Мон-Дор"
+ },
+ "NI": {
+  "Nueva Guinea": "Нуэва-Гинеа",
+  "Ocotal": "Окоталь"
+ },
+ "NL": {
+  "Groningen": "Гронинген"
+ },
+ "PL": {
+  "Białystok": "Белосток"
+ },
+ "PR": {
+  "Bayamón": "Баямон"
+ },
+ "PT": {
+  "Amadora": "Амадора"
+ },
+ "RO": {
+  "Cluj-Napoca": "Клуж-Напока",
+  "Iaşi": "Яссы"
+ },
+ "RS": {
+  "Niš": "Ниш"
+ },
+ "RU": {
+  "Petropavlovsk-Kamchatsky": "Петропавловск-Камчатский",
+  "Magadan": "Магадан",
+  "Norilsk": "Норильск",
+  "Mirny": "Мирный",
+  "Yakutsk": "Якутск",
+  "Surgut": "Сургут",
+  "Chita": "Чита",
+  "Svobodnyy": "Свободный",
+  "Moscow": "Москва",
+  "Syktyvkar": "Сыктывкар"
+ },
+ "SK": {
+  "Košice": "Кошице"
+ },
+ "SN": {
+  "Ziguinchor": "Зигиншор",
+  "Matam": "Матам"
+ },
+ "SR": {
+  "Nieuw Nickerie": "Ньив-Никкери"
+ },
+ "TG": {
+  "Sokodé": "Сокоде"
+ },
+ "TJ": {
+  "Khorugh": "Хорог"
+ },
+ "TN": {
+  "Gabès": "Габес",
+  "Tataouine": "Татавин"
+ },
+ "TR": {
+  "Samsun": "Самсун"
+ },
+ "TW": {
+  "Kaohsiung": "Гаосюн",
+  "Taipei": "Тайбэй"
+ },
+ "US": {
+  "Anchorage": "Анкоридж",
+  "Fairbanks": "Фэрбанкс",
+  "Minneapolis": "Миннеаполис",
+  "Billings": "Биллингс",
+  "Fargo": "Фарго"
+ },
+ "UY": {
+  "Salto": "Сальто",
+  "Maldonado": "Мальдонадо"
+ },
+ "UZ": {
+  "Oltinko‘l": "Алтынкуль",
+  "Nukus": "Нукус"
+ },
+ "XK": {
+  "Pristina": "Приштина"
+ },
+ "ZW": {
+  "Mutare": "Мутаре",
+  "Marondera": "Марондера"
+ },
+ "IT": {
+  "Naples": "Неаполь",
+  "Rome": "Рим"
+ },
+ "HT": {
+  "Port-au-Prince": "Порт-о-Пренс"
+ },
+ "_exclude": {
+  "_comment": "Названия из старого справочника, которые сопоставились не с тем местом (районы крупных городов).",
+  "TR": [
+   "Картал",
+   "Чанкая",
+   "Пендик",
+   "Сейхан"
+  ]
  }
 }
