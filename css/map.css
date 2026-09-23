@@ -39,6 +39,13 @@
 .city-label.left, .capital-label.left { text-anchor: end; transform: translateX(calc(var(--sw) * -5)); }
 .city-label.crowded, .capital-label.crowded { display: none; }
 
+/* Разметка значков войск до перехода на плашки. Если браузер на минуту
+   смешает старый скрипт с новыми стилями, эмодзи не раздуются на экран. */
+.army-marker {
+    font-size: calc(var(--sw) * 13); text-anchor: middle; dominant-baseline: central;
+    paint-order: stroke; stroke: rgba(0, 0, 0, 0.85); stroke-width: calc(var(--sw) * 3);
+}
+
 /* --- значки войск: плашка с числом --- */
 .badge-inner { transform: scale(var(--k, 0.1)); }
 .army-badge rect:first-child {
