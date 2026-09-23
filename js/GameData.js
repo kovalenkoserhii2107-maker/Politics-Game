@@ -5,7 +5,7 @@
 // Все настройки механик в одном месте — чтобы баланс правился без поиска
 // чисел по коду.
 const RULES = {
-    INDUSTRY_VALUE: 400,        // доход с единицы индустрии за ход
+    INDUSTRY_VALUE: 2500,        // доход с единицы индустрии за ход
     ATTACK_ADVANTAGE: 1.2,      // во сколько раз атака должна превзойти оборону
     COUNTER_BONUS: 0.4,         // бонус рода войск против тех, кого он контрит
     CAPITAL_DEFENSE: 0.25,      // бонус обороны столицы
@@ -22,6 +22,17 @@ const RULES = {
     SPY_COST: 50000,
     MILITIA_DIVISOR: 250,       // ополчение: sqrt(население) / это число
     DESERTION: 0.1,             // доля войск, уходящих при пустой казне
+};
+
+const DEVELOPMENT = {
+    industry: { name: 'Промышленный район', cost: 500000, turns: 2, resource: 'industry', gain: 20, income: RULES.INDUSTRY_VALUE },
+    agro: { name: 'Агрокомплекс', cost: 180000, turns: 2, resource: 'agro', gain: 15, income: 1500 },
+    oil: { name: 'Энергетический комплекс', cost: 400000, turns: 3, resource: 'oil', gain: 10, income: 4000 },
+};
+const POLICIES = {
+    balanced: { name: 'Сбалансированный курс', description: 'Без дополнительных расходов и штрафов.', industry: 1, loyalty: 0, socialCost: 0 },
+    social: { name: 'Социальный курс', description: '+10 п.п. к целевой лояльности. Расход: $0,005 на жителя за ход.', industry: 1, loyalty: 0.1, socialCost: 0.005 },
+    production: { name: 'Промышленный курс', description: '+20% дохода промышленности. −5 п.п. к целевой лояльности.', industry: 1.2, loyalty: -0.05, socialCost: 0 },
 };
 
 class GameData {
@@ -41,6 +52,9 @@ class GameData {
         this.truces = new Map();    // 'AA|BB' -> ход, до которого действует перемирие
         this.decisions = [];        // предложения, ждущие ответа игрока
         this.gameOver = false;
+        this.outcome = null;
+        this.projects = [];
+        this.campaign = { budget: false, investment: false, recruited: false, diplomacy: false, conquest: false };
 
         this.build();
         if (!options.restoring) this.setupScenario();
@@ -76,6 +90,8 @@ class GameData {
                 playable: c.playable,
                 alive: c.regions > 0,
                 capital: null,
+                policy: 'balanced',
+                policyChangedAt: -3,
                 lastNetIncome: 0,
                 tech: this.baseTech(),
             };
@@ -95,6 +111,7 @@ class GameData {
                 cx: info.cx,
                 cy: info.cy,
                 loyalty: 1.0,
+                development: { industry: 0, agro: 0, oil: 0 },
                 army: this.emptyArmy(),
                 resources: { oil: info.oil, agro: info.agro, industry: info.industry },
             };
@@ -180,6 +197,7 @@ class GameData {
         if (index >= 0) list.splice(index, 1);
         this.regionsByCountry[newOwner].push(regionId);
         region.owner = newOwner;
+        if (newOwner === this.playerCountry && region.originalOwner !== newOwner) this.campaign.conquest = true;
     }
 
     // --- армия и сила ----------------------------------------------------
@@ -293,10 +311,10 @@ class GameData {
         this.wars.delete(key);
         this.truces.set(key, this.turn + RULES.TRUCE_TURNS);
         // приказы на атаку между бывшими врагами теряют смысл
-        this.orders.attacks = this.orders.attacks.filter(o => {
-            const target = this.regions[o.to];
-            return !(target && ((o.country === a && target.owner === b) || (o.country === b && target.owner === a)));
-        });
+        for (let i = this.orders.attacks.length - 1; i >= 0; i--) {
+            const o = this.orders.attacks[i], target = this.regions[o.to];
+            if (target && ((o.country === a && target.owner === b) || (o.country === b && target.owner === a))) this.cancelOrder('attacks', i);
+        }
     }
 
     warInfo(a, b) {
@@ -318,7 +336,7 @@ class GameData {
     }
 
     // Обход в ширину на глубину скорости марша — без перебора всего мира.
-    getValidMoveTargets(startRegionId) {
+    getLandMoveTargets(startRegionId) {
         const start = this.getRegion(startRegionId);
         if (!start) return [];
         const country = this.getCountry(start.owner);
@@ -344,12 +362,27 @@ class GameData {
         return targets;
     }
 
+    getValidMoveTargets(startRegionId) {
+        const region = this.regions[startRegionId];
+        if (!region) return [];
+        if (this.countries[region.owner].tech.marchSpeed >= 3) return this.getCountryRegions(region.owner).filter(r => r.id !== startRegionId).map(r => r.id);
+        return this.getLandMoveTargets(startRegionId);
+    }
+
+    expeditionQuote(type, fromId, toId, forces) {
+        const land = type === 'attacks' ? this.getNeighbors(fromId) : this.getLandMoveTargets(fromId);
+        if (land.includes(toId)) return { cost: 0, influence: 0 };
+        const total = Object.values(forces).reduce((sum, n) => sum + n, 0);
+        return { cost: 500000 + total * 25000, influence: 5 };
+    }
+
     // Атаковать можно только соседние области стран, с которыми идёт война.
     getValidAttackTargets(startRegionId) {
         const region = this.getRegion(startRegionId);
         if (!region) return [];
         const targets = [];
-        for (const id of this.getNeighbors(startRegionId)) {
+        const candidates = this.countries[region.owner].tech.marchSpeed >= 3 ? Object.keys(this.regions) : this.getNeighbors(startRegionId);
+        for (const id of candidates) {
             const other = this.regions[id];
             if (other && other.owner !== region.owner && this.isAtWar(region.owner, other.owner)) targets.push(id);
         }
@@ -405,7 +438,7 @@ class GameData {
         const region = this.getRegion(regionId);
         const unit = UnitsDB[unitId];
         const country = this.countries[countryId];
-        if (!region || !unit || !country || region.owner !== countryId || amount <= 0) {
+        if (this.gameOver || !region || !unit || !country || region.owner !== countryId || !Number.isSafeInteger(amount) || amount <= 0) {
             return { ok: false, reason: 'Нельзя набрать здесь' };
         }
         if (unit.industryCost * amount > this.recruitCapacityLeft(regionId)) {
@@ -415,6 +448,7 @@ class GameData {
         if (country.money < cost) return { ok: false, reason: 'Недостаточно средств' };
 
         country.money -= cost;
+        if (countryId === this.playerCountry) this.campaign.recruited = true;
         this.orders.recruitment.push({
             country: countryId, regionId, unitId, amount, cost,
             text: `[Набор] ${region.name}: +${amount} ${unit.name}`,
@@ -425,7 +459,7 @@ class GameData {
     // Роспуск: войска уходят сразу, содержание за них больше не платится.
     disband(regionId, forces, countryId = this.playerCountry) {
         const region = this.getRegion(regionId);
-        if (!region || region.owner !== countryId) return 0;
+        if (this.gameOver || !this.validateForces(regionId, forces, countryId)) return 0;
         const available = this.getAvailableArmy(regionId);
         let removed = 0;
         for (const unitId of Object.keys(UnitsDB)) {
@@ -445,7 +479,9 @@ class GameData {
     }
 
     research(countryId, key) {
+        if (this.gameOver) return { ok: false, reason: 'Кампания завершена' };
         const country = this.countries[countryId];
+        if (!country || (key !== 'marchSpeed' && !Object.hasOwn(UnitsDB, key))) return { ok: false, reason: 'Неизвестное исследование' };
         const cost = this.techCost(countryId, key);
         if (cost === null) return { ok: false, reason: 'Максимальный уровень' };
         if (country.money < cost) return { ok: false, reason: 'Недостаточно средств' };
@@ -462,25 +498,46 @@ class GameData {
             .join(', ');
     }
 
+    validateForces(regionId, forces, countryId) {
+        const region = this.regions[regionId];
+        if (!region || region.owner !== countryId || !forces || typeof forces !== 'object') return false;
+        const available = this.getAvailableArmy(regionId);
+        let total = 0;
+        for (const [unit, count] of Object.entries(forces)) {
+            if (!Object.hasOwn(UnitsDB, unit) || !Number.isSafeInteger(count) || count < 0 || count > available[unit]) return false;
+            total += count;
+        }
+        return total > 0;
+    }
+
     queueMovement(fromId, toId, forces, countryId = this.playerCountry) {
-        const from = this.getRegion(fromId), to = this.getRegion(toId);
-        if (!from || !to) return;
-        this.orders.movements.push({
-            country: countryId, from: fromId, to: toId, forces,
-            text: `[Марш] ${from.name} ➔ ${to.name} (${this.describeForces(forces)})`,
-        });
+        return this.queueMilitaryOrder('movements', fromId, toId, forces, countryId);
     }
 
     queueAttack(fromId, toId, forces, countryId = this.playerCountry) {
-        const from = this.getRegion(fromId), to = this.getRegion(toId);
-        if (!from || !to) return;
-        this.orders.attacks.push({
-            country: countryId, from: fromId, to: toId, forces,
-            text: `[Атака] ${from.name} ➔ ${to.name} (${this.describeForces(forces)})`,
+        return this.queueMilitaryOrder('attacks', fromId, toId, forces, countryId);
+    }
+
+    queueMilitaryOrder(type, fromId, toId, forces, countryId) {
+        if (this.gameOver || !this.validateForces(fromId, forces, countryId)) return { ok: false, reason: 'Недоступный состав войск' };
+        const targets = type === 'attacks' ? this.getValidAttackTargets(fromId) : this.getValidMoveTargets(fromId);
+        if (!targets.includes(toId)) return { ok: false, reason: 'Недоступная цель' };
+        const from = this.regions[fromId], to = this.regions[toId], country = this.countries[countryId];
+        const transport = this.expeditionQuote(type, fromId, toId, forces);
+        if (country.money < transport.cost || country.influence < transport.influence) return { ok: false, reason: 'Не хватает денег или влияния на экспедицию' };
+        country.money -= transport.cost;
+        country.influence -= transport.influence;
+        this.orders[type].push({
+            transportCost: transport.cost, transportInfluence: transport.influence,
+            country: countryId, from: fromId, to: toId, forces: { ...forces },
+            text: `[${type === 'attacks' ? 'Атака' : 'Марш'}] ${from.name} ➔ ${to.name} (${this.describeForces(forces)})`,
         });
+        return { ok: true };
     }
 
     queueRecon(targetId, cost, prob, regionName) {
+        const target = this.regions[targetId];
+        if (!target || target.owner === this.playerCountry || this.gameOver || cost !== RULES.SPY_COST || !Number.isFinite(prob) || prob < 0 || prob > 100) return false;
         if (this.orders.recon.some(o => o.target === targetId)) return false;
         const player = this.getCountry(this.playerCountry);
         if (!player || player.money < cost) return false;
@@ -491,9 +548,10 @@ class GameData {
 
     cancelOrder(type, index) {
         const list = this.orders[type];
-        if (!list || index < 0 || index >= list.length) return null;
+        if (!list || !Number.isInteger(index) || index < 0 || index >= list.length) return null;
         const [order] = list.splice(index, 1);
-        const refund = (type === 'recon' || type === 'recruitment') ? order.cost : 0;
+        const refund = (type === 'recon' || type === 'recruitment') ? order.cost : (order.transportCost || 0);
+        if (order.transportInfluence) this.countries[order.country].influence = Math.min(RULES.INFLUENCE_MAX, this.countries[order.country].influence + order.transportInfluence);
         if (refund) this.countries[order.country].money += refund;
         return order;
     }
@@ -638,15 +696,23 @@ class GameData {
             target.army[unitId] -= defLosses[unitId];
         }
         // потери атакующего раскладываем по областям-источникам
-        const survivorsBySource = sources.map(src => {
-            const left = {};
-            for (const unitId of Object.keys(UnitsDB)) {
-                const loss = Math.min(src.sent[unitId], Math.floor(src.sent[unitId] * attLossPct));
-                attLosses[unitId] += loss;
-                left[unitId] = src.sent[unitId] - loss;
-            }
-            return { region: src.region, left };
-        });
+        const survivorsBySource = sources.map(src => ({ region: src.region, left: { ...src.sent } }));
+        for (const unitId of Object.keys(UnitsDB)) {
+            const total = forces[unitId];
+            if (!total) continue;
+            // Round once per army, then distribute integer casualties. Splitting
+            // a force into many orders must never change its total losses.
+            const losses = Math.min(total, Math.ceil(total * attLossPct));
+            attLosses[unitId] = losses;
+            const shares = sources.map((src, i) => {
+                const exact = losses * src.sent[unitId] / total;
+                const whole = Math.floor(exact);
+                survivorsBySource[i].left[unitId] -= whole;
+                return { i, fraction: exact - whole, whole };
+            }).sort((a, b) => b.fraction - a.fraction || a.i - b.i);
+            const remainder = losses - shares.reduce((sum, share) => sum + share.whole, 0);
+            for (let i = 0; i < remainder; i++) survivorsBySource[shares[i].i].left[unitId]--;
+        }
 
         const attackerName = this.countries[attacker].name;
         const defenderName = this.countries[defender].name;
@@ -662,6 +728,7 @@ class GameData {
                     for (const unitId of Object.keys(UnitsDB)) retreat.army[unitId] += target.army[unitId];
                     extra.push(`Уцелевшие защитники отошли в ${retreat.name}.`);
                 } else {
+                    for (const unitId of Object.keys(UnitsDB)) defLosses[unitId] += target.army[unitId];
                     extra.push('Защитники окружены и уничтожены.');
                 }
             }
@@ -711,23 +778,106 @@ class GameData {
             : '';
     }
 
+    developmentCost(regionId, kind) {
+        const region = this.regions[regionId], plan = DEVELOPMENT[kind];
+        return region && plan ? Math.round(plan.cost * (1 + (region.development[kind] || 0) * 0.5)) : null;
+    }
+
+    invest(regionId, kind, countryId = this.playerCountry) {
+        const region = this.regions[regionId], plan = DEVELOPMENT[kind], country = this.countries[countryId];
+        if (this.gameOver || !region || !plan || region.owner !== countryId) return { ok: false, reason: 'Проект недоступен' };
+        if (region.development[kind] >= 5) return { ok: false, reason: 'Достигнут 5-й уровень развития' };
+        if (this.projects.some(p => p.regionId === regionId)) return { ok: false, reason: 'В области уже идёт строительство' };
+        const cost = this.developmentCost(regionId, kind);
+        if (country.money < cost) return { ok: false, reason: 'Недостаточно средств' };
+        country.money -= cost;
+        this.projects.push({ regionId, kind, country: countryId, cost, remaining: plan.turns });
+        if (countryId === this.playerCountry) this.campaign.investment = true;
+        return { ok: true };
+    }
+
+    cancelProject(regionId, countryId = this.playerCountry) {
+        const index = this.projects.findIndex(p => p.regionId === regionId && p.country === countryId);
+        if (index < 0) return false;
+        const [project] = this.projects.splice(index, 1);
+        // Construction spending is reserved until completion, like recruitment.
+        this.countries[countryId].money += project.cost;
+        return true;
+    }
+
+    processProjects() {
+        const events = [], pending = [];
+        for (const project of this.projects) {
+            const region = this.regions[project.regionId];
+            if (!region || region.owner !== project.country) {
+                this.countries[project.country].money += project.cost;
+                if (project.country === this.playerCountry) events.push({ message: 'Строительство сорвано потерей области. Средства возвращены.' });
+                continue;
+            }
+            project.remaining--;
+            if (project.remaining > 0) { pending.push(project); continue; }
+            const plan = DEVELOPMENT[project.kind];
+            region.resources[plan.resource] += plan.gain;
+            region.development[project.kind]++;
+            if (project.country === this.playerCountry) events.push({ message: `${region.name}: завершён проект «${plan.name}».` });
+        }
+        this.projects = pending;
+        return events;
+    }
+
+    setPolicy(countryId, policy) {
+        const c = this.countries[countryId];
+        if (this.gameOver || !c || !Object.hasOwn(POLICIES, policy) || c.policy === policy) return { ok: false, reason: 'Курс уже выбран или недоступен' };
+        if (this.turn - c.policyChangedAt < 3) return { ok: false, reason: 'Смена курса доступна раз в 3 хода' };
+        if (c.influence < 5) return { ok: false, reason: 'Нужно 5 влияния' };
+        c.influence -= 5;
+        c.policy = policy;
+        c.policyChangedAt = this.turn;
+        return { ok: true };
+    }
+
+    integrateTerritory(regionId) {
+        const region = this.regions[regionId], player = this.countries[this.playerCountry];
+        if (this.gameOver || !region || region.owner === player.id || this.countries[region.owner].playable || !this.isNeighborToPlayer(regionId)) return { ok: false, reason: 'Нужна общая граница с территорией без правительства' };
+        if (player.influence < 10 || player.money < 500000) return { ok: false, reason: 'Нужно $500K и 10 влияния' };
+        const previous = region.owner;
+        player.influence -= 10;
+        player.money -= 500000;
+        this.setOwner(regionId, player.id);
+        region.loyalty = 0.5;
+        if (this.countries[previous].capital === regionId) this.onCapitalLost(previous);
+        return { ok: true };
+    }
+
+    campaignProgress() {
+        const territories = Object.values(this.regions).filter(r => CountriesDB[r.originalOwner].playable);
+        const controlled = territories.filter(r => r.owner === this.playerCountry).length;
+        const share = territories.length ? controlled / territories.length : 0;
+        const rank = share >= 1 ? 'Мировое господство' : share >= 0.5 ? 'Сверхдержава' : share >= 0.25 ? 'Мировая держава' : share >= 0.1 ? 'Региональный лидер' : 'Становление державы';
+        return { controlled, total: territories.length, share, rank };
+    }
+
     // --- экономика -------------------------------------------------------------------
     countryBalance(countryId) {
         const country = this.getCountry(countryId);
-        let tax = 0, industry = 0, upkeep = 0;
+        let tax = 0, industry = 0, upkeep = 0, agro = 0, energy = 0, social = 0;
         if (!country) return { income: 0, expense: 0, tax, industry, upkeep };
         for (const region of this.getCountryRegions(countryId)) {
             tax += region.population * country.taxRate * region.loyalty;
-            industry += region.resources.industry * RULES.INDUSTRY_VALUE;
+            const policy = POLICIES[country.policy] || POLICIES.balanced;
+            industry += region.resources.industry * RULES.INDUSTRY_VALUE * policy.industry;
+            agro += region.resources.agro * DEVELOPMENT.agro.income * region.loyalty;
+            energy += region.resources.oil * DEVELOPMENT.oil.income * region.loyalty;
+            social += region.population * policy.socialCost;
             upkeep += this.armyUpkeep(region.army);
         }
-        return { income: tax + industry, expense: upkeep, tax, industry, upkeep };
+        return { income: tax + industry + agro + energy, expense: upkeep + social, tax, industry, agro, energy, social, upkeep };
     }
 
     // Итоги хода после боёв: деньги, лояльность, влияние, банкротство,
     // гибель стран. Возвращает события для отчёта игроку.
     applyEndOfTurn() {
-        const events = [];
+        const events = this.processProjects();
         const balances = {};
 
         for (const country of Object.values(this.countries)) {
@@ -750,7 +900,7 @@ class GameData {
         for (const region of Object.values(this.regions)) {
             const country = this.countries[region.owner];
             const occupied = region.owner !== region.originalOwner;
-            const target = Math.max(0.3, (occupied ? 0.8 : 1) - Math.max(0, country.taxRate - 0.1) * 2);
+            const target = Math.min(1, Math.max(0.3, (occupied ? 0.8 : 1) + POLICIES[country.policy].loyalty - Math.max(0, country.taxRate - 0.1) * 2));
             if (region.loyalty < target) region.loyalty = Math.min(target, region.loyalty + 0.05);
             else if (region.loyalty > target) region.loyalty = Math.max(target, region.loyalty - 0.02);
         }
@@ -760,10 +910,15 @@ class GameData {
             if (!country.alive || this.regionsByCountry[country.id].length > 0) continue;
             country.alive = false;
             for (const enemy of this.enemiesOf(country.id)) this.wars.delete(this.pairKey(country.id, enemy));
-            if (country.id === this.playerCountry) this.gameOver = true;
+            if (country.id === this.playerCountry) { this.gameOver = true; this.outcome = 'defeat'; }
             events.push({ type: 'eliminated', country: country.id, message: `🏳️ ${country.name} прекратила существование.` });
         }
 
+        if (!this.gameOver && this.campaignProgress().share === 1) {
+            this.gameOver = true;
+            this.outcome = 'victory';
+            events.push({ message: 'Все области суверенных стран под вашим управлением. Мировое господство достигнуто!' });
+        }
         return { balances, events };
     }
 
@@ -865,14 +1020,19 @@ class GameData {
                 units.map(u => region.army[u]),
                 Math.round(region.loyalty * 100) / 100,
                 region.reconActiveUntil ? +new Date(region.reconActiveUntil) : 0,
+                { ...region.resources }, { ...region.development },
             ];
         }
         const countries = {};
         for (const c of Object.values(this.countries)) {
-            countries[c.id] = [Math.round(c.money), c.taxRate, c.influence, c.tech, c.lastNetIncome, c.alive, c.capital];
+            countries[c.id] = [Math.round(c.money), c.taxRate, c.influence, c.tech, c.lastNetIncome, c.alive, c.capital, c.policy, c.policyChangedAt];
         }
         return {
-            v: 2,
+            v: 3,
+            units,
+            projects: this.projects,
+            campaign: this.campaign,
+            outcome: this.outcome,
             player: this.playerCountry,
             cheat: this.cheatMode,
             scenario: this.scenario,
@@ -888,7 +1048,46 @@ class GameData {
         };
     }
 
+    static validateSave(save) {
+        const fail = () => { throw new Error('Сохранение несовместимо или повреждено'); };
+        const finite = n => typeof n === 'number' && Number.isFinite(n);
+        const count = n => Number.isSafeInteger(n) && n >= 0;
+        if (!save || save.v !== 3 || !CountriesDB[save.player]?.playable || !count(save.turn) || !finite(save.date) || !Number.isFinite(+new Date(save.date))) fail();
+        if (JSON.stringify(save.units) !== JSON.stringify(Object.keys(UnitsDB))) fail();
+        if (!save.regions || !save.countries || !save.campaign || !Array.isArray(save.projects)) fail();
+        if (Object.keys(save.regions).length !== Object.keys(RegionsDB).length || Object.keys(save.countries).length !== Object.keys(CountriesDB).length) fail();
+        for (const id of Object.keys(RegionsDB)) {
+            const r = save.regions[id];
+            if (!Array.isArray(r) || !CountriesDB[r[0]] || !Array.isArray(r[1]) || r[1].length !== save.units.length || !r[1].every(count) || !finite(r[2]) || r[2] < 0 || r[2] > 1 || !finite(r[3])) fail();
+            for (const key of ['industry', 'agro', 'oil']) if (!count(r[4]?.[key]) || !count(r[5]?.[key]) || r[5][key] > 5) fail();
+        }
+        for (const id of Object.keys(CountriesDB)) {
+            const c = save.countries[id];
+            if (!Array.isArray(c) || !finite(c[0]) || !finite(c[1]) || c[1] < 0.01 || c[1] > 0.3 || !finite(c[2]) || c[2] < 0 || c[2] > 100 || !finite(c[4]) || typeof c[5] !== 'boolean' || (c[6] !== null && (!RegionsDB[c[6]] || save.regions[c[6]][0] !== id)) || !POLICIES[c[7]] || !Number.isInteger(c[8])) fail();
+            for (const key of [...save.units, 'marchSpeed']) if (!count(c[3]?.[key]) || c[3][key] < 1 || c[3][key] > (key === 'marchSpeed' ? 3 : RULES.TECH_MAX)) fail();
+        }
+        const pair = key => typeof key === 'string' && key.split('|').length === 2 && key.split('|').every(cc => CountriesDB[cc]);
+        if (!Array.isArray(save.wars) || save.wars.some(x => !Array.isArray(x) || !pair(x[0]) || !count(x[1]?.start) || !CountriesDB[x[1]?.attacker])) fail();
+        if (!Array.isArray(save.truces) || save.truces.some(x => !Array.isArray(x) || !pair(x[0]) || !count(x[1]))) fail();
+        if (!Array.isArray(save.decisions) || save.decisions.some(x => x.type !== 'peace' || !CountriesDB[x.from])) fail();
+        if (!Array.isArray(save.history) || save.history.some(t => typeof t.date !== 'string' || !Array.isArray(t.logs) || !t.financial || !['income','expense','net'].every(k => finite(t.financial[k])))) fail();
+        if (save.projects.some(p => !RegionsDB[p.regionId] || !CountriesDB[p.country] || !DEVELOPMENT[p.kind] || !count(p.remaining) || p.remaining < 1 || !count(p.cost))) fail();
+        if (!save.orders || !['recruitment','recon','movements','attacks'].every(k => Array.isArray(save.orders[k]))) fail();
+        for (const [type, list] of Object.entries(save.orders)) {
+            if (!['recruitment','recon','movements','attacks'].includes(type)) fail();
+            for (const o of list) {
+                if (!CountriesDB[o.country]) fail();
+                if (type === 'recruitment' && (!RegionsDB[o.regionId] || !UnitsDB[o.unitId] || !count(o.amount) || o.amount < 1 || o.cost !== o.amount * UnitsDB[o.unitId].buildCost)) fail();
+                if (type === 'recon' && (!RegionsDB[o.target] || o.cost !== RULES.SPY_COST || !finite(o.prob) || o.prob < 0 || o.prob > 100)) fail();
+                if (type === 'movements' || type === 'attacks') {
+                    if (!count(o.transportCost || 0) || !count(o.transportInfluence || 0) || !RegionsDB[o.from] || !RegionsDB[o.to] || !o.forces || Object.entries(o.forces).some(([u, n]) => !UnitsDB[u] || !count(n))) fail();
+                }
+            }
+        }
+    }
+
     static restore(save) {
+        GameData.validateSave(save);
         const data = new GameData(save.player, { cheat: save.cheat, scenario: save.scenario, restoring: true });
         const units = Object.keys(UnitsDB);
 
@@ -900,6 +1099,8 @@ class GameData {
                 region.owner = saved[0];
                 units.forEach((u, i) => { region.army[u] = saved[1][i] || 0; });
                 region.loyalty = saved[2];
+                region.resources = { ...saved[4] };
+                region.development = { ...saved[5] };
                 region.reconActiveUntil = saved[3] ? new Date(saved[3]) : undefined;
             }
             data.regionsByCountry[region.owner].push(region.id);
@@ -907,7 +1108,7 @@ class GameData {
         for (const c of Object.values(data.countries)) {
             const saved = save.countries[c.id];
             if (!saved) continue;
-            [c.money, c.taxRate, c.influence, c.tech, c.lastNetIncome, c.alive, c.capital] = saved;
+            [c.money, c.taxRate, c.influence, c.tech, c.lastNetIncome, c.alive, c.capital, c.policy, c.policyChangedAt] = saved;
         }
         data.currentDate = new Date(save.date);
         data.turn = save.turn;
@@ -917,6 +1118,9 @@ class GameData {
         data.decisions = save.decisions || [];
         data.history = save.history || [];
         data.gameOver = !!save.gameOver;
+        data.outcome = save.outcome;
+        data.projects = structuredClone(save.projects);
+        data.campaign = { ...save.campaign };
         return data;
     }
 }

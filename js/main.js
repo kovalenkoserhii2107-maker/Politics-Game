@@ -12,6 +12,7 @@ class GameCore {
         this.armyAction = { active: false, type: null, fromId: null, forces: {} };
         this.panelRegion = null;
 
+        document.addEventListener('mapBackground', () => this.ui.closePanel());
         document.addEventListener('panelClosed', () => {
             this.map.clearSelection();
             this.cancelTargeting();
@@ -47,6 +48,7 @@ class GameCore {
 
         this.ui.updateOrdersPanel(this.data);
         SaveGame.save(this.data);
+        this.loop.afterSummary();
     }
 
     // --- действия из карточек и окон ---------------------------------------
@@ -54,6 +56,35 @@ class GameCore {
         const d = this.data;
         const player = d.playerCountry;
         const cc = btn.dataset.country;
+        const action = btn.dataset.action;
+        if (action.startsWith('campaign-')) {
+            this.ui.hideModal('campaign-modal');
+            if (action === 'campaign-budget') this.openGovernment();
+            else if (action === 'campaign-diplomacy') this.openDiplomacy();
+            else {
+                const id = document.getElementById('owned-region-select')?.value || d.mostPopulousRegion(player);
+                if (id) { this.map.focusRegion(id); this.showRegion(id);
+                    if (action === 'campaign-invest') { const panel = document.getElementById('development-panel'); panel.open = true; panel.scrollIntoView({ block: 'nearest' }); }
+                    if (action === 'campaign-recruit') document.getElementById('recruit-btn').click();
+                }
+            }
+            return;
+        }
+        if (d.gameOver) return;
+        if (['invest', 'cancel-project', 'integrate'].includes(action)) {
+            const id = btn.dataset.region;
+            const result = action === 'invest' ? d.invest(id, btn.dataset.kind)
+                : action === 'integrate' ? d.integrateTerritory(id)
+                : { ok: d.cancelProject(id) };
+            if (!result.ok) { this.ui.toast(result.reason || 'Проект недоступен'); return; }
+            this.ui.toast(action === 'invest' ? 'Строительство начато' : action === 'integrate' ? 'Территория интегрирована' : 'Средства возвращены');
+            this.showRegion(id);
+            this.loop.updateTopBarUI();
+            this.map.refreshColors();
+            this.map.createCountryLabels();
+            SaveGame.save(d);
+            return;
+        }
 
         if (btn.dataset.action === 'war') {
             const result = d.declareWar(player, cc);
@@ -81,6 +112,7 @@ class GameCore {
             btn.textContent = 'Разведка в плане';
             this.ui.updateOrdersPanel(d);
             this.loop.updateTopBarUI();
+            SaveGame.save(d);
         } else if (btn.dataset.action === 'research') {
             const result = d.research(player, btn.dataset.key);
             if (!result.ok) { this.ui.toast(result.reason); return; }
@@ -89,6 +121,7 @@ class GameCore {
             this.ui.renderGovernment(d);
             this.loop.updateTopBarUI();
             this.map.drawArmyMarkers();
+            SaveGame.save(d);
         }
     }
 
@@ -108,6 +141,7 @@ class GameCore {
         if (!order) return;
         this.ui.updateOrdersPanel(this.data);
         this.loop.updateTopBarUI();
+        SaveGame.save(this.data);
         if (this.panelRegion) this.showRegion(this.panelRegion);
     }
 
@@ -280,6 +314,7 @@ class GameCore {
             this.ui.updateOrdersPanel(this.data);
             this.loop.updateTopBarUI();
             this.showRegion(this.panelRegion);
+            SaveGame.save(this.data);
         });
     }
 
@@ -331,32 +366,50 @@ class GameCore {
 
     // --- правительство, дипломатия, журнал ----------------------------------------------
     initGovernment() {
+        document.getElementById('gov-policy').addEventListener('change', e => {
+            const result = this.data.setPolicy(this.data.playerCountry, e.target.value);
+            if (!result.ok) this.ui.toast(result.reason);
+            this.ui.renderGovernment(this.data);
+            this.loop.updateTopBarUI();
+            SaveGame.save(this.data);
+        });
         document.getElementById('gov-tax-slider').addEventListener('input', e => {
             this.data.countries[this.data.playerCountry].taxRate = parseFloat(e.target.value);
             this.ui.renderGovernment(this.data);
+            this.loop.updateTopBarUI();
+            SaveGame.save(this.data);
         });
         document.getElementById('save-game-btn').addEventListener('click', () => {
             this.ui.toast(SaveGame.save(this.data) ? 'Игра сохранена' : 'Не удалось сохранить: хранилище недоступно');
         });
         document.getElementById('new-game-btn').addEventListener('click', () => {
             if (!confirm('Начать новую игру? Текущая партия будет удалена.')) return;
-            SaveGame.clear();
+            SaveGame.discard();
             location.reload();
         });
     }
 
+    openGovernment() {
+        this.ui.closePanel();
+        this.data.campaign.budget = true;
+        this.ui.renderGovernment(this.data);
+        this.ui.showModal('gov-modal');
+        SaveGame.save(this.data);
+    }
+
+    openDiplomacy() {
+        this.ui.closePanel();
+        this.data.campaign.diplomacy = true;
+        this.ui.showDiplomacy(this.data);
+        SaveGame.save(this.data);
+    }
+
     initTopButtons() {
-        document.getElementById('gov-btn').addEventListener('click', () => {
-            this.ui.closePanel();
-            this.ui.renderGovernment(this.data);
-            this.ui.showModal('gov-modal');
-        });
-        document.getElementById('diplo-btn').addEventListener('click', () => {
-            this.ui.closePanel();
-            this.ui.showDiplomacy(this.data);
-        });
+        document.getElementById('gov-btn').addEventListener('click', () => this.openGovernment());
+        document.getElementById('diplo-btn').addEventListener('click', () => this.openDiplomacy());
+        document.getElementById('campaign-btn').addEventListener('click', () => this.ui.showCampaign(this.data));
         document.getElementById('log-btn').addEventListener('click', () => this.ui.showHistory(this.data.history));
-        document.getElementById('gameover-new-btn').addEventListener('click', () => { SaveGame.clear(); location.reload(); });
+        document.getElementById('gameover-new-btn').addEventListener('click', () => { SaveGame.discard(); location.reload(); });
     }
 
     initMapControls() {
@@ -367,6 +420,7 @@ class GameCore {
 
     afterOrder(message) {
         this.ui.updateOrdersPanel(this.data);
+        SaveGame.save(this.data);
         this.ui.haptic(20);
         this.ui.toast(message);
     }
@@ -391,8 +445,25 @@ class GameCore {
             const targets = isMove ? this.data.getValidMoveTargets(state.fromId) : this.data.getValidAttackTargets(state.fromId);
             this.cancelTargeting();
             if (!targets.includes(regionId)) return;
+            const transport = this.data.expeditionQuote(isMove ? 'movements' : 'attacks', state.fromId, regionId, state.forces);
+            if (transport.cost) {
+                const odds = isMove ? null : this.attackOdds(regionId, state.forces);
+                this.ui.showDecision({
+                    title: isMove ? 'Межконтинентальная переброска' : 'Экспедиция',
+                    text: `Перевозка за один ход: ${this.ui.money(transport.cost)} и ${transport.influence} влияния.${odds ? ` Шансы атаки: ${odds.label}. Сила ${odds.attack}, нужно ${odds.needed}.` : ''} При отмене приказа затраты возвращаются.`,
+                    accept: 'Отправить', decline: 'Отменить',
+                    onAccept: () => {
+                        const result = isMove ? this.data.queueMovement(state.fromId, regionId, state.forces) : this.data.queueAttack(state.fromId, regionId, state.forces);
+                        if (!result.ok) { this.ui.toast(result.reason); return; }
+                        this.loop.updateTopBarUI();
+                        this.afterOrder('Экспедиция запланирована');
+                    }, onDecline: () => {},
+                });
+                return;
+            }
             if (isMove) {
-                this.data.queueMovement(state.fromId, regionId, state.forces);
+                const result = this.data.queueMovement(state.fromId, regionId, state.forces);
+                if (!result.ok) { this.ui.toast(result.reason); return; }
                 this.afterOrder('Марш запланирован');
                 return;
             }
@@ -400,7 +471,8 @@ class GameCore {
             // заведомо проигрышную атаку лучше переспросить, чем молча отправить.
             const odds = this.attackOdds(regionId, state.forces);
             const queue = () => {
-                this.data.queueAttack(state.fromId, regionId, state.forces);
+                const result = this.data.queueAttack(state.fromId, regionId, state.forces);
+                if (!result.ok) { this.ui.toast(result.reason); return; }
                 this.afterOrder(`Наступление запланировано · шансы ${odds.label}`);
             };
             if (odds.ratio >= 0.9) { queue(); return; }
@@ -442,11 +514,19 @@ class GameCore {
 
         const launch = data => {
             document.getElementById('start-screen').style.display = 'none';
+            document.body.classList.add('in-game');
             window.game = new GameCore(data);
+            if (!data.gameOver && !data.decisions.length && data.turn === 0 && !data.campaign.budget) window.game.ui.showCampaign(data);
         };
 
         // Сохранённая партия — сразу предлагаем продолжить.
         const saved = SaveGame.load();
+        const saveProblem = SaveGame.error;
+        if (saveProblem) {
+            const warning = document.getElementById('save-warning');
+            warning.hidden = false;
+            warning.textContent = saveProblem;
+        }
         if (saved) {
             const g = saved.game;
             const country = CountriesDB[g.player];
@@ -457,7 +537,7 @@ class GameCore {
                 `${country ? country.name : g.player} · ${date.getDate()}.${String(date.getMonth() + 1).padStart(2, '0')}.${date.getFullYear()} · ход ${g.turn}`;
             document.getElementById('continue-btn').addEventListener('click', () => {
                 try { launch(GameData.restore(g)); }
-                catch (e) { SaveGame.clear(); alert('Сохранение повреждено и удалено. Начните новую игру.'); location.reload(); }
+                catch (e) { alert('Не удалось загрузить партию. Сохранение оставлено в хранилище.'); }
             });
         }
 
@@ -468,8 +548,10 @@ class GameCore {
             for (const id of playable) {
                 const country = CountriesDB[id];
                 if (query && !country.name.toLowerCase().includes(query)) continue;
-                const item = document.createElement('div');
+                const item = document.createElement('button');
                 item.className = 'country-list-item' + (id === selectedId ? ' selected' : '');
+                item.type = 'button';
+                item.setAttribute('aria-pressed', String(id === selectedId));
                 item.dataset.id = id;
                 item.innerHTML = `<span>${country.name}</span><span class="list-regions">${country.regions}</span>`;
                 fragment.appendChild(item);
@@ -480,7 +562,8 @@ class GameCore {
 
         const select = id => {
             selectedId = id;
-            for (const el of listEl.children) el.classList.toggle('selected', el.dataset.id === id);
+            for (const el of listEl.querySelectorAll('[data-id]')) { el.classList.toggle('selected', el.dataset.id === id); el.setAttribute('aria-pressed', String(el.dataset.id === id)); }
+            for (const el of document.querySelectorAll('.quick-country')) el.setAttribute('aria-pressed', String(el.dataset.id === id));
             const country = CountriesDB[id];
             document.getElementById('info-name').textContent = country.name;
             const set = (elId, value) => { document.getElementById(elId).querySelector('span').textContent = value; };
@@ -493,6 +576,13 @@ class GameCore {
             document.getElementById('info-visuals').style.visibility = 'visible';
             document.getElementById('info-flag').src = `https://flagcdn.com/w160/${id.toLowerCase()}.png`;
             drawMinimap(regions, country.color);
+            const preview = new GameData(id);
+            const balance = preview.countryBalance(id);
+            const net = balance.income - balance.expense;
+            const money = n => '$' + new Intl.NumberFormat('ru-RU', { notation: 'compact', maximumFractionDigits: 1 }).format(Math.abs(n));
+            const neighbours = preview.neighbourCountries(id).filter(cc => preview.countries[cc].playable);
+            document.getElementById('start-economy').innerHTML = `<div class="start-metrics"><div class="start-metric"><small>Стартовая казна</small><strong>${money(preview.countries[id].money)}</strong></div><div class="start-metric"><small>Баланс за неделю</small><strong class="${net >= 0 ? 'pos' : 'neg'}">${net >= 0 ? '+' : '−'}${money(net)}</strong></div></div><p class="hint">${neighbours.length} соседних государств · ${Object.values(preview.getCountryStats(id).army).reduce((a,b) => a+b,0)} подразделений.${net < 0 ? ' Дефицит: сначала сократите расходы или развивайте экономику.' : ' Есть средства для первых инвестиций.'}</p>`;
+            startBtn.textContent = `Возглавить: ${country.name}`;
             startBtn.disabled = false;
         };
 
@@ -501,10 +591,13 @@ class GameCore {
             if (item) select(item.dataset.id);
         });
         searchEl.addEventListener('input', () => render(searchEl.value));
+        const quick = document.getElementById('quick-countries');
+        quick.innerHTML = [['BR','Большая экономика'],['FR','Компактная держава'],['UA','Пять областей']].map(([id, note]) => `<button class="quick-country" data-id="${id}" aria-pressed="false"><b>${CountriesDB[id].name}</b><small>${note}</small></button>`).join('');
+        quick.addEventListener('click', e => { const btn = e.target.closest('[data-id]'); if (btn) select(btn.dataset.id); });
 
         startBtn.addEventListener('click', () => {
             if (!selectedId || !CountriesDB[selectedId]) return;
-            if (saved && !confirm('Начать новую игру? Сохранённая партия будет удалена.')) return;
+            if ((saved || saveProblem) && !confirm('Начать новую игру? Сохранённая партия будет удалена.')) return;
             SaveGame.clear();
             launch(new GameData(selectedId, {
                 cheat: document.getElementById('cheat-toggle').checked,
