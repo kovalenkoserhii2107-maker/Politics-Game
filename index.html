@@ -587,6 +587,10 @@ body { overscroll-behavior: none; }
             </div>
             <button id="continue-btn" class="btn btn-light" type="button">Продолжить ▶</button>
         </section>
+        <div class="file-row">
+            <button id="import-btn" class="btn btn-ghost btn-sm" type="button">📂 Загрузить партию из файла</button>
+            <input id="import-file" type="file" accept=".json,application/json" hidden>
+        </div>
         <div id="save-warning" class="notice" role="status" hidden>
             <span>Старое сохранение не подходит к новой версии игры. Начните новую партию.</span>
             <button id="save-delete-btn" class="btn btn-ghost btn-sm" type="button">Удалить</button>
@@ -642,8 +646,22 @@ body { overscroll-behavior: none; }
                         <span class="mode-text"><b>Сценарий 2024</b><small>С первого хода идёт война России и Украины.</small></span>
                     </label>
                 </div>
+                <div class="levels" role="radiogroup" aria-label="Уровень игры">
+                    <span class="label">Уровень</span>
+                    <div class="segmented">
+                        <label><input type="radio" name="difficulty" value="easy"><span>Лёгкий</span></label>
+                        <label><input type="radio" name="difficulty" value="normal" checked><span>Обычный</span></label>
+                        <label><input type="radio" name="difficulty" value="hard"><span>Тяжёлый</span></label>
+                    </div>
+                    <p id="level-note" class="level-note"></p>
+                </div>
                 <details class="extra">
                     <summary>Дополнительно</summary>
+                    <label class="switch">
+                        <input type="checkbox" id="tutorial-toggle">
+                        <span class="switch-track" aria-hidden="true"></span>
+                        <span class="switch-text"><b>Обучение</b><small>Подсказки по шагам в первые ходы</small></span>
+                    </label>
                     <label class="switch">
                         <input type="checkbox" id="cheat-toggle">
                         <span class="switch-track" aria-hidden="true"></span>
@@ -685,8 +703,18 @@ body { overscroll-behavior: none; }
         <button class="map-btn" id="home-btn" aria-label="К моей стране">◎</button>
     </div>
 
+    <div id="coach" class="ui-element coach hud" role="status" aria-live="polite" hidden>
+        <div id="coach-step" class="label"></div>
+        <p id="coach-text"></p>
+        <div class="coach-actions">
+            <button id="coach-skip" type="button">Пропустить обучение</button>
+            <button id="coach-next" type="button" hidden>Понятно, играю!</button>
+        </div>
+    </div>
+
     <div id="target-banner" class="ui-element">
         <span id="target-text">Выберите цель</span>
+        <button id="target-list-btn">📋 Списком</button>
         <button id="target-cancel">Отмена</button>
     </div>
 
@@ -694,6 +722,18 @@ body { overscroll-behavior: none; }
         <div class="modal-content"><div class="modal-header"><h2 id="campaign-title">Ваша кампания</h2><button class="close-btn" id="close-campaign-btn" aria-label="Закрыть кампанию">✕</button></div>
         <div class="modal-body"><div id="campaign-content"></div><button id="log-btn" class="top-btn">Журнал событий</button></div></div>
     </div>
+    <!-- ВЫБОР ЦЕЛИ СПИСКОМ -->
+    <div id="target-modal" class="modal ui-element" role="dialog" aria-modal="true" aria-labelledby="target-title">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 id="target-title">Выберите цель</h2>
+                <button class="close-btn" id="close-target-btn" aria-label="Вернуться к карте">✕</button>
+            </div>
+            <p id="target-hint" class="hint"></p>
+            <div id="target-list" class="modal-body target-list"></div>
+        </div>
+    </div>
+
     <!-- ПРАВИТЕЛЬСТВО -->
     <div id="gov-modal" class="modal ui-element">
         <div class="modal-content">
@@ -724,6 +764,7 @@ body { overscroll-behavior: none; }
                 </div>
                 <div class="gov-menu">
                     <button id="save-game-btn">💾 Сохранить</button>
+                    <button id="export-game-btn">📤 В файл</button>
                     <button id="new-game-btn">🔄 Новая игра</button>
                 </div>
             </div>
@@ -858,6 +899,7 @@ body { overscroll-behavior: none; }
 <script src="js/MapEngine.js"></script>
 <script src="js/UIManager.js"></script>
 <script src="js/GameLoop.js"></script>
+<script src="js/Tutorial.js"></script>
 <script src="js/main.js"></script>
 </body>
 </html>

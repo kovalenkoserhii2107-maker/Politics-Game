@@ -270,9 +270,54 @@ class GameCore {
         });
 
         document.getElementById('target-cancel').addEventListener('click', () => this.cancelTargeting());
+        document.getElementById('target-list-btn').addEventListener('click', () => this.showTargetList());
+        document.getElementById('close-target-btn').addEventListener('click', () => this.ui.hideModal('target-modal'));
+        document.getElementById('target-list').addEventListener('click', e => {
+            const row = e.target.closest('[data-target]');
+            if (!row) return;
+            this.ui.hideModal('target-modal');
+            this.handleMapClick(row.dataset.target);
+        });
+    }
+
+    // Те же цели, что подсвечены на карте, но списком: в маленькую область
+    // на телефоне пальцем не попасть. Атаки — от лучших шансов к худшим.
+    showTargetList() {
+        const state = this.armyAction;
+        if (!state.active) return;
+        const d = this.data;
+        const isMove = state.type === 'move';
+        const ids = isMove ? d.getValidMoveTargets(state.fromId) : d.getValidAttackTargets(state.fromId);
+        const LIMIT = 60;
+        const rows = ids.map(id => {
+            const region = d.getRegion(id);
+            const transport = d.expeditionQuote(isMove ? 'movements' : 'attacks', state.fromId, id, state.forces);
+            const odds = isMove ? null : this.attackOdds(id, state.forces);
+            return { id, region, transport, odds };
+        }).sort((a, b) => (a.transport.cost ? 1 : 0) - (b.transport.cost ? 1 : 0)
+            || (b.odds ? b.odds.ratio : 0) - (a.odds ? a.odds.ratio : 0)
+            || a.region.name.localeCompare(b.region.name, 'ru'));
+
+        const from = d.getRegion(state.fromId);
+        document.getElementById('target-title').textContent = isMove ? 'Куда перебросить войска' : 'Кого атаковать';
+        document.getElementById('target-hint').textContent = `Из области ${from.name}. `
+            + (isMove ? 'Выберите свою область.' : 'Шансы считаются по отправленным войскам.');
+        document.getElementById('target-list').innerHTML = rows.slice(0, LIMIT).map(({ id, region, transport, odds }) => {
+            const owner = d.countries[region.owner];
+            const sea = transport.cost ? ` · морем ${this.ui.money(transport.cost)}` : '';
+            const chip = odds
+                ? `<span class="odds ${odds.ratio >= 1 ? 'high' : odds.ratio >= 0.9 ? 'even' : 'low'}">${odds.label}</span>`
+                : `<span class="odds move">марш</span>`;
+            return `<button class="target-row" type="button" data-target="${id}">
+                <span class="swatch" style="background:${owner.color}"></span>
+                <span><b>${this.ui.escape(region.name)}</b><small>${this.ui.escape(owner.name)}${sea}</small></span>
+                ${chip}</button>`;
+        }).join('') + (rows.length > LIMIT ? `<p class="hint">И ещё ${rows.length - LIMIT} — выберите их на карте.</p>` : '');
+        this.ui.showModal('target-modal');
     }
 
     cancelTargeting() {
+        this.ui.hideModal('target-modal');
         if (!this.armyAction.active) return;
         this.armyAction.active = false;
         this.map.disableTargetSelection();
@@ -381,6 +426,16 @@ class GameCore {
         });
         document.getElementById('save-game-btn').addEventListener('click', () => {
             this.ui.toast(SaveGame.save(this.data) ? 'Игра сохранена' : 'Не удалось сохранить: хранилище недоступно');
+        });
+        document.getElementById('export-game-btn').addEventListener('click', () => {
+            const file = SaveGame.exportFile(this.data);
+            const url = URL.createObjectURL(new Blob([file.text], { type: 'application/json' }));
+            const link = Object.assign(document.createElement('a'), { href: url, download: file.name });
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+            setTimeout(() => URL.revokeObjectURL(url), 1000);
+            this.ui.toast(`Партия записана в файл ${file.name}`);
         });
         document.getElementById('new-game-btn').addEventListener('click', () => {
             if (!confirm('Начать новую игру? Текущая партия будет удалена.')) return;
@@ -527,6 +582,9 @@ class GameCore {
         const featured = FEATURED.filter(id => playable.includes(id));
 
         const scenario = () => ($('scenario-toggle').checked ? 'war2024' : 'peace');
+        const difficulty = () => (document.querySelector('input[name="difficulty"]:checked') || {}).value || 'normal';
+        const showLevel = () => { $('level-note').textContent = DIFFICULTY[difficulty()].note; };
+        for (const radio of document.querySelectorAll('input[name="difficulty"]')) radio.addEventListener('change', () => { showLevel(); updateCta(); });
         const preview = () => {
             const key = scenario();
             if (!previews[key]) previews[key] = new GameData(playable[0], { scenario: key });
@@ -582,12 +640,14 @@ class GameCore {
             return '$' + Math.round(v);
         };
 
-        const launch = data => {
+        const launch = (data, tutorial = false) => {
             $('start-screen').style.display = 'none';
             document.body.classList.add('in-game');
             window.game = new GameCore(data);
-            if (!data.gameOver && !data.decisions.length && data.turn === 0 && !data.campaign.budget) window.game.ui.showCampaign(data);
+            if (tutorial) new Tutorial(window.game).start();
+            else if (!data.gameOver && !data.decisions.length && data.turn === 0 && !data.campaign.budget) window.game.ui.showCampaign(data);
         };
+        $('tutorial-toggle').checked = !Tutorial.isDone();
 
         // Сохранённая партия — первым делом предлагаем продолжить.
         const saved = SaveGame.load();
@@ -607,8 +667,9 @@ class GameCore {
             $('continue-box').hidden = false;
             $('continue-flag').outerHTML = flagImg(g.player, 80).replace('<img', '<img id="continue-flag"');
             $('continue-name').textContent = country ? country.name : g.player;
-            $('continue-info').textContent =
-                `Ход ${g.turn} · ${date.getDate()}.${String(date.getMonth() + 1).padStart(2, '0')}.${date.getFullYear()}`;
+            $('continue-info').innerHTML =
+                `Ход ${g.turn} · ${date.getDate()}.${String(date.getMonth() + 1).padStart(2, '0')}.${date.getFullYear()}`
+                + (SaveGame.migrated ? ' · <span class="migrated">перенесена из прошлой версии</span>' : '');
             $('continue-btn').addEventListener('click', () => {
                 try { launch(GameData.restore(g)); }
                 catch (e) { alert('Не удалось загрузить партию. Сохранение оставлено в хранилище.'); }
@@ -677,7 +738,8 @@ class GameCore {
         const updateCta = () => {
             if (!selectedId) return;
             const mode = scenario() === 'war2024' ? 'Сценарий 2024' : 'Мирный старт';
-            startBtn.innerHTML = `<span>Начать игру ▶</span><small>${escape(CountriesDB[selectedId].name)} · ${mode}</small>`;
+            const level = difficulty() === 'normal' ? '' : ' · ' + DIFFICULTY[difficulty()].name;
+            startBtn.innerHTML = `<span>Начать игру ▶</span><small>${escape(CountriesDB[selectedId].name)} · ${mode}${level}</small>`;
         };
 
         // Нет сети — вместо флага плашка цвета страны на карте.
@@ -726,8 +788,29 @@ class GameCore {
             if (!selectedId || !CountriesDB[selectedId]) return;
             if ((saved || saveProblem) && !confirm('Начать новую игру? Сохранённая партия будет удалена.')) return;
             SaveGame.clear();
-            launch(new GameData(selectedId, { cheat: $('cheat-toggle').checked, scenario: scenario() }));
+            launch(new GameData(selectedId, { cheat: $('cheat-toggle').checked, scenario: scenario(), difficulty: difficulty() }),
+                $('tutorial-toggle').checked);
         });
+
+        // Партия из файла: текущая версия грузится как есть, старая переносится.
+        $('import-btn').addEventListener('click', () => $('import-file').click());
+        $('import-file').addEventListener('change', async e => {
+            const file = e.target.files[0];
+            e.target.value = '';
+            if (!file) return;
+            let data;
+            try {
+                data = GameData.restore(SaveGame.parse(await file.text()).game);
+            } catch (err) {
+                alert('Этот файл не подходит: в нём нет партии или она от другой карты.');
+                return;
+            }
+            if ((saved || saveProblem) && !confirm('Загрузить партию из файла? Текущее сохранение будет заменено.')) return;
+            SaveGame.clear();
+            SaveGame.save(data);
+            launch(data);
+        });
+        showLevel();
 
         drawHeroArt($('hero-art'));
         const initial = saved && playable.includes(saved.game.player) ? saved.game.player

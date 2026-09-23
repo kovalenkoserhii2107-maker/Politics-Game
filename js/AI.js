@@ -25,6 +25,12 @@ class AI {
         this.data = data;
     }
 
+    // Правило с поправкой на уровень игры.
+    rule(key) {
+        const override = DIFFICULTY[this.data.difficulty]?.ai;
+        return override && key in override ? override[key] : AI_RULES[key];
+    }
+
     // --- планирование хода -------------------------------------------
     planTurn() {
         const d = this.data;
@@ -64,7 +70,7 @@ class AI {
 
         this.recruit(country, front, enemySet, AI_RULES.SPEND_SHARE);
         this.reinforce(country, own, front);
-        if (d.turn >= AI_RULES.FIRST_ATTACK_TURN) this.attack(country, front, enemySet);
+        if (d.turn >= this.rule('FIRST_ATTACK_TURN')) this.attack(country, front, enemySet);
     }
 
     // В мирное время сосед игрока вооружается только до паритета: это
@@ -251,7 +257,7 @@ class AI {
         plans.sort((a, b) => b.ratio - a.ratio);
 
         for (const plan of plans) {
-            if (plan.ratio < AI_RULES.ATTACK_MARGIN) break;
+            if (plan.ratio < this.rule('ATTACK_MARGIN')) break;
             // пересчёт с учётом войск, уже отданных под другие атаки
             const target = d.regions[plan.targetId];
             const pool = d.emptyArmy();
@@ -265,7 +271,7 @@ class AI {
                 return { region, offer };
             });
             const attack = d.sidePower(pool, country.id, 'baseAttack', target.army);
-            if (attack < this.estimateDefense(target, pool) * AI_RULES.ATTACK_MARGIN) continue;
+            if (attack < this.estimateDefense(target, pool) * this.rule('ATTACK_MARGIN')) continue;
             for (const { region, offer } of offers) {
                 if (Object.values(offer).some(n => n > 0)) d.queueAttack(region.id, plan.targetId, offer, country.id);
             }
@@ -284,7 +290,7 @@ class AI {
         const player = d.playerCountry;
         const playerPower = Math.max(1, d.calculateMilitaryPower(player));
         // первые ходы новых войн не начинают — но мир заключать можно всегда
-        const mayStartWars = d.turn >= AI_RULES.PEACEFUL_START_TURNS;
+        const mayStartWars = d.turn >= this.rule('PEACEFUL_START_TURNS');
 
         // 1. Сильный сосед может напасть на игрока — но только если тот ни с кем
         //    не воюет: второй фронт открывают не ИИ, а сам игрок
@@ -294,8 +300,8 @@ class AI {
             if (!country || !country.alive || !country.playable) continue;
             if (d.isAtWar(cc, player) || d.truceLeft(cc, player) || d.enemiesOf(cc).length) continue;
             const ratio = d.calculateMilitaryPower(cc) / playerPower;
-            if (ratio < AI_RULES.WAR_ON_PLAYER_RATIO) continue;
-            if (Math.random() > AI_RULES.WAR_ON_PLAYER_CHANCE * ratio) continue;
+            if (ratio < this.rule('WAR_ON_PLAYER_RATIO')) continue;
+            if (Math.random() > this.rule('WAR_ON_PLAYER_CHANCE') * ratio) continue;
             if (!d.declareWar(cc, player).ok) continue;
             events.push({ type: 'war', by: cc, target: player, message: `⚔️ ${country.name} объявила вам войну!` });
             break;

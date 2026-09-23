@@ -50,7 +50,9 @@ class MapEngine {
         this.createCountryLabels();
         this.drawCities();
         this.drawArmyMarkers();
+        this.drawOrders();
         this.updateLOD();
+        document.addEventListener('ordersChanged', () => this.drawOrders());
     }
 
     // Сколько единиц карты укладывается по ширине экрана.
@@ -81,7 +83,17 @@ class MapEngine {
         this.cityLayer = g('layer-cities');
         this.regionLabelLayer = g('layer-region-labels');
         this.labelLayer = g('layer-labels');
+        this.orderLayer = g('layer-orders');
         this.armyLayer = g('layer-armies');
+
+        // Наконечники стрел приказов. markerUnits=strokeWidth — наконечник
+        // масштабируется вместе с линией, толщина которой постоянна на экране.
+        const defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
+        defs.innerHTML = [['attack', '#ff3b2f'], ['move', '#eceef1']].map(([kind, color]) =>
+            `<marker id="arrow-${kind}" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="3.2" markerHeight="3.2" orient="auto" markerUnits="strokeWidth">`
+            + `<path d="M0,0 L10,5 L0,10 z" fill="${color}"/></marker>`).join('');
+        this.svg.insertBefore(defs, this.svg.firstChild);
+        this.changed = [];
 
         const fragment = document.createDocumentFragment();
         for (const id of Object.keys(RegionsDB)) {
@@ -225,6 +237,30 @@ class MapEngine {
         const width = Math.max(bounds.bw * 1.4, bounds.bh * 1.4 * this.rect.width / this.rect.height, this.minView);
         this.scale = this.clampScale(this.rect.width / (Math.min(width, this.interactiveView * 0.9) * this.baseScale));
         this.centerOn(region.cx, region.cy);
+        this.updateLOD();
+        this.updateLabelVisibility();
+        document.dispatchEvent(new CustomEvent('zoomLevelChanged', { detail: { isRegional: this.isRegionalZoom } }));
+    }
+
+    // Вся страна на экране, но не дальше уровня, где кликаются области.
+    focusCountry(countryId) {
+        const regions = this.data.getCountryRegions(countryId);
+        if (!regions.length) return;
+        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+        for (const region of regions) {
+            const b = RegionsDB[region.id];
+            minX = Math.min(minX, b.bx); minY = Math.min(minY, b.by);
+            maxX = Math.max(maxX, b.bx + b.bw); maxY = Math.max(maxY, b.by + b.bh);
+        }
+        cancelAnimationFrame(this.animFrame);
+        this.measure();
+        const w = maxX - minX, h = maxY - minY;
+        const width = Math.max(w * 1.15, h * 1.15 * this.rect.width / this.rect.height, this.minView * 2);
+        this.scale = this.clampScale(this.rect.width / (Math.min(width, this.interactiveView * 0.9) * this.baseScale));
+        const capital = this.data.getRegion(this.data.countries[countryId].capital);
+        // Страна не влезла — центрируем на столице, иначе на середине страны.
+        if (width > this.interactiveView * 0.9 && capital) this.centerOn(capital.cx, capital.cy);
+        else this.centerOn(minX + w / 2, minY + h / 2);
         this.updateLOD();
         this.updateLabelVisibility();
         document.dispatchEvent(new CustomEvent('zoomLevelChanged', { detail: { isRegional: this.isRegionalZoom } }));
@@ -663,6 +699,62 @@ class MapEngine {
         if (num >= 1000000) return (num / 1000000).toFixed(1) + 'M';
         if (num >= 1000) return (num / 1000).toFixed(1) + 'K';
         return String(Math.floor(num));
+    }
+
+    // --- стрелки приказов --------------------------------------------------------
+    // Марш — светлая пунктирная стрелка, атака — красная сплошная. Приказы
+    // по одному направлению сливаются в одну стрелку.
+    drawOrders() {
+        this.orderLayer.innerHTML = '';
+        const mine = this.data.playerOrders();
+        const arrows = new Map();
+        for (const [key, kind] of [['movements', 'move'], ['attacks', 'attack']]) {
+            for (const { order } of mine[key]) {
+                const id = `${kind}:${order.from}>${order.to}`;
+                if (!arrows.has(id)) arrows.set(id, { kind, from: order.from, to: order.to });
+            }
+        }
+        const ns = 'http://www.w3.org/2000/svg';
+        const fragment = document.createDocumentFragment();
+        for (const { kind, from, to } of arrows.values()) {
+            const a = this.data.getRegion(from), b = this.data.getRegion(to);
+            if (!a || !b) continue;
+            // Дуга, чтобы встречные стрелки не сливались; концы отступают от
+            // центров, где стоят маркеры войск.
+            const dx = b.cx - a.cx, dy = b.cy - a.cy;
+            const c = { x: (a.cx + b.cx) / 2 - dy * 0.18, y: (a.cy + b.cy) / 2 + dx * 0.18 };
+            const at = t => ({
+                x: (1 - t) * (1 - t) * a.cx + 2 * (1 - t) * t * c.x + t * t * b.cx,
+                y: (1 - t) * (1 - t) * a.cy + 2 * (1 - t) * t * c.y + t * t * b.cy,
+            });
+            const p0 = at(0.12), p1 = at(0.86);
+            const d = `M${p0.x.toFixed(2)},${p0.y.toFixed(2)} Q${c.x.toFixed(2)},${c.y.toFixed(2)} ${p1.x.toFixed(2)},${p1.y.toFixed(2)}`;
+            for (const cls of ['order-halo', `order-arrow ${kind}`]) {
+                const path = document.createElementNS(ns, 'path');
+                path.setAttribute('d', d);
+                path.setAttribute('class', cls);
+                if (cls !== 'order-halo') path.setAttribute('marker-end', `url(#arrow-${kind})`);
+                fragment.appendChild(path);
+            }
+        }
+        this.orderLayer.appendChild(fragment);
+    }
+
+    // Области, которые сменили хозяина за ход: захваченные и потерянные.
+    // Отметка держится до следующего хода.
+    markChanges(gained, lost) {
+        for (const id of this.changed) this.paths.get(id)?.classList.remove('gained', 'lost');
+        this.changed = [...gained, ...lost];
+        for (const id of gained) this.paths.get(id)?.classList.add('gained');
+        for (const id of lost) this.paths.get(id)?.classList.add('lost');
+    }
+
+    // Показать область: издалека — приблизить, вблизи — просто довести до центра.
+    showRegion(id) {
+        const region = this.data.getRegion(id);
+        if (!region) return;
+        if (this.isRegionalZoom) this.ensureVisible(region.cx, region.cy);
+        else this.focusRegion(id);
     }
 
     // --- маркеры войск --------------------------------------------------------

@@ -6,6 +6,8 @@
 // поэтому игра пишется после каждого хода и при сворачивании.
 const SaveGame = {
     KEY: 'politics-game-save',
+    BACKUP_KEY: 'politics-game-save-backup',
+    migrated: false,
     suspended: false,
     error: '',
     signature: null,
@@ -39,17 +41,45 @@ const SaveGame = {
 
     load() {
         this.error = '';
+        this.migrated = false;
+        let raw = null;
+        try { raw = localStorage.getItem(this.KEY); } catch (e) { return null; }
+        if (!raw) return null;
         try {
-            const raw = localStorage.getItem(this.KEY);
-            if (!raw) return null;
-            const payload = JSON.parse(raw);
-            if (payload.map !== this.mapId()) throw new Error('Другая версия карты');
-            GameData.validateSave(payload.game);
+            const payload = this.parse(raw);
+            // Перед тем как новая версия перезапишет партию, кладём исходник рядом.
+            if (this.migrated) {
+                try { localStorage.setItem(this.BACKUP_KEY, raw); } catch (e) { /* место кончилось — не критично */ }
+            }
             return payload;
         } catch (e) {
-            this.error = 'Сохранение несовместимо с этой версией или повреждено. Оно сохранено в хранилище; новая кампания заменит его после подтверждения.';
+            this.error = 'Старое сохранение не подходит к новой версии игры. Начните новую партию.';
             return null;
         }
+    },
+
+    // Разбор партии из хранилища или файла. Партия текущей версии проходит
+    // как есть, партия прошлой версии переносится (this.migrated = true).
+    parse(text) {
+        this.migrated = false;
+        const payload = typeof text === 'string' ? JSON.parse(text) : text;
+        if (!payload || typeof payload !== 'object' || !payload.game) throw new Error('В файле нет партии');
+        if (payload.map === this.mapId()) {
+            try {
+                GameData.validateSave(payload.game);
+                return payload;
+            } catch (e) { /* пробуем перенести */ }
+        }
+        const game = GameData.migrateSave(payload.game);
+        this.migrated = true;
+        return { map: this.mapId(), savedAt: payload.savedAt || Date.now(), game };
+    },
+
+    // Файл для переноса партии на другое устройство или про запас.
+    exportFile(data) {
+        const payload = { app: 'politics-game', map: this.mapId(), savedAt: Date.now(), game: data.serialize() };
+        const name = `politics-${data.playerCountry.toLowerCase()}-turn${data.turn}.json`;
+        return { name, text: JSON.stringify(payload) };
     },
 
     clear() {
@@ -97,6 +127,10 @@ class GameLoop {
         this.endTurnBtn.disabled = true;
 
         try {
+        // Кто чем владел до хода — чтобы потом отметить на карте перемены.
+        const before = {};
+        for (const region of Object.values(d.regions)) before[region.id] = region.owner;
+
         this.ai.planTurn();
         const { logs, worldBattles } = d.processOrders();
         const { balances, events } = d.applyEndOfTurn();
@@ -104,7 +138,16 @@ class GameLoop {
         d.currentDate.setDate(d.currentDate.getDate() + 7);
         const diplomacy = d.gameOver ? [] : this.ai.diplomacy();
 
+        const gained = [], lost = [];
+        for (const region of Object.values(d.regions)) {
+            if (before[region.id] === region.owner) continue;
+            if (region.owner === d.playerCountry) gained.push(region.id);
+            else if (before[region.id] === d.playerCountry) lost.push(region.id);
+        }
+        this.lastChanges = { gained, lost };
+
         this.map.refreshColors();
+        this.map.markChanges(gained, lost);
         this.map.createCountryLabels();
         this.updateTopBarUI();
 
@@ -144,7 +187,7 @@ class GameLoop {
         if (d.gameOver) { this.ui.showGameOver(d); return; }
         // Keep pending decisions in state until the answer is committed.
         const next = d.decisions[0];
-        if (!next) return;
+        if (!next) { this.revealChanges(); return; }
         const from = d.countries[next.from];
         if (next.type !== 'peace' || !from?.alive || !d.isAtWar(next.from, d.playerCountry)) {
             d.decisions.shift();
@@ -172,6 +215,19 @@ class GameLoop {
         });
     }
 
+    // После отчёта и решений показываем, где на карте что изменилось.
+    revealChanges() {
+        const changes = this.lastChanges;
+        this.lastChanges = null;
+        if (!changes || (!changes.gained.length && !changes.lost.length)) return;
+        this.map.showRegion(changes.lost[0] || changes.gained[0]);
+        const parts = [];
+        if (changes.gained.length) parts.push(`захвачено областей: ${changes.gained.length}`);
+        if (changes.lost.length) parts.push(`потеряно: ${changes.lost.length}`);
+        const text = parts.join(', ');
+        this.ui.toast(text[0].toUpperCase() + text.slice(1) + ' — отмечено на карте');
+    }
+
     updateTopBarUI() {
         const player = this.data.getCountry(this.data.playerCountry);
         if (!player) return;
@@ -181,7 +237,7 @@ class GameLoop {
         const value = this.getProjectedNetIncome(player.id);
         net.textContent = value === 0 ? '(0)'
             : (value > 0 ? '(+' : '(−') + this.ui.formatNumber(Math.abs(value)) + ')';
-        net.style.color = value > 0 ? '#4ade80' : value < 0 ? '#f87171' : '#94a3b8';
+        net.style.color = value > 0 ? 'var(--good)' : value < 0 ? 'var(--accent-2)' : 'var(--text-3)';
 
         document.getElementById('glob-influence').textContent = player.influence;
         document.getElementById('glob-date').textContent = this.formatDate(this.data.currentDate);
