@@ -20,6 +20,7 @@ class UIManager {
         bind('close-gov-btn', () => this.hideModal('gov-modal'));
         bind('close-history-btn', () => this.hideModal('history-modal'));
         bind('close-diplo-btn', () => this.hideModal('diplo-modal'));
+        bind('close-science-btn', () => this.hideModal('science-modal'));
         bind('close-summary-btn', () => this.closeSummary());
 
         for (const id of ['history-modal', 'gov-modal', 'diplo-modal', 'campaign-modal']) {
@@ -204,7 +205,8 @@ class UIManager {
         let rows = '';
         for (const unitId of Object.keys(UnitsDB)) {
             const count = (army && army[unitId]) || 0;
-            if (!count && !showZeros) continue;
+            // нули — только у базовых родов войск, новые показываем, когда они есть
+            if (!count && (!showZeros || UnitsDB[unitId].requires)) continue;
             const unit = UnitsDB[unitId];
             rows += `
                 <div class="army-list-item">
@@ -561,7 +563,7 @@ class UIManager {
             <h3 class="section-title">Первые шаги</h3>
             ${steps.map(([name, sub, done, action, label], i) => `<div class="campaign-step ${done ? 'done' : ''}"><span class="step-number">${i + 1}</span><div><b>${name}${done ? ' · выполнено' : ''}</b><small>${sub}</small></div><button class="mini-btn" data-action="${action}">${label}</button></div>`).join('')}
             <h3 class="section-title">Ваши области</h3><label class="sr-only" for="owned-region-select">Выбрать область</label><select id="owned-region-select">${data.getCountryRegions(data.playerCountry).map(r => `<option value="${r.id}">${this.escape(r.name)} · лояльность ${Math.round(r.loyalty * 100)}%</option>`).join('')}</select><button class="mini-btn" data-action="campaign-region">Открыть область</button>
-            <p class="hint">Для океанских походов исследуйте логистику до уровня 3. Экспедиция: $500K + $25K за подразделение и 5 влияния. Территории без правительства интегрируются за $500K и 10 влияния при общей границе.</p><p class="hint">Активных строек: ${data.projects.filter(x => x.country === data.playerCountry).length}. Нажмите область на карте для набора, строительства или марша.</p>`;
+            <p class="hint">Для океанских походов изучите «Глобальную логистику» в «Науке». Экспедиция: $500K + $25K за подразделение и 5 влияния. Территории без правительства интегрируются за $500K и 10 влияния при общей границе.</p><p class="hint">Активных строек: ${data.projects.filter(x => x.country === data.playerCountry).length}. Нажмите область на карте для набора, строительства или марша.</p>`;
         this.showModal('campaign-modal');
     }
 
@@ -641,15 +643,6 @@ class UIManager {
             <div class="budget-row"><span>Содержание армии</span><span class="neg">−${this.money(balance.upkeep)}</span></div>
             <div class="budget-row total"><span>Итого за ход</span><span class="${net >= 0 ? 'pos' : 'neg'}">${net >= 0 ? '+' : ''}${this.money(net)}</span></div>`;
 
-        const rows = Object.keys(UnitsDB).map(unitId => {
-            const unit = UnitsDB[unitId];
-            const level = player.tech[unitId] || 1;
-            const cost = data.techCost(player.id, unitId);
-            return this.researchRow(unitId, `${unit.icon} ${unit.name}`, `ур. ${level}/${RULES.TECH_MAX} · сила +${Math.round((level - 1) * RULES.TECH_STEP * 100)}%`, cost, player.money);
-        });
-        const march = player.tech.marchSpeed || 1;
-        rows.push(this.researchRow('marchSpeed', '🚚 Логистика', `марш на ${march} обл. за ход${march >= 3 ? ' · экспедиции по всему миру' : ' · на ур. 3: экспедиции'}`, data.techCost(player.id, 'marchSpeed'), player.money));
-        document.getElementById('gov-research').innerHTML = rows.join('');
     }
 
     // Ресурсы страны: сколько производим и тратим, запас на складе, цена
@@ -704,6 +697,74 @@ class UIManager {
             el.className = state;
             el.title = `${RESOURCES[key].name}: ${state === 'short' ? 'не хватает' : state === 'import' ? 'докупаем на рынке' : 'хватает'}`;
         }
+    }
+
+    // --- наука ----------------------------------------------------------------------------------
+    // Дерево по веткам: изучено / идёт / можно начать / закрыто. Ниже —
+    // модернизация открытых родов войск.
+    showScience(data) {
+        this.closePanel();
+        const player = data.countries[data.playerCountry];
+        Tech.init(player);
+        const money = player.money;
+        const active = player.research;
+        let html = '';
+
+        if (active) {
+            const tech = TECH_TREE[active.id];
+            const refund = active.started === data.turn ? tech.cost : Math.round(tech.cost / 2);
+            const done = Math.round((1 - active.remaining / tech.turns) * 100);
+            html += `<div class="sci-active"><div><span class="label">Идёт исследование</span>
+                <b>${tech.icon} ${tech.name}</b><small>Осталось ходов: ${active.remaining}</small>
+                <div class="res-bar"><i style="width:${done}%"></i></div></div>
+                <button class="mini-btn" data-action="tech-cancel">Отменить · вернуть ${this.money(refund)}</button></div>`;
+        } else {
+            html += `<p class="hint sci-idle">Лаборатории свободны. Выберите исследование: деньги списываются сразу, результат — через несколько ходов. Одновременно идёт одно.</p>`;
+        }
+
+        for (const [branchId, branch] of Object.entries(TECH_BRANCHES)) {
+            html += `<h3 class="section-title">${branch.icon} ${branch.name}</h3><div class="sci-branch">`;
+            for (const [id, tech] of Object.entries(TECH_TREE)) {
+                if (tech.branch !== branchId) continue;
+                const done = Tech.has(player, id);
+                const running = active && active.id === id;
+                const missing = tech.requires.filter(r => !Tech.has(player, r));
+                const unit = tech.unlocks ? UnitsDB[tech.unlocks] : null;
+                const state = done ? 'done' : running ? 'running' : missing.length ? 'locked' : 'open';
+                let action;
+                if (done) action = '<span class="sci-state pos">✓ Изучено</span>';
+                else if (running) action = `<span class="sci-state">Идёт · ${active.remaining} ход.</span>`;
+                else if (missing.length) action = `<span class="sci-state muted">🔒 Нужно: ${missing.map(r => TECH_TREE[r].name).join(', ')}</span>`;
+                else action = `<button class="mini-btn" data-action="tech" data-key="${id}" ${active || money < tech.cost ? 'disabled' : ''}>${this.money(tech.cost)} · ${tech.turns} ход.</button>`;
+                html += `<div class="sci-card ${state}"><div class="sci-head"><b>${tech.icon} ${tech.name}</b>${action}</div>
+                    <p>${tech.text}</p>
+                    ${unit ? `<div class="sci-unit">Новый род войск: ${unit.icon} ${unit.name} · атака ${unit.baseAttack} · оборона ${unit.baseDefense} · ${this.money(unit.buildCost)}</div>` : ''}
+                </div>`;
+            }
+            html += '</div>';
+        }
+
+        html += `<h3 class="section-title">⚙️ Модернизация войск</h3>
+            <p class="hint">Каждая ступень — +${Math.round(MODERNIZATION.STEP * 100)}% к силе рода войск, до ${MODERNIZATION.MAX}-й. Сразу, но каждая следующая дороже.</p>`;
+        html += Object.keys(UnitsDB).filter(id => Tech.unitUnlocked(player, id)).map(unitId => {
+            const unit = UnitsDB[unitId];
+            const level = player.tech[unitId] || 1;
+            return this.researchRow(unitId, `${unit.icon} ${unit.name}`,
+                `ступень ${level}/${MODERNIZATION.MAX} · сила +${Math.round((level - 1) * MODERNIZATION.STEP * 100)}%`, data.techCost(player.id, unitId), money);
+        }).join('');
+        document.getElementById('science-content').innerHTML = html;
+        this.showModal('science-modal');
+    }
+
+    // Точка на кнопке «Наука»: лаборатории простаивают, а деньги есть.
+    updateScienceBadge(data) {
+        const player = data.countries[data.playerCountry];
+        const badge = document.getElementById('sci-badge');
+        if (!player || !badge) return;
+        Tech.init(player);
+        const idle = !player.research && Object.entries(TECH_TREE).some(([id, t]) =>
+            !Tech.has(player, id) && t.requires.every(r => Tech.has(player, r)) && player.money >= t.cost);
+        badge.classList.toggle('visible', idle);
     }
 
     researchRow(key, label, sub, cost, money) {

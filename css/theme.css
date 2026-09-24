@@ -336,3 +336,29 @@ progress::-moz-progress-bar { background: var(--accent); }
 .res-chip { font-family: var(--mono); font-size: 0.78rem; padding: 4px 8px; border-radius: 2px; background: var(--s2); border: 1px solid var(--line); }
 .res-chip.pos { color: var(--good); }
 .res-chip.neg { color: var(--accent-2); }
+
+/* ---------- наука ---------- */
+.sci-badge { display: none; position: absolute; top: 4px; right: 18%; width: 8px; height: 8px; border-radius: 50%; background: var(--warn); box-shadow: 0 0 8px var(--warn); }
+.sci-badge.visible { display: block; }
+#sci-btn { position: relative; }
+.sci-active {
+    display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px;
+    background: var(--s2); border: 1px solid var(--line-2); border-left: 3px solid var(--warn); border-radius: var(--r);
+}
+.sci-active > div { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.sci-active small { color: var(--text-2); }
+.sci-branch { display: flex; flex-direction: column; gap: 6px; }
+.sci-card { background: var(--s1); border: 1px solid var(--line); border-radius: var(--r); padding: 10px 12px; }
+.sci-card p { margin: 6px 0 0; color: var(--text-2); font-size: 0.86rem; line-height: 1.4; }
+.sci-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+.sci-head b { font-size: 0.95rem; }
+.sci-state { font-size: 0.8rem; white-space: nowrap; }
+.sci-state.muted { white-space: normal; text-align: right; color: var(--text-3); }
+.sci-card.done { border-left: 3px solid var(--good); }
+.sci-card.running { border-left: 3px solid var(--warn); }
+.sci-card.open { border-left: 3px solid var(--light); }
+.sci-card.locked { opacity: 0.6; }
+.sci-unit { margin-top: 6px; font-family: var(--mono); font-size: 0.72rem; color: var(--text-2); line-height: 1.5; }
+@media (max-width: 560px) {
+    .sci-active { flex-direction: column; align-items: stretch; }
+}

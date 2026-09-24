@@ -29,7 +29,10 @@ const ECONOMY = {
     ENERGY_PER_INDUSTRY: 0.25,
     ENERGY_NEED_PER_INDUSTRY: 0.5,
     ENERGY_NEED_PER_MPOP: 0.3,
-    ENERGY_PER_UNIT: { infantry: 0.01, tanks: 0.2, artillery: 0.05, aviation: 0.5, antiair: 0.05 },
+    ENERGY_PER_UNIT: {
+        infantry: 0.01, tanks: 0.2, artillery: 0.05, aviation: 0.5, antiair: 0.05,
+        mech: 0.05, specops: 0.02, drones: 0.1, ewar: 0.2, missiles: 0.4, stealth: 0.8,
+    },
     // товары: заводы (нужна энергия) + ремесло населения; покупают жители
     GOODS_PER_INDUSTRY: 0.6,
     GOODS_PER_MPOP: 0.6,
@@ -91,15 +94,15 @@ class Economy {
                 armyEnergy += count * (ECONOMY.ENERGY_PER_UNIT[unitId] || 0);
             }
         }
-        const factories = industry * ECONOMY.GOODS_PER_INDUSTRY * policy.industry;
+        const factories = industry * ECONOMY.GOODS_PER_INDUSTRY * policy.industry * Tech.factor(country, 'goods');
         return {
             popM,
             food: {
-                prod: agro * ECONOMY.FOOD_PER_AGRO + popM * ECONOMY.FOOD_PER_MPOP,
+                prod: (agro * ECONOMY.FOOD_PER_AGRO + popM * ECONOMY.FOOD_PER_MPOP) * Tech.factor(country, 'food'),
                 need: popM * ECONOMY.FOOD_NEED_PER_MPOP + armyFood,
             },
             energy: {
-                prod: oil * ECONOMY.ENERGY_PER_OIL + industry * ECONOMY.ENERGY_PER_INDUSTRY,
+                prod: (oil * ECONOMY.ENERGY_PER_OIL + industry * ECONOMY.ENERGY_PER_INDUSTRY) * Tech.factor(country, 'energy'),
                 need: industry * ECONOMY.ENERGY_NEED_PER_INDUSTRY + popM * ECONOMY.ENERGY_NEED_PER_MPOP + armyEnergy,
             },
             goods: {
@@ -218,9 +221,9 @@ class Economy {
         const work = 0.5 + 0.5 * region.loyalty;
         const popM = region.population / 1e6;
         return {
-            food: region.resources.agro * work * ECONOMY.FOOD_PER_AGRO + popM * ECONOMY.FOOD_PER_MPOP,
-            energy: region.resources.oil * work * ECONOMY.ENERGY_PER_OIL + region.resources.industry * work * ECONOMY.ENERGY_PER_INDUSTRY,
-            goods: region.resources.industry * work * ECONOMY.GOODS_PER_INDUSTRY * policy.industry + popM * ECONOMY.GOODS_PER_MPOP,
+            food: (region.resources.agro * work * ECONOMY.FOOD_PER_AGRO + popM * ECONOMY.FOOD_PER_MPOP) * Tech.factor(country, 'food'),
+            energy: (region.resources.oil * work * ECONOMY.ENERGY_PER_OIL + region.resources.industry * work * ECONOMY.ENERGY_PER_INDUSTRY) * Tech.factor(country, 'energy'),
+            goods: region.resources.industry * work * ECONOMY.GOODS_PER_INDUSTRY * policy.industry * Tech.factor(country, 'goods') + popM * ECONOMY.GOODS_PER_MPOP,
         };
     }
 

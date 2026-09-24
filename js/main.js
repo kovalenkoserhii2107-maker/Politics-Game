@@ -122,12 +122,27 @@ class GameCore {
             const result = d.research(player, btn.dataset.key);
             if (!result.ok) { this.ui.toast(result.reason); return; }
             this.ui.haptic(20);
-            this.ui.toast('Исследование завершено');
-            this.ui.renderGovernment(d);
-            this.loop.updateTopBarUI();
-            this.map.drawArmyMarkers();
-            SaveGame.save(d);
+            this.ui.toast(`Модернизация: ${UnitsDB[btn.dataset.key].name} — ступень ${d.countries[player].tech[btn.dataset.key]}`);
+            this.afterScience();
+        } else if (btn.dataset.action === 'tech') {
+            const result = d.startResearch(player, btn.dataset.key);
+            if (!result.ok) { this.ui.toast(result.reason); return; }
+            this.ui.haptic(20);
+            const tech = TECH_TREE[btn.dataset.key];
+            this.ui.toast(`Исследование начато: ${tech.name}. Готово через ${tech.turns} ход.`);
+            this.afterScience();
+        } else if (btn.dataset.action === 'tech-cancel') {
+            const refund = d.cancelResearch(player);
+            this.ui.toast(`Исследование отменено, возвращено ${this.ui.money(refund)}`);
+            this.afterScience();
         }
+    }
+
+    afterScience() {
+        this.ui.showScience(this.data);
+        this.loop.updateTopBarUI();
+        this.map.drawArmyMarkers();
+        SaveGame.save(this.data);
     }
 
     // После войны или мира обновляем всё, что от этого зависит.
@@ -371,14 +386,17 @@ class GameCore {
     renderRecruit() {
         const d = this.data;
         const list = document.getElementById('recruit-list');
-        list.innerHTML = Object.keys(UnitsDB).map(unitId => {
+        const player = d.countries[d.playerCountry];
+        const open = Object.keys(UnitsDB).filter(id => Tech.unitUnlocked(player, id));
+        const closed = Object.keys(UnitsDB).length - open.length;
+        list.innerHTML = open.map(unitId => {
             const unit = UnitsDB[unitId];
             return this.ui.stepperRow({
                 key: unitId, icon: unit.icon, label: unit.name,
-                sub: `${this.ui.money(unit.buildCost)} · ${unit.industryCost} инд. · −${this.ui.money(unit.maintenanceCost)}/ход`,
+                sub: `${unit.note} · ${this.ui.money(unit.buildCost)} · ${unit.industryCost} инд. · −${this.ui.money(unit.maintenanceCost)}/ход`,
                 max: 0,
             });
-        }).join('');
+        }).join('') + (closed ? `<p class="hint">🔒 Ещё ${closed} род. войск откроются исследованиями в «Науке».</p>` : '');
         this.updateRecruitLimits();
     }
 
@@ -466,6 +484,7 @@ class GameCore {
 
     initTopButtons() {
         document.getElementById('gov-btn').addEventListener('click', () => this.openGovernment());
+        document.getElementById('sci-btn').addEventListener('click', () => this.ui.showScience(this.data));
         document.getElementById('res-status').addEventListener('click', () => {
             this.openGovernment();
             document.getElementById('gov-economy-section').scrollIntoView({ block: 'start' });
