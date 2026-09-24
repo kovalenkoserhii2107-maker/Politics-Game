@@ -3,8 +3,8 @@ const assert=require('node:assert/strict');
 const fs=require('node:fs'),path=require('node:path'),vm=require('node:vm');
 function engine(){
  const values=new Map();let seed=123456;const math=Object.create(Math);math.random=()=>{seed=(Math.imul(seed,1664525)+1013904223)>>>0;return seed/4294967296;};const context=vm.createContext({console,Date,Math:math,structuredClone,localStorage:{setItem:(k,v)=>values.set(k,v),getItem:k=>values.get(k)||null,removeItem:k=>values.delete(k)}});
- for(const file of ['data/CountriesDB','data/RegionsDB','data/NeighborsDB','data/CitiesDB','UnitsDB','Tech','Economy','GameData','AI','GameLoop'])vm.runInContext(fs.readFileSync(path.join(__dirname,'../js',file+'.js'),'utf8'),context);
- return Object.assign(vm.runInContext('({GameData,AI,SaveGame,GameLoop,RegionsDB,UnitsDB,DEVELOPMENT,POLICIES,Economy,RESOURCES,ECONOMY,Tech,TECH_TREE,MODERNIZATION})',context),{localStorage:context.localStorage});
+ for(const file of ['data/CountriesDB','data/RegionsDB','data/NeighborsDB','data/CitiesDB','UnitsDB','Tech','Economy','Diplomacy','Missions','GameData','AI','GameLoop'])vm.runInContext(fs.readFileSync(path.join(__dirname,'../js',file+'.js'),'utf8'),context);
+ return Object.assign(vm.runInContext('({GameData,AI,SaveGame,GameLoop,RegionsDB,UnitsDB,DEVELOPMENT,POLICIES,Economy,RESOURCES,ECONOMY,Tech,TECH_TREE,MODERNIZATION,Diplomacy,DIPLOMACY,Missions,MISSION_KINDS,MISSION_RULES})',context),{localStorage:context.localStorage});
 }
 test('casualties are invariant under splitting an attack into orders',()=>{
  const {GameData}=engine();const fight=split=>{const d=new GameData('UA',{scenario:'war2024'});for(const id of ['UA-1','RU-19']){d.regions[id].army=d.emptyArmy();d.regions[id].army.infantry=10;}
@@ -70,3 +70,118 @@ test('tech effects: fewer losses, stronger defense, more food, logistics',()=>{c
  const fight=med=>{const d=new GameData('UA');d.startWar('UA','MD');if(med)Tech.grant(d.countries.UA,'medicine');const from=d.getCountryRegions('UA').find(r=>d.getNeighbors(r.id).includes('MD-1'));from.army=d.emptyArmy();from.army.infantry=100;d.regions['MD-1'].army=d.emptyArmy();d.regions['MD-1'].army.infantry=60;d.queueAttack(from.id,'MD-1',{infantry:100});return d.processOrders().logs.find(l=>l.losses).losses.attacker.infantry;};assert.ok(fight(true)<fight(false));});
 test('research survives save and old logistics levels become technologies',()=>{const {GameData}=engine(),d=new GameData('DE');d.countries.DE.money=1e9;d.startResearch('DE','powergrid');d.research('DE','infantry');const back=GameData.restore(JSON.parse(JSON.stringify(d.serialize())));assert.equal(JSON.stringify(back.serialize()),JSON.stringify(d.serialize()));assert.equal(back.countries.DE.research.id,'powergrid');const old=d.serialize();for(const c of Object.values(old.countries)){c.length=9;}old.countries.DE[3].marchSpeed=3;const m=GameData.restore(GameData.migrateSave(old));assert.ok(m.countries.DE.techs.includes('logistics2'));assert.equal(m.countries.DE.research,null);});
 test('rich AI spends surplus on science instead of hoarding',()=>{const run=science=>{const {GameData,AI}=engine(),d=new GameData('DE'),ai=new AI(d);if(!science)ai.planScience=()=>{};d.countries.CN.money=5e8;for(let t=0;t<10;t++){ai.planTurn();d.processOrders();d.applyEndOfTurn();d.turn++;}return d.countries.CN;};const cn=run(true),hoard=run(false);assert.ok(cn.techs.length>=3);assert.ok(Object.keys(cn.tech).some(k=>k!=='marchSpeed'&&cn.tech[k]>1));assert.ok(cn.money<hoard.money-1e8,`${cn.money} vs ${hoard.money}`);});
+
+// --- дипломатия ---
+test('diplomacy: gift improves relations, deal gives trade bonus, pact blocks war', () => {
+    const { GameData, Diplomacy, DIPLOMACY } = engine(), d = new GameData('DE');
+    const de = d.countries.DE;
+    de.money = 1e9; de.influence = 100;
+    assert.equal(d.diplomacyAction('FR', 'gift').ok, true);
+    assert.ok(Diplomacy.relation(d, 'DE', 'FR') > 0);
+    const before = d.countryBalance('DE');
+    const deal = d.diplomacyAction('FR', 'deal');
+    assert.equal(deal.accepted, true);
+    assert.equal(d.stats.deals, 1);
+    const after = d.countryBalance('DE');
+    assert.equal(after.tradeBonus, DIPLOMACY.DEAL_BONUS);
+    assert.ok(after.sales >= before.sales && after.purchases <= before.purchases);
+    assert.equal(d.diplomacyAction('FR', 'pact').accepted, true);
+    assert.equal(d.canDeclareWar('DE', 'FR').ok, false);
+    assert.equal(d.diplomacyAction('FR', 'cancel-pact').ok, true);
+    assert.equal(d.canDeclareWar('DE', 'FR').ok, false, 'после разрыва пакта — пауза');
+    d.turn += 3;
+    assert.equal(d.canDeclareWar('DE', 'FR').ok, true);
+});
+
+test('diplomacy: allies join a defensive war, alliance needs trust', () => {
+    const { GameData, Diplomacy } = engine(), d = new GameData('DE');
+    d.countries.DE.influence = 100;
+    assert.equal(d.diplomacyAction('PL', 'alliance').accepted, false, 'без отношений и договоров союз не подпишут');
+    d.relations[d.pairKey('DE', 'PL')] = 70;
+    Diplomacy.sign(d, 'DE', 'PL', 'deal');
+    assert.equal(d.diplomacyAction('PL', 'alliance').accepted, true);
+    assert.equal(d.canDeclareWar('DE', 'PL').ok, false);
+    d.countries.CZ.influence = 100;
+    const result = d.declareWar('CZ', 'PL');
+    assert.equal(result.ok, true);
+    assert.deepEqual([...result.joined], ['DE']);
+    assert.equal(d.isAtWar('DE', 'CZ'), true);
+    assert.ok(d.takeDiploEvents().some(e => e.message.includes('союзник')));
+});
+
+test('diplomacy: tribute only from much weaker countries, decline hurts relations', () => {
+    const { GameData, Diplomacy, DIPLOMACY } = engine(), d = new GameData('US');
+    d.countries.US.influence = 100;
+    const weak = d.neighbourCountries('US').find(cc => d.calculateMilitaryPower('US') > DIPLOMACY.TRIBUTE_RATIO * d.calculateMilitaryPower(cc));
+    assert.ok(weak);
+    const money = d.countries.US.money;
+    const r = d.diplomacyAction(weak, 'tribute');
+    assert.ok(r.paid > 0);
+    assert.equal(d.countries.US.money, money + r.paid);
+    assert.equal(Diplomacy.relation(d, 'US', weak), DIPLOMACY.TRIBUTE_RELATION);
+    const d2 = new GameData('LT');
+    d2.countries.LT.influence = 100;
+    assert.equal(d2.diplomacyAction('PL', 'tribute').paid, 0);
+});
+
+test('diplomacy survives save and relations drift back', () => {
+    const { GameData, Diplomacy } = engine(), d = new GameData('DE');
+    d.relations[d.pairKey('DE', 'FR')] = 40;
+    Diplomacy.sign(d, 'DE', 'FR', 'pact');
+    const back = GameData.restore(JSON.parse(JSON.stringify(d.serialize())));
+    assert.equal(Diplomacy.relation(back, 'DE', 'FR'), 50);
+    assert.ok(Diplomacy.pactLeft(back, 'DE', 'FR') > 0);
+    const rel = Diplomacy.relation(back, 'DE', 'FR');
+    Diplomacy.endTurn(back, []);
+    assert.equal(Diplomacy.relation(back, 'DE', 'FR'), rel - 1);
+    const bad = d.serialize(); bad.diplomacy.relations['DE|FR'] = 500;
+    assert.throws(() => GameData.restore(bad));
+});
+
+// --- задания ---
+test('missions: three active, progress counts from issue, claim pays and replaces', () => {
+    const { GameData, Missions } = engine(), d = new GameData('UA', { scenario: 'war2024' });
+    assert.equal(d.missions.length, 3);
+    d.missions[0] = { kind: 'recruit', target: 2, text: 'x', stat: 'recruited', base: d.stats.recruited || 0, reward: { money: 1e6, influence: 5 }, issued: 0 };
+    assert.equal(Missions.claim(d, 0), null, 'невыполненное не выдаётся');
+    assert.equal(d.queueRecruitment('UA-1', 'infantry', 1).ok, true);
+    assert.equal(Missions.progress(d, d.missions[0]).done, false);
+    assert.equal(d.queueRecruitment('UA-1', 'infantry', 1).ok, true);
+    assert.equal(Missions.progress(d, d.missions[0]).done, true);
+    assert.equal(Missions.readyCount(d) >= 1, true);
+    const ua = d.countries.UA, money = ua.money, infl = ua.influence;
+    assert.deepEqual({ ...Missions.claim(d, 0) }, { money: 1e6, influence: 5 });
+    assert.equal(ua.money, money + 1e6);
+    assert.equal(ua.influence, Math.min(100, infl + 5));
+    assert.equal(d.missions.length, 3);
+    assert.equal(d.stats.missions, 1);
+});
+
+test('missions: cancelled recruitment does not count, skip costs influence, stale ones replaced', () => {
+    const { GameData, Missions, MISSION_RULES } = engine(), d = new GameData('UA', { scenario: 'war2024' });
+    d.queueRecruitment('UA-1', 'infantry', 1);
+    d.cancelOrder('recruitment', 0);
+    assert.equal(d.stats.recruited, 0);
+    d.countries.UA.influence = MISSION_RULES.SKIP_COST;
+    const kind = d.missions[1].kind;
+    assert.equal(Missions.skip(d, 1), true);
+    assert.equal(d.countries.UA.influence, 0);
+    assert.equal(d.missions.length, 3);
+    assert.ok(!d.missions.some(m => m.kind === kind));
+    assert.equal(Missions.skip(d, 0), false);
+    d.missions[2] = { kind: 'battles', target: 2, text: 'x', stat: 'battlesWon', base: 0, reward: { money: 1e6, influence: 5 }, issued: 0 };
+    d.makePeace('UA', 'RU');
+    Missions.update(d);
+    assert.ok(!d.missions.some(m => m.kind === 'battles'));
+    assert.equal(d.missions.length, 3);
+});
+
+test('missions: done is announced once and missions survive save', () => {
+    const { GameData, Missions } = engine(), d = new GameData('DE');
+    d.missions[0] = { kind: 'treasury', target: 1, text: 'x', value: 'money', start: 0, reward: { money: 1e6, influence: 5 }, issued: 0 };
+    assert.equal(Missions.update(d).length, 1);
+    assert.equal(Missions.update(d).length, 0);
+    const back = GameData.restore(JSON.parse(JSON.stringify(d.serialize())));
+    assert.equal(JSON.stringify(back.missions), JSON.stringify(d.missions));
+    assert.equal(Missions.progress(back, back.missions[0]).done, true);
+});

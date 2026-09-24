@@ -195,7 +195,7 @@ class Economy {
                     }
                 }
                 r.sat[key] = e.f.need > 0 ? Math.max(0, Math.min(1, 1 - shortage / e.f.need)) : 1;
-                r.res[key] = { prod: e.f.prod, need: e.f.need, sold, bought, shortage, stock: e.c.stock[key] };
+                r.res[key] = { prod: e.f.prod, need: e.f.need, sold, bought, shortage, stock: e.c.stock[key], price };
             }
             data.marketStats = data.marketStats || {};
             data.marketStats[key] = { offers, bids, traded: Math.min(offers, bids), price };

@@ -57,19 +57,13 @@ class GameCore {
         const player = d.playerCountry;
         const cc = btn.dataset.country;
         const action = btn.dataset.action;
-        if (action.startsWith('campaign-')) {
-            this.ui.hideModal('campaign-modal');
-            if (action === 'campaign-budget') this.openGovernment();
-            else if (action === 'campaign-diplomacy') this.openDiplomacy();
-            else {
-                const id = document.getElementById('owned-region-select')?.value || d.mostPopulousRegion(player);
-                if (id) { this.map.focusRegion(id); this.showRegion(id);
-                    if (action === 'campaign-invest') { const panel = document.getElementById('development-panel'); panel.open = true; panel.scrollIntoView({ block: 'nearest' }); }
-                    if (action === 'campaign-recruit') document.getElementById('recruit-btn').click();
-                }
-            }
+        if (action === 'open-country') {
+            this.ui.hideModal('diplo-modal');
+            this.map.focusCountry(cc);
+            this.showCountry(cc);
             return;
         }
+        if (action === 'mission-go') { this.goToMission(d.missions[+btn.dataset.index]); return; }
         if (d.gameOver) return;
         if (['invest', 'cancel-project', 'integrate'].includes(action)) {
             const id = btn.dataset.region;
@@ -86,11 +80,32 @@ class GameCore {
             return;
         }
 
+        if (action === 'mission-claim') {
+            const reward = Missions.claim(d, +btn.dataset.index);
+            if (!reward) return;
+            this.ui.haptic(30);
+            this.ui.toast(`Награда: +${this.ui.money(reward.money)} и +${reward.influence} влияния`);
+            this.afterMissions();
+            return;
+        }
+        if (action === 'mission-skip') {
+            if (!Missions.skip(d, +btn.dataset.index)) { this.ui.toast(`Нужно ${MISSION_RULES.SKIP_COST} влияния`); return; }
+            this.afterMissions();
+            return;
+        }
+        if (['gift', 'deal', 'pact', 'alliance', 'tribute', 'cancel-deal', 'cancel-pact', 'cancel-alliance'].includes(action)) {
+            this.diplomacyAction(cc, action);
+            return;
+        }
+
         if (btn.dataset.action === 'war') {
+            const allies = Diplomacy.allies(d, cc).filter(x => x !== player && !d.isAtWar(x, player));
+            if (allies.length && !confirm(`У страны ${d.countries[cc].name} есть союзники: ${allies.map(x => d.countries[x].name).join(', ')}. Они тоже вступят в войну. Объявить?`)) return;
             const result = d.declareWar(player, cc);
             if (!result.ok) { this.ui.toast(result.reason); return; }
             this.ui.haptic(40);
-            this.ui.toast(`Вы объявили войну: ${d.countries[cc].name}`);
+            const joined = result.joined || [];
+            this.ui.toast(`Вы объявили войну: ${d.countries[cc].name}${joined.length ? `. Её союзники вступили в войну: ${joined.map(x => d.countries[x].name).join(', ')}` : ''}`);
             this.afterStateChange();
         } else if (btn.dataset.action === 'peace') {
             if (d.countries[player].influence < RULES.PEACE_COST) { this.ui.toast(`Нужно ${RULES.PEACE_COST} влияния`); return; }
@@ -138,6 +153,56 @@ class GameCore {
         }
     }
 
+    diplomacyAction(cc, action) {
+        const d = this.data;
+        const name = d.countries[cc].name;
+        if (action.startsWith('cancel-')) {
+            const what = { 'cancel-deal': 'расторгнуть торговый договор', 'cancel-pact': 'разорвать пакт о ненападении', 'cancel-alliance': 'выйти из союза' }[action];
+            if (!confirm(`${name}: ${what}? Отношения ухудшатся на ${-DIPLOMACY.BREAK_RELATION}.`)) return;
+        }
+        const result = d.diplomacyAction(cc, action);
+        if (!result.ok) { this.ui.toast(result.reason); return; }
+        const names = { deal: 'торговый договор', pact: 'пакт о ненападении', alliance: 'оборонительный союз' };
+        if (action === 'gift') this.ui.toast(`${name}: подарок принят (−${this.ui.money(result.cost)}), отношения +${result.gain}`);
+        else if (action === 'tribute') this.ui.toast(result.paid ? `${name}: дань выплачена, +${this.ui.money(result.paid)}` : `${name}: платить отказались — ${result.reason.toLowerCase()}`);
+        else if (action.startsWith('cancel-')) this.ui.toast(`${name}: договор расторгнут`);
+        else this.ui.toast(result.accepted ? `${name}: подписан ${names[action]}` : `${name}: отказ — ${result.reason.toLowerCase()}`);
+        this.ui.haptic(20);
+        this.afterStateChange();
+    }
+
+    // «Перейти» из задания — туда, где его выполняют.
+    goToMission(m) {
+        if (!m) return;
+        const d = this.data, player = d.playerCountry;
+        this.ui.hideModal('campaign-modal');
+        const own = () => {
+            const id = d.getCountry(player).capital && d.regions[d.getCountry(player).capital]?.owner === player ? d.getCountry(player).capital : d.mostPopulousRegion(player);
+            if (id) { this.map.focusRegion(id); this.showRegion(id); }
+            return id;
+        };
+        if (m.kind === 'recruit') { if (own()) document.getElementById('recruit-btn').click(); }
+        else if (m.kind === 'build') {
+            if (own()) document.getElementById('development-panel').scrollIntoView({ block: 'nearest' });
+        } else if (m.kind === 'battles' || m.kind === 'conquer') {
+            const enemy = d.enemiesOf(player)[0];
+            if (enemy) this.map.focusCountry(enemy);
+            this.ui.toast('Выберите свою область у фронта и нажмите «Наступление»');
+        } else if (m.kind === 'research' || m.kind === 'modernize') this.ui.showScience(d);
+        else if (m.kind === 'deal') this.openDiplomacy();
+        else if (m.kind === 'friend') { this.map.focusCountry(m.param); this.showCountry(m.param); }
+        else {
+            this.openGovernment();
+            if (m.kind === 'surplus') document.getElementById('gov-economy-section').scrollIntoView({ block: 'start' });
+        }
+    }
+
+    afterMissions() {
+        this.ui.showCampaign(this.data);
+        this.loop.updateTopBarUI();
+        SaveGame.save(this.data);
+    }
+
     afterScience() {
         this.ui.showScience(this.data);
         this.loop.updateTopBarUI();
@@ -150,6 +215,7 @@ class GameCore {
         this.map.refreshColors();
         this.loop.updateTopBarUI();
         if (document.getElementById('diplo-modal').classList.contains('active')) this.ui.showDiplomacy(this.data);
+        if (document.getElementById('campaign-modal').classList.contains('active')) this.ui.showCampaign(this.data);
         if (this.panelRegion) this.showRegion(this.panelRegion);
         else if (this.panelCountry) this.showCountry(this.panelCountry);
         SaveGame.save(this.data);

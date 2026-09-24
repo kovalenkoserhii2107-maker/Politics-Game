@@ -14,6 +14,7 @@ const AI_RULES = {
     WAR_ON_PLAYER_CHANCE: 0.015,
     AI_WARS_MAX: 1,             // сколько войн между ИИ может идти одновременно
     AI_WAR_CHANCE: 0.05,
+    AI_TREATY_TRIES: 3,     // сколько пар соседей за ход пробуют договориться
     AI_WAR_RATIO: [1.2, 2.5],   // ИИ воюет с ИИ только при сопоставимых силах — без избиения слабых
     AI_WAR_GOAL: 0.2,           // войны между ИИ ограниченные: взял пятую часть земель — мир
     PEACEFUL_START_TURNS: 10,   // первые ходы никто не объявляет новых войн
@@ -333,7 +334,9 @@ class AI {
         const d = this.data;
         const events = [];
         const player = d.playerCountry;
-        const playerPower = Math.max(1, d.calculateMilitaryPower(player));
+        // на игрока смотрят вместе с его союзниками
+        const playerPower = Math.max(1, d.calculateMilitaryPower(player)
+            + Diplomacy.allies(d, player).reduce((sum, cc) => sum + d.calculateMilitaryPower(cc), 0));
         // первые ходы новых войн не начинают — но мир заключать можно всегда
         const mayStartWars = d.turn >= this.rule('PEACEFUL_START_TURNS');
 
@@ -344,9 +347,12 @@ class AI {
             const country = d.countries[cc];
             if (!country || !country.alive || !country.playable) continue;
             if (d.isAtWar(cc, player) || d.truceLeft(cc, player) || d.enemiesOf(cc).length) continue;
+            if (Diplomacy.pactLeft(d, cc, player) || Diplomacy.isAllied(d, cc, player)) continue;
             const ratio = d.calculateMilitaryPower(cc) / playerPower;
             if (ratio < this.rule('WAR_ON_PLAYER_RATIO')) continue;
-            if (Math.random() > this.rule('WAR_ON_PLAYER_CHANCE') * ratio) continue;
+            // хорошие отношения удерживают от войны, плохие — подталкивают
+            const mood = Math.max(0, 1 - Diplomacy.relation(d, cc, player) / 100);
+            if (Math.random() > this.rule('WAR_ON_PLAYER_CHANCE') * ratio * mood) continue;
             if (!d.declareWar(cc, player).ok) continue;
             events.push({ type: 'war', by: cc, target: player, message: `⚔️ ${country.name} объявила вам войну!` });
             break;
@@ -361,7 +367,26 @@ class AI {
             }
         }
 
-        // 3. Мир: ИИ сам предлагает его игроку или договаривается с другим ИИ
+        // 3. Предложения игроку: торговля, пакт, союз — от тех, кто к нему расположен
+        if (!d.decisions.some(x => x.type !== 'peace')) {
+            const offer = this.pickOffer();
+            if (offer) {
+                d.decisions.push(offer);
+                const what = { deal: 'торговый договор', pact: 'пакт о ненападении', alliance: 'союз' }[offer.type];
+                events.push({ type: 'offer', message: `📨 ${d.countries[offer.from].name} предлагает ${what}.` });
+            }
+        }
+
+        // 4. Договоры между ИИ: соседи торгуют, друзья вступают в союзы.
+        //    Об этом сообщаем, только если это касается соседей игрока.
+        const near = new Set(d.neighbourCountries(player));
+        for (const signed of this.aiTreaties()) {
+            if (!near.has(signed.a) && !near.has(signed.b)) continue;
+            const what = signed.kind === 'alliance' ? 'заключили оборонительный союз' : 'подписали торговый договор';
+            events.push({ type: 'world-treaty', message: `${signed.kind === 'alliance' ? '🛡️' : '🤝'} ${d.countries[signed.a].name} и ${d.countries[signed.b].name} ${what}.` });
+        }
+
+        // 5. Мир: ИИ сам предлагает его игроку или договаривается с другим ИИ
         for (const key of [...d.wars.keys()]) {
             const [a, b] = key.split('|');
             if (a === player || b === player) {
@@ -377,6 +402,49 @@ class AI {
             }
         }
         return events;
+    }
+
+    // Несколько случайных пар соседей за ход: хватает, чтобы за пару десятков
+    // ходов сложились торговые связи и первые союзы, но мир не окаменел.
+    aiTreaties() {
+        const d = this.data;
+        const signed = [];
+        const ids = Object.keys(d.countries).filter(cc => cc !== d.playerCountry && d.countries[cc].alive && d.countries[cc].playable);
+        for (let i = 0; i < AI_RULES.AI_TREATY_TRIES; i++) {
+            const a = ids[Math.floor(Math.random() * ids.length)];
+            const around = d.neighbourCountries(a).filter(cc => cc !== d.playerCountry && ids.includes(cc));
+            const b = around[Math.floor(Math.random() * around.length)];
+            if (!b || d.isAtWar(a, b)) continue;
+            const rel = Diplomacy.relation(d, a, b);
+            let kind = null;
+            if (!Diplomacy.hasDeal(d, a, b)) {
+                if (rel >= 0 && Diplomacy.dealCount(d, a) < DIPLOMACY.DEAL_MAX && Diplomacy.dealCount(d, b) < DIPLOMACY.DEAL_MAX) kind = 'deal';
+            } else if (!Diplomacy.isAllied(d, a, b) && rel >= DIPLOMACY.ALLIANCE_MIN_RELATION + 5 && Math.random() < 0.25
+                && Diplomacy.allies(d, a).length < 2 && Diplomacy.allies(d, b).length < 2
+                && Diplomacy.willAccept(d, a, b, 'alliance').likely && Diplomacy.willAccept(d, b, a, 'alliance').likely) kind = 'alliance';
+            if (!kind) continue;
+            Diplomacy.sign(d, a, b, kind);
+            signed.push({ a, b, kind });
+        }
+        return signed;
+    }
+
+    pickOffer() {
+        const d = this.data;
+        const p = d.playerCountry;
+        const candidates = new Set([...d.neighbourCountries(p), ...Diplomacy.partners(d, p, d.deals)]);
+        for (const cc of candidates) {
+            const c = d.countries[cc];
+            if (!c || !c.alive || !c.playable || d.isAtWar(cc, p)) continue;
+            const rel = Diplomacy.relation(d, cc, p);
+            if (rel >= 0 && !Diplomacy.hasDeal(d, cc, p) && Diplomacy.dealCount(d, p) < DIPLOMACY.DEAL_MAX
+                && Diplomacy.dealCount(d, cc) < DIPLOMACY.DEAL_MAX && Math.random() < 0.012) return { type: 'deal', from: cc };
+            if (rel >= 10 && !Diplomacy.pactLeft(d, cc, p) && d.calculateMilitaryPower(cc) < d.calculateMilitaryPower(p)
+                && Math.random() < 0.03) return { type: 'pact', from: cc };
+            if (rel >= 60 && !Diplomacy.isAllied(d, cc, p) && Diplomacy.willAccept(d, cc, p, 'alliance').likely
+                && Math.random() < 0.02) return { type: 'alliance', from: cc };
+        }
+        return null;
     }
 
     pickAiWar() {
@@ -423,7 +491,7 @@ class AI {
         if (!info) return true;
         const ratio = d.calculateMilitaryPower(ai) / Math.max(1, d.calculateMilitaryPower(other));
         const score = info.taken - info.lost;
-        return score < 0 || ratio < 0.9 || (info.turns >= 12 && score <= 0);
+        return score < 0 || ratio < 0.9 || (info.turns >= 12 && score <= 0) || (info.turns >= 6 && Diplomacy.relation(d, ai, other) > -30);
     }
 
     // Нападающий в войне ИИ против ИИ берёт свою долю земель и останавливается.
