@@ -520,9 +520,9 @@ body { overscroll-behavior: none; }
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Exo+2:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;700&display=swap">
 <link rel="stylesheet" href="css/campaign.css?v=92c1697601">
-<link rel="stylesheet" href="css/theme.css?v=5b3c8c40f5">
+<link rel="stylesheet" href="css/theme.css?v=5fea1ebb8e">
 <link rel="stylesheet" href="css/map.css?v=7923cd8529">
-<link rel="stylesheet" href="css/start.css?v=f0a2609566">
+<link rel="stylesheet" href="css/start.css?v=0dd37db050">
 </head>
 <body>
 
@@ -596,6 +596,7 @@ body { overscroll-behavior: none; }
                         <svg id="info-minimap" class="minimap" aria-hidden="true"></svg>
                         <div class="stats" id="info-stats"></div>
                     </div>
+                    <div id="info-resources" class="res-chips" aria-label="Ресурсы на ход"></div>
                     <p id="info-advice" class="advice"></p>
                 </div>
 
@@ -653,6 +654,10 @@ body { overscroll-behavior: none; }
             <div class="stat-item"><span>Казна:</span> $<span id="glob-money">0</span>
                 <span id="glob-net" style="font-size:0.85em;font-weight:700;margin-left:4px;"></span></div>
             <div class="stat-item"><span>Влияние:</span> <span id="glob-influence">0</span></div>
+            <button class="stat-item res-status" id="res-status" type="button" aria-label="Ресурсы: открыть экономику">
+                <span>Ресурсы:</span>
+                <span class="res-dots"><i data-k="food">🌾</i><i data-k="energy">⚡</i><i data-k="goods">📦</i></span>
+            </button>
             <div class="stat-item"><span>Дата:</span> <span id="glob-date" style="color:#fff;">1 Января 2024</span></div>
         </div>
         <div class="stat-group" id="action-bar">
@@ -708,6 +713,9 @@ body { overscroll-behavior: none; }
                 <button class="close-btn" id="close-gov-btn">✕</button>
             </div>
             <div class="modal-body">
+                <div class="gov-section" id="gov-economy-section"><h3>Экономика · ресурсы на ход</h3>
+                    <div id="gov-economy"></div>
+                </div>
                 <div class="gov-section"><h3>Политический курс</h3>
                     <label for="gov-policy">Приоритет государства</label><select id="gov-policy"></select><p id="gov-policy-note" class="hint"></p>
                 </div>
@@ -807,9 +815,9 @@ body { overscroll-behavior: none; }
         <h3 class="section-title" style="margin-top:0;">Экономика</h3>
         <div class="info-grid">
             <div class="info-box"><div class="label">👥 Население</div><div id="panel-pop" class="val">0</div></div>
-            <div class="info-box"><div class="label">🛢️ Нефть</div><div id="panel-oil" class="val">0</div></div>
-            <div class="info-box"><div class="label">🌾 Агрокомплекс</div><div id="panel-agro" class="val">0</div></div>
-            <div class="info-box"><div class="label">🏭 Индустрия</div><div id="panel-ind" class="val">0</div></div>
+            <div class="info-box"><div class="label">🌾 Еда</div><div id="panel-food" class="val">0</div></div>
+            <div class="info-box"><div class="label">⚡ Энергия</div><div id="panel-energy" class="val">0</div></div>
+            <div class="info-box"><div class="label">📦 Товары</div><div id="panel-goods" class="val">0</div></div>
         </div>
 
         <div id="region-army-container"></div>
@@ -860,12 +868,13 @@ body { overscroll-behavior: none; }
 
 <!-- Движок -->
 <script src="js/UnitsDB.js?v=0d96f99a3f"></script>
-<script src="js/GameData.js?v=45b3e278a8"></script>
-<script src="js/AI.js?v=7678a97313"></script>
+<script src="js/Economy.js?v=4984581195"></script>
+<script src="js/GameData.js?v=db8b7f2462"></script>
+<script src="js/AI.js?v=fdd6f93ae6"></script>
 <script src="js/MapEngine.js?v=5e2af0e070"></script>
-<script src="js/UIManager.js?v=4a4e1a046b"></script>
-<script src="js/GameLoop.js?v=bab9a45f93"></script>
+<script src="js/UIManager.js?v=99f1508a3b"></script>
+<script src="js/GameLoop.js?v=6b2ed01b49"></script>
 <script src="js/Tutorial.js?v=ca91505373"></script>
-<script src="js/main.js?v=8ae20675d1"></script>
+<script src="js/main.js?v=01eb102ebc"></script>
 </body>
 </html>

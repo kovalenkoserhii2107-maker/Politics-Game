@@ -155,11 +155,28 @@ class UIManager {
     }
 
     // --- общие куски карточек ------------------------------------------------
-    fillEconomy(stats) {
-        document.getElementById('panel-pop').textContent = this.formatNumber(stats.population);
-        document.getElementById('panel-oil').textContent = stats.oil;
-        document.getElementById('panel-agro').textContent = stats.agro;
-        document.getElementById('panel-ind').textContent = stats.industry;
+    // Население и производство за ход. У страны — ещё и сколько нужно:
+    // сразу видно, чем она торгует, а что докупает.
+    fillEconomy(data, target) {
+        const set = (id, value, sub, cls = '') => {
+            const el = document.getElementById(id);
+            el.innerHTML = `${value}${sub ? `<small class="${cls}">${sub}</small>` : ''}`;
+        };
+        const n = v => (v >= 100 ? Math.round(v) : Math.round(v * 10) / 10).toLocaleString('ru-RU');
+        if (target.countryId) {
+            const f = Economy.flows(data, target.countryId);
+            set('panel-pop', this.formatNumber(f.popM * 1e6));
+            for (const [key, id] of [['food', 'panel-food'], ['energy', 'panel-energy'], ['goods', 'panel-goods']]) {
+                const net = f[key].prod - f[key].need;
+                set(id, n(f[key].prod), `${net >= 0 ? 'излишек +' : 'нехватка −'}${n(Math.abs(net))}`, net >= 0 ? 'pos' : 'neg');
+            }
+        } else {
+            const out = Economy.regionOutput(data, target.region);
+            set('panel-pop', this.formatNumber(target.region.population));
+            set('panel-food', n(out.food), 'в ход');
+            set('panel-energy', n(out.energy), 'в ход');
+            set('panel-goods', n(out.goods), 'в ход');
+        }
     }
 
     tag(text, kind = '') { return `<span class="tag ${kind}">${text}</span>`; }
@@ -244,7 +261,7 @@ class UIManager {
             capital ? this.tag(`🏛️ ${this.escape(capital.name)}`) : '',
             this.tag(`${stats.regions} обл.`),
         ].join('');
-        this.fillEconomy(stats);
+        this.fillEconomy(data, { countryId: country.id });
 
         const container = document.getElementById('region-army-container');
         const seeArmy = isPlayer || data.isAtWar(data.playerCountry, country.id);
@@ -277,7 +294,7 @@ class UIManager {
         if (region.owner !== region.originalOwner) tags.push(this.tag(`Оккупирована (${data.countries[region.originalOwner].name})`, 'war'));
         tags.push(this.tag(`Лояльность ${Math.round(region.loyalty * 100)}%`, region.loyalty < 0.6 ? 'war' : ''));
         document.getElementById('panel-tags').innerHTML = tags.join('');
-        this.fillEconomy({ population: region.population, ...region.resources });
+        this.fillEconomy(data, { region });
         this.renderDevelopment(region, data);
 
         const isNeighbor = data.isNeighborToPlayer(region.id);
@@ -517,10 +534,11 @@ class UIManager {
         } else {
             for (const [kind, plan] of Object.entries(DEVELOPMENT)) {
                 const level = region.development[kind], cost = data.developmentCost(region.id, kind);
-                const modifier = kind === 'industry' ? POLICIES[data.countries[data.playerCountry].policy].industry : region.loyalty;
-                const gain = plan.gain * plan.income * modifier;
+                const value = Economy.projectValue(data, region.id, kind);
+                const res = RESOURCES[plan.yields];
+                const payback = value > 0 ? Math.ceil(cost / value) : null;
                 const disabled = level >= 5 || data.countries[data.playerCountry].money < cost || data.gameOver;
-                html += `<div class="development-card"><strong>${plan.name} · ${level}/5</strong><p>${plan.turns} ход. · +${plan.gain} к ресурсу · около +${this.money(gain)}/ход при текущем курсе и лояльности${kind === 'industry' ? '. Также увеличивает мощность набора' : ''}.</p><button class="mini-btn" data-action="invest" data-region="${region.id}" data-kind="${kind}" ${disabled ? 'disabled' : ''}>${level >= 5 ? 'Максимальный уровень' : `Построить · ${this.money(cost)}`}</button></div>`;
+                html += `<div class="development-card"><strong>${plan.name} · ${level}/5</strong><p>${plan.turns} ход. стройки · больше ресурса «${res.icon} ${res.name}» · по нынешним ценам около +${this.money(value)}/ход${payback ? `, окупится за ~${payback} ход.` : ''}${kind === 'industry' ? ' Заводам нужна энергия. Также растёт мощность набора войск.' : ''}</p><button class="mini-btn" data-action="invest" data-region="${region.id}" data-kind="${kind}" ${disabled ? 'disabled' : ''}>${level >= 5 ? 'Максимальный уровень' : `Построить · ${this.money(cost)}`}</button></div>`;
             }
         }
         container.innerHTML = html;
@@ -614,11 +632,11 @@ class UIManager {
             ? `Высокий налог: лояльность будет снижаться до ${Math.round(Math.min(1, 1 + POLICIES[player.policy].loyalty - penalty) * 100)}% — а с ней и сбор.`
             : 'Налог до 10% не снижает лояльность.';
 
+        this.renderEconomy(data);
         document.getElementById('gov-budget').innerHTML = `
             <div class="budget-row"><span>Налоги</span><span class="pos">+${this.money(balance.tax)}</span></div>
-            <div class="budget-row"><span>Индустрия</span><span class="pos">+${this.money(balance.industry)}</span></div>
-            <div class="budget-row"><span>Сельское хозяйство</span><span class="pos">+${this.money(balance.agro)}</span></div>
-            <div class="budget-row"><span>Энергетика</span><span class="pos">+${this.money(balance.energy)}</span></div>
+            <div class="budget-row"><span>Продажа ресурсов</span><span class="pos">+${this.money(balance.sales)}</span></div>
+            <div class="budget-row"><span>Закупка ресурсов</span><span class="neg">−${this.money(balance.purchases)}</span></div>
             <div class="budget-row"><span>Социальная программа</span><span class="neg">−${this.money(balance.social)}</span></div>
             <div class="budget-row"><span>Содержание армии</span><span class="neg">−${this.money(balance.upkeep)}</span></div>
             <div class="budget-row total"><span>Итого за ход</span><span class="${net >= 0 ? 'pos' : 'neg'}">${net >= 0 ? '+' : ''}${this.money(net)}</span></div>`;
@@ -632,6 +650,60 @@ class UIManager {
         const march = player.tech.marchSpeed || 1;
         rows.push(this.researchRow('marchSpeed', '🚚 Логистика', `марш на ${march} обл. за ход${march >= 3 ? ' · экспедиции по всему миру' : ' · на ур. 3: экспедиции'}`, data.techCost(player.id, 'marchSpeed'), player.money));
         document.getElementById('gov-research').innerHTML = rows.join('');
+    }
+
+    // Ресурсы страны: сколько производим и тратим, запас на складе, цена
+    // на мировом рынке и что делать с излишком.
+    renderEconomy(data) {
+        const player = data.countries[data.playerCountry];
+        Economy.initCountry(player);
+        const f = Economy.flows(data, player.id);
+        const n = v => (Math.abs(v) >= 100 ? Math.round(v) : Math.round(v * 10) / 10).toLocaleString('ru-RU');
+        const html = Object.entries(RESOURCES).map(([key, res]) => {
+            const { prod, need } = f[key];
+            const net = prod - need;
+            const price = data.market[key];
+            const change = Math.round((price / res.price - 1) * 100);
+            const stock = player.stock[key];
+            const weeks = need > 0 ? stock / need : 0;
+            const fill = Math.min(100, Math.round((weeks / ECONOMY.STOCK_CAP) * 100));
+            const sat = player.economy ? player.economy.sat[key] : 1;
+            const selling = player.trade[key] === 'sell';
+            let note;
+            if (sat < 0.95) note = `<span class="neg">В прошлый ход не хватило ${Math.round((1 - sat) * 100)}%.</span> `;
+            else note = '';
+            if (net >= 0) note += selling
+                ? `Излишек ${n(net)} продаётся: около <span class="pos">+${this.money(net * price)}</span> в ход.`
+                : `Излишек ${n(net)} копится на складе (до ${ECONOMY.STOCK_CAP} недель запаса).`;
+            else note += `Нехватка ${n(-net)} докупается: около <span class="neg">−${this.money(-net * price)}</span> в ход.`;
+            return `<div class="res-card ${sat < 0.95 ? 'short' : net < 0 ? 'import' : 'ok'}">
+                <div class="res-head"><b>${res.icon} ${res.name}</b>
+                    <span class="res-price">${this.money(price)} <small class="${change > 0 ? 'neg' : change < 0 ? 'pos' : 'muted'}">${change > 0 ? '+' : ''}${change}%</small></span></div>
+                <div class="res-flow"><span>Производство <b>${n(prod)}</b></span><span>Потребление <b>${n(need)}</b></span>
+                    <b class="${net >= 0 ? 'pos' : 'neg'}">${net >= 0 ? '+' : '−'}${n(Math.abs(net))}</b></div>
+                <div class="res-stock"><div class="res-bar"><i style="width:${fill}%"></i></div><small>Склад ${n(stock)} · ${weeks.toFixed(1)} нед.</small></div>
+                <p class="hint">${note}</p>
+                <label class="switch switch-sm" ${net < 0 ? 'hidden' : ''}><input type="checkbox" data-action="trade" data-key="${key}" ${selling ? 'checked' : ''}>
+                    <span class="switch-track" aria-hidden="true"></span><span>Продавать излишки</span></label>
+            </div>`;
+        }).join('');
+        document.getElementById('gov-economy').innerHTML = html
+            + `<p class="hint">Цены мирового рынка растут, когда товара не хватает, и падают при избытке. Воюющая страна под блокадой торгует только на ${Math.round(ECONOMY.WAR_TRADE * 100)}%.</p>`;
+    }
+
+    // Три значка в верхней панели: зелёный — хватает, жёлтый — докупаем,
+    // красный — не хватило в прошлый ход.
+    updateResourceStatus(data) {
+        const player = data.countries[data.playerCountry];
+        if (!player || !data.regionsByCountry[player.id]?.length) return;
+        const f = Economy.flows(data, player.id);
+        for (const el of document.querySelectorAll('#res-status [data-k]')) {
+            const key = el.dataset.k;
+            const sat = player.economy ? player.economy.sat[key] : 1;
+            const state = sat < 0.95 ? 'short' : f[key].prod < f[key].need ? 'import' : 'ok';
+            el.className = state;
+            el.title = `${RESOURCES[key].name}: ${state === 'short' ? 'не хватает' : state === 'import' ? 'докупаем на рынке' : 'хватает'}`;
+        }
     }
 
     researchRow(key, label, sub, cost, money) {

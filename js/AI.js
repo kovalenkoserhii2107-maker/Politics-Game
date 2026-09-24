@@ -18,6 +18,7 @@ const AI_RULES = {
     AI_WAR_GOAL: 0.2,           // войны между ИИ ограниченные: взял пятую часть земель — мир
     PEACEFUL_START_TURNS: 10,   // первые ходы никто не объявляет новых войн
     FIRST_ATTACK_TURN: 2,       // в уже идущей войне первые ходы ИИ только мобилизуется
+    INVEST_PAYBACK: 10,         // строить, только если проект окупится быстрее, чем за столько ходов
 };
 
 class AI {
@@ -44,12 +45,28 @@ class AI {
             if (enemies.length) this.planWar(country, enemies);
             else {
                 if (playerNeighbours.has(country.id)) this.planPeace(country);
-                if (d.turn % 4 === 0 && country.money > 3000000) {
-                    const region = d.getCountryRegions(country.id).find(r => !d.projects.some(p => p.regionId === r.id) && r.development.industry < 5);
-                    if (region) d.invest(region.id, 'industry', country.id);
-                }
+                // страны строят в разные ходы — иначе все разом переполняют рынок
+                const slot = (country.id.charCodeAt(0) * 31 + country.id.charCodeAt(1)) % 8;
+                if ((d.turn + slot) % 8 === 0 && country.money > 3000000) this.invest(country);
             }
         }
+    }
+
+    // Строим то, что по текущим ценам окупается быстрее: дешёвые товары —
+    // значит, выгоднее еда или энергия. Так рынок сам себя выравнивает.
+    invest(country) {
+        const d = this.data;
+        let best = null;
+        for (const region of d.getCountryRegions(country.id)) {
+            if (d.projects.some(p => p.regionId === region.id)) continue;
+            for (const kind of Object.keys(DEVELOPMENT)) {
+                if (region.development[kind] >= 5) continue;
+                const cost = d.developmentCost(region.id, kind);
+                const score = Economy.projectValue(d, region.id, kind) / cost;
+                if (!best || score > best.score) best = { region, kind, score };
+            }
+        }
+        if (best && best.score >= 1 / AI_RULES.INVEST_PAYBACK) d.invest(best.region.id, best.kind, country.id);
     }
 
     // Налог подстраивается под расходы: ИИ не должен банкротиться.
