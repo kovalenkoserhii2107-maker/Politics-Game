@@ -190,7 +190,7 @@
         var(--bg);
     background-size: 16px 16px, 16px 16px, 100% 100%;
 }
-.stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+.dossier .stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
 .stat {
     padding: 9px 10px; background: var(--s2); border: 1px solid var(--line); border-radius: var(--r);
     display: flex; flex-direction: column; gap: 4px; min-width: 0;

@@ -113,6 +113,11 @@ class GameCore {
             this.ui.updateOrdersPanel(d);
             this.loop.updateTopBarUI();
             SaveGame.save(d);
+        } else if (btn.dataset.action === 'trade') {
+            d.setTrade(player, btn.dataset.key, btn.checked ? 'sell' : 'keep');
+            this.ui.renderGovernment(d);
+            this.loop.updateTopBarUI();
+            SaveGame.save(d);
         } else if (btn.dataset.action === 'research') {
             const result = d.research(player, btn.dataset.key);
             if (!result.ok) { this.ui.toast(result.reason); return; }
@@ -461,6 +466,10 @@ class GameCore {
 
     initTopButtons() {
         document.getElementById('gov-btn').addEventListener('click', () => this.openGovernment());
+        document.getElementById('res-status').addEventListener('click', () => {
+            this.openGovernment();
+            document.getElementById('gov-economy-section').scrollIntoView({ block: 'start' });
+        });
         document.getElementById('diplo-btn').addEventListener('click', () => this.openDiplomacy());
         document.getElementById('campaign-btn').addEventListener('click', () => this.ui.showCampaign(this.data));
         document.getElementById('log-btn').addEventListener('click', () => this.ui.showHistory(this.data.history));
@@ -599,7 +608,7 @@ class GameCore {
             if (assessments[key][id]) return assessments[key][id];
             const d = preview();
             const unitsOf = cc => Object.values(d.getCountryStats(cc).army).reduce((a, b) => a + b, 0);
-            const balance = d.countryBalance(id);
+            const balance = d.steadyBalance(id);
             const net = balance.income - balance.expense;
             const army = unitsOf(id);
             const neighbours = d.neighbourCountries(id).filter(cc => d.countries[cc].playable);
@@ -726,6 +735,12 @@ class GameCore {
                 stat('Доход / нед.', (a.net >= 0 ? '+' : '−') + money(a.net), a.net >= 0 ? 'pos' : 'neg'),
                 stat('Армия', a.army.toLocaleString('ru-RU')),
             ].join('');
+            // Профиль страны: чего в избытке (продаст), чего не хватает (будет докупать).
+            const flows = Economy.flows(preview(), id);
+            $('info-resources').innerHTML = Object.entries(RESOURCES).map(([key, res]) => {
+                const net = Math.round(flows[key].prod - flows[key].need);
+                return `<span class="res-chip ${net >= 0 ? 'pos' : 'neg'}" title="${res.name}: ${net >= 0 ? 'излишек' : 'нехватка'} за ход">${res.icon} ${net >= 0 ? '+' : '−'}${Math.abs(net)}</span>`;
+            }).join('');
             const advice = $('info-advice');
             advice.className = `advice lvl-${a.level}`;
             advice.textContent = a.advice;

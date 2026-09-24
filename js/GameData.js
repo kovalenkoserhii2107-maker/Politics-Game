@@ -5,7 +5,6 @@
 // Все настройки механик в одном месте — чтобы баланс правился без поиска
 // чисел по коду.
 const RULES = {
-    INDUSTRY_VALUE: 2500,        // доход с единицы индустрии за ход
     ATTACK_ADVANTAGE: 1.2,      // во сколько раз атака должна превзойти оборону
     COUNTER_BONUS: 0.4,         // бонус рода войск против тех, кого он контрит
     CAPITAL_DEFENSE: 0.25,      // бонус обороны столицы
@@ -24,10 +23,12 @@ const RULES = {
     DESERTION: 0.1,             // доля войск, уходящих при пустой казне
 };
 
+// Проекты увеличивают ресурс области; что это даёт в еде, энергии и
+// товарах, считает Economy. Цены подобраны под окупаемость ~8 ходов.
 const DEVELOPMENT = {
-    industry: { name: 'Промышленный район', cost: 500000, turns: 2, resource: 'industry', gain: 20, income: RULES.INDUSTRY_VALUE },
-    agro: { name: 'Агрокомплекс', cost: 180000, turns: 2, resource: 'agro', gain: 15, income: 1500 },
-    oil: { name: 'Энергетический комплекс', cost: 400000, turns: 3, resource: 'oil', gain: 10, income: 4000 },
+    industry: { name: 'Промышленный район', cost: 600000, turns: 2, resource: 'industry', gain: 20, yields: 'goods' },
+    agro: { name: 'Агрокомплекс', cost: 360000, turns: 2, resource: 'agro', gain: 15, yields: 'food' },
+    oil: { name: 'Энергетический комплекс', cost: 750000, turns: 3, resource: 'oil', gain: 2, yields: 'energy' },
 };
 const POLICIES = {
     balanced: { name: 'Сбалансированный курс', description: 'Без дополнительных расходов и штрафов.', industry: 1, loyalty: 0, socialCost: 0 },
@@ -71,6 +72,7 @@ class GameData {
         this.gameOver = false;
         this.outcome = null;
         this.projects = [];
+        this.market = Economy.initMarket();   // текущие цены мирового рынка
         this.campaign = { budget: false, investment: false, recruited: false, diplomacy: false, conquest: false };
 
         this.build();
@@ -144,6 +146,7 @@ class GameData {
 
         this.assignCapitals();
         this.distributeArmiesToBorders();
+        this.fillStartingStocks();
         this.setStartingBudgets();
     }
 
@@ -174,26 +177,61 @@ class GameData {
         }
     }
 
-    // Стартовые налог и казна подбираются под расставленную армию, чтобы
-    // страна не оказывалась банкротом на первом же ходу.
+    // Склады на старте — запас на несколько недель потребления.
+    fillStartingStocks() {
+        for (const country of Object.values(this.countries)) {
+            Economy.initCountry(country);
+            if (!this.regionsByCountry[country.id].length) continue;
+            const f = Economy.flows(this, country.id);
+            for (const key of Object.keys(RESOURCES)) country.stock[key] = Math.round(f[key].need * ECONOMY.STOCK_TARGET);
+        }
+    }
+
+    // Стартовые налог и казна подбираются под армию и торговлю (импорт
+    // тоже надо оплачивать), чтобы страна не оказывалась банкротом сразу.
     setStartingBudgets() {
         for (const country of Object.values(this.countries)) {
             const regions = this.getCountryRegions(country.id);
             if (!regions.length) continue;
 
-            let population = 0, industry = 0, upkeep = 0;
+            let population = 0, upkeep = 0;
             for (const region of regions) {
                 population += region.population;
-                industry += region.resources.industry * RULES.INDUSTRY_VALUE;
                 upkeep += this.armyUpkeep(region.army);
             }
             if (population <= 0) continue;
 
-            const breakEven = (upkeep - industry) / population;
-            country.taxRate = Math.min(0.20, Math.max(0.05, Math.ceil(breakEven * 100) / 100 + 0.01));
-            const income = population * country.taxRate + industry;
+            const trade = Economy.projectTrade(this, country.id);
+            const tradeNet = trade.sales - trade.purchases;
+            // Налог выше 10% со временем снижает лояльность, а с ней сбор —
+            // поэтому ищем ставку, которая окупит армию и при сниженной лояльности.
+            country.taxRate = 0.20;
+            for (let pct = 5; pct <= 20; pct++) {
+                const rate = pct / 100;
+                if (population * rate * GameData.loyaltyAtTax(rate) + tradeNet >= upkeep * 1.02) { country.taxRate = rate; break; }
+            }
+            const income = population * country.taxRate + Math.max(0, tradeNet);
             country.money = Math.max(2000000, Math.round(income * 3));
         }
+    }
+
+    // Лояльность, к которой со временем придёт своя область при таком налоге.
+    static loyaltyAtTax(rate, policy = 'balanced') {
+        return Math.min(1, Math.max(0.2, 1 + POLICIES[policy].loyalty - Math.max(0, rate - 0.1) * 2));
+    }
+
+    // Бюджет через несколько ходов, когда лояльность придёт к своей цели:
+    // честный прогноз для стартового экрана.
+    steadyBalance(countryId) {
+        const country = this.countries[countryId];
+        const b = this.countryBalance(countryId);
+        const loyalty = GameData.loyaltyAtTax(country.taxRate, country.policy);
+        let now = 0, n = 0;
+        for (const region of this.getCountryRegions(countryId)) { now += region.loyalty; n++; }
+        now = n ? now / n : 1;
+        const tax = b.tax * (loyalty / Math.max(now, 0.01));
+        const sales = b.sales * ((0.5 + 0.5 * loyalty) / (0.5 + 0.5 * now));
+        return { ...b, tax, sales, income: tax + sales, expense: b.expense };
     }
 
     // --- доступ ----------------------------------------------------------
@@ -882,20 +920,34 @@ class GameData {
     }
 
     // --- экономика -------------------------------------------------------------------
+    // Прогноз бюджета на ход: налоги, торговля по текущим ценам, армия,
+    // социальные расходы. Фактическая торговля считается на рынке в конце хода.
     countryBalance(countryId) {
         const country = this.getCountry(countryId);
-        let tax = 0, industry = 0, upkeep = 0, agro = 0, energy = 0, social = 0;
-        if (!country) return { income: 0, expense: 0, tax, industry, upkeep };
+        let tax = 0, upkeep = 0, social = 0;
+        if (!country || !this.regionsByCountry[countryId]?.length) {
+            return { income: 0, expense: 0, tax, sales: 0, purchases: 0, upkeep, social, trade: { lines: {} } };
+        }
+        const policy = POLICIES[country.policy] || POLICIES.balanced;
         for (const region of this.getCountryRegions(countryId)) {
             tax += region.population * country.taxRate * region.loyalty;
-            const policy = POLICIES[country.policy] || POLICIES.balanced;
-            industry += region.resources.industry * RULES.INDUSTRY_VALUE * policy.industry;
-            agro += region.resources.agro * DEVELOPMENT.agro.income * region.loyalty;
-            energy += region.resources.oil * DEVELOPMENT.oil.income * region.loyalty;
             social += region.population * policy.socialCost;
             upkeep += this.armyUpkeep(region.army);
         }
-        return { income: tax + industry + agro + energy, expense: upkeep + social, tax, industry, agro, energy, social, upkeep };
+        tax *= Economy.taxFactor(country);
+        const trade = Economy.projectTrade(this, countryId);
+        return {
+            income: tax + trade.sales, expense: upkeep + social + trade.purchases,
+            tax, sales: trade.sales, purchases: trade.purchases, upkeep, social, trade,
+        };
+    }
+
+    setTrade(countryId, key, mode) {
+        const c = this.countries[countryId];
+        if (!c || !RESOURCES[key] || !TRADE_MODES[mode]) return false;
+        Economy.initCountry(c);
+        c.trade[key] = mode;
+        return true;
     }
 
     // Итоги хода после боёв: деньги, лояльность, влияние, банкротство,
@@ -903,13 +955,23 @@ class GameData {
     applyEndOfTurn() {
         const events = this.processProjects();
         const balances = {};
+        const markets = Economy.runMarkets(this);
 
         for (const country of Object.values(this.countries)) {
             if (!country.alive) continue;
+            const economy = markets[country.id];
+            if (economy) country.economy = economy;
             const balance = this.countryBalance(country.id);
+            // вместо прогноза торговли — то, что реально продано и куплено
+            const tradeMoney = economy ? economy.money : 0;
+            balance.sales = Math.max(0, tradeMoney);
+            balance.purchases = Math.max(0, -tradeMoney);
+            balance.income = balance.tax + balance.sales;
+            balance.expense = balance.upkeep + balance.social + balance.purchases;
             balances[country.id] = balance;
-            country.lastNetIncome = balance.income - balance.expense;
+            country.lastNetIncome = Math.round(balance.income - balance.expense);
             country.money += country.lastNetIncome;
+            if (economy) this.applyShortages(country, economy, events);
             country.influence = Math.min(RULES.INFLUENCE_MAX, country.influence + RULES.INFLUENCE_PER_TURN);
 
             if (country.money < 0) {
@@ -920,13 +982,17 @@ class GameData {
             }
         }
 
-        // Лояльность тянется к цели: захваченные земли и высокие налоги её снижают.
+        // Лояльность тянется к цели: захваченные земли, высокие налоги, голод
+        // и нехватка товаров её снижают. Население растёт в сытости.
         for (const region of Object.values(this.regions)) {
             const country = this.countries[region.owner];
             const occupied = region.owner !== region.originalOwner;
-            const target = Math.min(1, Math.max(0.3, (occupied ? 0.8 : 1) + POLICIES[country.policy].loyalty - Math.max(0, country.taxRate - 0.1) * 2));
+            const target = Math.min(1, Math.max(0.2, (occupied ? 0.8 : 1) + POLICIES[country.policy].loyalty
+                - Math.max(0, country.taxRate - 0.1) * 2 - Economy.loyaltyPenalty(country)));
             if (region.loyalty < target) region.loyalty = Math.min(target, region.loyalty + 0.05);
-            else if (region.loyalty > target) region.loyalty = Math.max(target, region.loyalty - 0.02);
+            else if (region.loyalty > target) region.loyalty = Math.max(target, region.loyalty - 0.03);
+            const change = Economy.populationChange(country);
+            if (change && region.population > 0) region.population = Math.max(1000, Math.round(region.population * (1 + change)));
         }
 
         // Гибель стран
@@ -944,6 +1010,24 @@ class GameData {
             events.push({ message: 'Все области суверенных стран под вашим управлением. Мировое господство достигнуто!' });
         }
         return { balances, events };
+    }
+
+    // Голод: армия разбегается, игроку — предупреждения о нехватке.
+    applyShortages(country, economy, events) {
+        const hunger = 1 - economy.sat.food;
+        if (hunger > 0.1) {
+            for (const region of this.getCountryRegions(country.id)) {
+                for (const unitId of Object.keys(UnitsDB)) {
+                    const n = region.army[unitId];
+                    if (n > 0) region.army[unitId] -= Math.min(n, Math.ceil(n * hunger * ECONOMY.HUNGER_DESERTION));
+                }
+            }
+        }
+        if (country.id !== this.playerCountry) return;
+        const pct = key => Math.round((1 - economy.sat[key]) * 100);
+        if (pct('food') >= 5) events.push({ type: 'shortage', message: `🌾 Не хватает еды (${pct('food')}%): люди голодают, армия разбегается, население убывает.` });
+        if (pct('energy') >= 5) events.push({ type: 'shortage', message: `⚡ Не хватает энергии (${pct('energy')}%): заводы выпускают меньше товаров.` });
+        if (pct('goods') >= 5) events.push({ type: 'shortage', message: `📦 Не хватает товаров (${pct('goods')}%): налоги собираются хуже, растёт недовольство.` });
     }
 
     applyDesertion(countryId) {
@@ -1045,11 +1129,18 @@ class GameData {
                 Math.round(region.loyalty * 100) / 100,
                 region.reconActiveUntil ? +new Date(region.reconActiveUntil) : 0,
                 { ...region.resources }, { ...region.development },
+                region.population,
             ];
         }
         const countries = {};
         for (const c of Object.values(this.countries)) {
-            countries[c.id] = [Math.round(c.money), c.taxRate, c.influence, c.tech, c.lastNetIncome, c.alive, c.capital, c.policy, c.policyChangedAt];
+            const stock = {}, sat = {};
+            for (const key of Object.keys(RESOURCES)) {
+                stock[key] = Math.round(((c.stock && c.stock[key]) || 0) * 10) / 10;
+                sat[key] = c.economy ? Math.round(c.economy.sat[key] * 1000) / 1000 : 1;
+            }
+            countries[c.id] = [Math.round(c.money), c.taxRate, c.influence, c.tech, c.lastNetIncome, c.alive, c.capital, c.policy, c.policyChangedAt,
+                stock, { ...(c.trade || { food: 'sell', energy: 'sell', goods: 'sell' }) }, sat];
         }
         return {
             v: 3,
@@ -1061,6 +1152,7 @@ class GameData {
             cheat: this.cheatMode,
             scenario: this.scenario,
             difficulty: this.difficulty,
+            market: { ...this.market },
             date: +this.currentDate,
             turn: this.turn,
             regions, countries,
@@ -1080,17 +1172,20 @@ class GameData {
         if (!save || save.v !== 3 || !CountriesDB[save.player]?.playable || !count(save.turn) || !finite(save.date) || !Number.isFinite(+new Date(save.date))) fail();
         if (JSON.stringify(save.units) !== JSON.stringify(Object.keys(UnitsDB))) fail();
         if (save.difficulty !== undefined && !DIFFICULTY[save.difficulty]) fail();
+        if (save.market !== undefined && !GameData.validMarket(save.market)) fail();
         if (!save.regions || !save.countries || !save.campaign || !Array.isArray(save.projects)) fail();
         if (Object.keys(save.regions).length !== Object.keys(RegionsDB).length || Object.keys(save.countries).length !== Object.keys(CountriesDB).length) fail();
         for (const id of Object.keys(RegionsDB)) {
             const r = save.regions[id];
             if (!Array.isArray(r) || !CountriesDB[r[0]] || !Array.isArray(r[1]) || r[1].length !== save.units.length || !r[1].every(count) || !finite(r[2]) || r[2] < 0 || r[2] > 1 || !finite(r[3])) fail();
             for (const key of ['industry', 'agro', 'oil']) if (!count(r[4]?.[key]) || !count(r[5]?.[key]) || r[5][key] > 5) fail();
+            if (r[6] !== undefined && !count(r[6])) fail();
         }
         for (const id of Object.keys(CountriesDB)) {
             const c = save.countries[id];
             if (!Array.isArray(c) || !finite(c[0]) || !finite(c[1]) || c[1] < 0.01 || c[1] > 0.3 || !finite(c[2]) || c[2] < 0 || c[2] > 100 || !finite(c[4]) || typeof c[5] !== 'boolean' || (c[6] !== null && (!RegionsDB[c[6]] || save.regions[c[6]][0] !== id)) || !POLICIES[c[7]] || !Number.isInteger(c[8])) fail();
             for (const key of [...save.units, 'marchSpeed']) if (!count(c[3]?.[key]) || c[3][key] < 1 || c[3][key] > (key === 'marchSpeed' ? 3 : RULES.TECH_MAX)) fail();
+            if (c[9] !== undefined && !GameData.validEconomy(c[9], c[10], c[11])) fail();
         }
         const pair = key => typeof key === 'string' && key.split('|').length === 2 && key.split('|').every(cc => CountriesDB[cc]);
         if (!Array.isArray(save.wars) || save.wars.some(x => !Array.isArray(x) || !pair(x[0]) || !count(x[1]?.start) || !CountriesDB[x[1]?.attacker])) fail();
@@ -1112,6 +1207,18 @@ class GameData {
         }
     }
 
+    // Склад, торговые настройки и обеспеченность страны (поля появились с экономикой).
+    static validEconomy(stock, trade, sat) {
+        const keys = Object.keys(RESOURCES);
+        const finite = n => typeof n === 'number' && Number.isFinite(n);
+        return !!stock && !!trade && !!sat
+            && keys.every(k => finite(stock[k]) && stock[k] >= 0 && Object.hasOwn(TRADE_MODES, trade[k]) && finite(sat[k]) && sat[k] >= 0 && sat[k] <= 1);
+    }
+
+    static validMarket(market) {
+        return !!market && Object.keys(RESOURCES).every(k => typeof market[k] === 'number' && Number.isFinite(market[k]) && market[k] > 0);
+    }
+
     static restore(save) {
         GameData.validateSave(save);
         const data = new GameData(save.player, { cheat: save.cheat, scenario: save.scenario, difficulty: save.difficulty, restoring: true });
@@ -1128,6 +1235,7 @@ class GameData {
                 region.resources = { ...saved[4] };
                 region.development = { ...saved[5] };
                 region.reconActiveUntil = saved[3] ? new Date(saved[3]) : undefined;
+                if (saved[6] !== undefined) region.population = saved[6];
             }
             data.regionsByCountry[region.owner].push(region.id);
         }
@@ -1135,6 +1243,11 @@ class GameData {
             const saved = save.countries[c.id];
             if (!saved) continue;
             [c.money, c.taxRate, c.influence, c.tech, c.lastNetIncome, c.alive, c.capital, c.policy, c.policyChangedAt] = saved;
+            if (saved[9]) {
+                c.stock = { ...saved[9] };
+                c.trade = { ...saved[10] };
+                c.economy = { money: 0, sat: { ...saved[11] }, res: {} };
+            }
         }
         data.currentDate = new Date(save.date);
         data.turn = save.turn;
@@ -1147,6 +1260,7 @@ class GameData {
         data.outcome = save.outcome;
         data.projects = structuredClone(save.projects);
         data.campaign = { ...save.campaign };
+        if (save.market) data.market = { ...save.market };
         return data;
     }
 
@@ -1189,6 +1303,7 @@ class GameData {
                 if (isObj(o[4]) && count(o[4][key])) r[4][key] = o[4][key];
                 if (isObj(o[5]) && count(o[5][key])) r[5][key] = Math.min(5, o[5][key]);
             }
+            if (count(o[6]) && o[6] > 0) r[6] = o[6];
         }
 
         const owned = {};
@@ -1207,6 +1322,7 @@ class GameData {
                 if (RegionsDB[o[6]]) c[6] = o[6];
                 if (POLICIES[o[7]]) c[7] = o[7];
                 if (Number.isInteger(o[8])) c[8] = o[8];
+                if (GameData.validEconomy(o[9], o[10], o[11])) { c[9] = { ...o[9] }; c[10] = { ...o[10] }; c[11] = { ...o[11] }; }
             }
             // столица — только своя область, иначе самая населённая из своих
             const mine = owned[id] || [];
@@ -1228,6 +1344,7 @@ class GameData {
         save.gameOver = !!old.gameOver;
         save.outcome = ['victory', 'defeat'].includes(old.outcome) ? old.outcome : null;
         if (isObj(old.orders)) save.orders = old.orders;
+        if (GameData.validMarket(old.market)) save.market = { ...old.market };
 
         try {
             GameData.validateSave(save);
