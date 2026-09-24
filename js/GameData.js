@@ -71,11 +71,15 @@ class GameData {
         this.market = Economy.initMarket();   // текущие цены мирового рынка
         this.campaign = { budget: false, investment: false, recruited: false, diplomacy: false, conquest: false };
 
+        Diplomacy.init(this);
+        Missions.init(this);
+        this.diploEvents = [];      // что случилось в дипломатии между отчётами хода
         this.build();
         if (!options.restoring) {
             this.setupScenario();
             const player = this.countries[playerCountryId];
             if (player) player.money = Math.round(player.money * DIFFICULTY[this.difficulty].playerMoney);
+            if (player && player.playable) Missions.refill(this);
         }
     }
 
@@ -258,6 +262,10 @@ class GameData {
         this.regionsByCountry[newOwner].push(regionId);
         region.owner = newOwner;
         if (newOwner === this.playerCountry && region.originalOwner !== newOwner) this.campaign.conquest = true;
+        if (this.countries[old] && this.isAtWar(newOwner, old)) {
+            Diplomacy.onConquest(this, newOwner, old);
+            if (newOwner === this.playerCountry) Missions.bump(this, 'conquered');
+        }
     }
 
     // --- армия и сила ----------------------------------------------------
@@ -349,6 +357,9 @@ class GameData {
         if (this.isAtWar(attacker, target)) return { ok: false, reason: 'Война уже идёт' };
         const truce = this.truceLeft(attacker, target);
         if (truce) return { ok: false, reason: `Перемирие: ещё ${truce} ход.` };
+        const pact = Diplomacy.pactLeft(this, attacker, target);
+        if (pact) return { ok: false, reason: `Пакт о ненападении: ещё ${pact} ход. Сначала разорвите пакт` };
+        if (Diplomacy.isAllied(this, attacker, target)) return { ok: false, reason: 'Это ваш союзник — сначала разорвите союз' };
         if (a.influence < RULES.WAR_COST) return { ok: false, reason: `Нужно ${RULES.WAR_COST} влияния` };
         return { ok: true };
     }
@@ -357,19 +368,42 @@ class GameData {
         const check = this.canDeclareWar(attacker, target);
         if (!check.ok) return check;
         this.countries[attacker].influence -= RULES.WAR_COST;
-        this.startWar(attacker, target, false);
-        return { ok: true };
+        const joined = this.startWar(attacker, target, false);
+        return { ok: true, joined };
     }
 
     startWar(attacker, target) {
         this.wars.set(this.pairKey(attacker, target), { start: this.turn, attacker });
         this.truces.delete(this.pairKey(attacker, target));
+        const joined = Diplomacy.onWar(this, attacker, target);
+        const p = this.playerCountry, name = cc => this.countries[cc].name;
+        for (const ally of joined) {
+            if (ally === p) this.diploEvents.push({ type: 'alliance', message: `🛡️ ${name(attacker)} напала на вашего союзника ${name(target)} — по договору вы вступили в войну.` });
+            else if (target === p) this.diploEvents.push({ type: 'alliance', message: `🛡️ Союзник ${name(ally)} вступил в войну на вашей стороне против ${name(attacker)}.` });
+            else if (attacker === p) this.diploEvents.push({ type: 'alliance', message: `🛡️ ${name(ally)}, союзник ${name(target)}, объявил вам войну.` });
+        }
+        return joined;
+    }
+
+    // Дипломатия игрока из карточки страны и окна «Дипломатия».
+    diplomacyAction(target, action) {
+        const p = this.playerCountry;
+        if (this.gameOver || !this.countries[target] || target === p) return { ok: false, reason: 'Нельзя' };
+        let result;
+        if (action === 'gift') result = Diplomacy.gift(this, p, target);
+        else if (action === 'tribute') result = Diplomacy.demandTribute(this, p, target);
+        else if (['deal', 'pact', 'alliance'].includes(action)) result = Diplomacy.propose(this, p, target, action);
+        else if (action.startsWith('cancel-')) result = { ok: Diplomacy.cancel(this, p, target, action.slice(7)), reason: 'Договора нет' };
+        else return { ok: false, reason: 'Неизвестное действие' };
+        if (result.ok && action === 'deal' && result.accepted) Missions.bump(this, 'deals');
+        return result;
     }
 
     makePeace(a, b) {
         const key = this.pairKey(a, b);
         this.wars.delete(key);
         this.truces.set(key, this.turn + RULES.TRUCE_TURNS);
+        Diplomacy.onPeace(this, a, b);
         // приказы на атаку между бывшими врагами теряют смысл
         for (let i = this.orders.attacks.length - 1; i >= 0; i--) {
             const o = this.orders.attacks[i], target = this.regions[o.to];
@@ -511,7 +545,10 @@ class GameData {
         if (country.money < cost) return { ok: false, reason: 'Недостаточно средств' };
 
         country.money -= cost;
-        if (countryId === this.playerCountry) this.campaign.recruited = true;
+        if (countryId === this.playerCountry) {
+            this.campaign.recruited = true;
+            Missions.bump(this, 'recruited', amount);
+        }
         this.orders.recruitment.push({
             country: countryId, regionId, unitId, amount, cost,
             text: `[Набор] ${region.name}: +${amount} ${unit.name}`,
@@ -553,6 +590,7 @@ class GameData {
         if (country.money < cost) return { ok: false, reason: 'Недостаточно средств' };
         country.money -= cost;
         country.tech[unitId] = (country.tech[unitId] || 1) + 1;
+        if (countryId === this.playerCountry) Missions.bump(this, 'modernized');
         return { ok: true };
     }
 
@@ -589,6 +627,7 @@ class GameData {
             Tech.grant(country, country.research.id);
             country.research = null;
             if (country.id !== this.playerCountry) continue;
+            Missions.bump(this, 'techs');
             const unit = tech.unlocks ? UnitsDB[tech.unlocks] : null;
             events.push({ type: 'tech', message: `🔬 Исследование завершено: ${tech.icon} ${tech.name}.`
                 + (unit ? ` Открыт новый род войск — ${unit.icon} ${unit.name}: набирайте в своих областях.` : ` ${tech.text}`) });
@@ -656,6 +695,10 @@ class GameData {
         if (!list || !Number.isInteger(index) || index < 0 || index >= list.length) return null;
         const [order] = list.splice(index, 1);
         const refund = (type === 'recon' || type === 'recruitment') ? order.cost : (order.transportCost || 0);
+        // отменённый набор не засчитывается в задание «наберите войска»
+        if (type === 'recruitment' && order.country === this.playerCountry) {
+            this.stats.recruited = Math.max(0, (this.stats.recruited || 0) - order.amount);
+        }
         if (order.transportInfluence) this.countries[order.country].influence = Math.min(RULES.INFLUENCE_MAX, this.countries[order.country].influence + order.transportInfluence);
         if (refund) this.countries[order.country].money += refund;
         return order;
@@ -852,6 +895,7 @@ class GameData {
             message = `${attackerName}: наступление на ${target.name} (${defenderName}) отбито.`;
         }
 
+        if ((attacker === this.playerCountry && success) || (defender === this.playerCountry && !success)) Missions.bump(this, 'battlesWon');
         return {
             success: attacker === this.playerCountry ? success : !success,
             message,
@@ -924,7 +968,10 @@ class GameData {
             const plan = DEVELOPMENT[project.kind];
             region.resources[plan.resource] += plan.gain;
             region.development[project.kind]++;
-            if (project.country === this.playerCountry) events.push({ message: `${region.name}: завершён проект «${plan.name}».` });
+            if (project.country === this.playerCountry) {
+                events.push({ message: `${region.name}: завершён проект «${plan.name}».` });
+                Missions.bump(this, 'projects');
+            }
         }
         this.projects = pending;
         return events;
@@ -979,9 +1026,12 @@ class GameData {
         }
         tax *= Economy.taxFactor(country) * Tech.factor(country, 'tax');
         const trade = Economy.projectTrade(this, countryId);
+        // торговые договоры: продаём дороже, покупаем дешевле
+        const bonus = Diplomacy.tradeBonus(this, countryId);
+        const sales = trade.sales * (1 + bonus), purchases = trade.purchases * (1 - bonus);
         return {
-            income: tax + trade.sales, expense: upkeep + social + trade.purchases,
-            tax, sales: trade.sales, purchases: trade.purchases, upkeep, social, trade,
+            income: tax + sales, expense: upkeep + social + purchases,
+            tax, sales, purchases, upkeep, social, trade, tradeBonus: bonus,
         };
     }
 
@@ -998,6 +1048,7 @@ class GameData {
     applyEndOfTurn() {
         const events = this.processProjects();
         this.processResearch(events);
+        Diplomacy.endTurn(this, events);
         const balances = {};
         const markets = Economy.runMarkets(this);
 
@@ -1007,9 +1058,11 @@ class GameData {
             if (economy) country.economy = economy;
             const balance = this.countryBalance(country.id);
             // вместо прогноза торговли — то, что реально продано и куплено
-            const tradeMoney = economy ? economy.money : 0;
-            balance.sales = Math.max(0, tradeMoney);
-            balance.purchases = Math.max(0, -tradeMoney);
+            let sales = 0, purchases = 0;
+            if (economy) for (const r of Object.values(economy.res)) { sales += r.sold * r.price; purchases += r.bought * r.price; }
+            const bonus = Diplomacy.tradeBonus(this, country.id);
+            balance.sales = Math.round(sales * (1 + bonus));
+            balance.purchases = Math.round(purchases * (1 - bonus));
             balance.income = balance.tax + balance.sales;
             balance.expense = balance.upkeep + balance.social + balance.purchases;
             balances[country.id] = balance;
@@ -1198,6 +1251,9 @@ class GameData {
             scenario: this.scenario,
             difficulty: this.difficulty,
             market: { ...this.market },
+            diplomacy: Diplomacy.serialize(this),
+            missions: this.missions.map(m => ({ ...m, reward: { ...m.reward } })),
+            stats: { ...this.stats },
             date: +this.currentDate,
             turn: this.turn,
             regions, countries,
@@ -1218,6 +1274,8 @@ class GameData {
         if (JSON.stringify(save.units) !== JSON.stringify(Object.keys(UnitsDB))) fail();
         if (save.difficulty !== undefined && !DIFFICULTY[save.difficulty]) fail();
         if (save.market !== undefined && !GameData.validMarket(save.market)) fail();
+        if (save.diplomacy !== undefined && !Diplomacy.valid(save.diplomacy)) fail();
+        if (save.missions !== undefined && !Missions.valid(save.missions, save.stats)) fail();
         if (!save.regions || !save.countries || !save.campaign || !Array.isArray(save.projects)) fail();
         if (Object.keys(save.regions).length !== Object.keys(RegionsDB).length || Object.keys(save.countries).length !== Object.keys(CountriesDB).length) fail();
         for (const id of Object.keys(RegionsDB)) {
@@ -1236,7 +1294,7 @@ class GameData {
         const pair = key => typeof key === 'string' && key.split('|').length === 2 && key.split('|').every(cc => CountriesDB[cc]);
         if (!Array.isArray(save.wars) || save.wars.some(x => !Array.isArray(x) || !pair(x[0]) || !count(x[1]?.start) || !CountriesDB[x[1]?.attacker])) fail();
         if (!Array.isArray(save.truces) || save.truces.some(x => !Array.isArray(x) || !pair(x[0]) || !count(x[1]))) fail();
-        if (!Array.isArray(save.decisions) || save.decisions.some(x => x.type !== 'peace' || !CountriesDB[x.from])) fail();
+        if (!Array.isArray(save.decisions) || save.decisions.some(x => !GameData.DECISIONS.includes(x.type) || !CountriesDB[x.from])) fail();
         if (!Array.isArray(save.history) || save.history.some(t => typeof t.date !== 'string' || !Array.isArray(t.logs) || !t.financial || !['income','expense','net'].every(k => finite(t.financial[k])))) fail();
         if (save.projects.some(p => !RegionsDB[p.regionId] || !CountriesDB[p.country] || !DEVELOPMENT[p.kind] || !count(p.remaining) || p.remaining < 1 || !count(p.cost))) fail();
         if (!save.orders || !['recruitment','recon','movements','attacks'].every(k => Array.isArray(save.orders[k]))) fail();
@@ -1251,6 +1309,12 @@ class GameData {
                 }
             }
         }
+    }
+
+    takeDiploEvents() {
+        const events = this.diploEvents;
+        this.diploEvents = [];
+        return events;
     }
 
     // Склад, торговые настройки и обеспеченность страны (поля появились с экономикой).
@@ -1323,6 +1387,9 @@ class GameData {
         data.projects = structuredClone(save.projects);
         data.campaign = { ...save.campaign };
         if (save.market) data.market = { ...save.market };
+        if (save.diplomacy) Object.assign(data, structuredClone(save.diplomacy));
+        if (save.missions) { data.missions = structuredClone(save.missions); data.stats = { ...save.stats }; }
+        else Missions.refill(data);
         return data;
     }
 
@@ -1400,7 +1467,9 @@ class GameData {
         if (finite(old.date) && Number.isFinite(+new Date(old.date))) save.date = old.date;
         if (Array.isArray(old.wars)) save.wars = old.wars.filter(x => Array.isArray(x) && pair(x[0]) && count(x[1]?.start) && CountriesDB[x[1]?.attacker]);
         if (Array.isArray(old.truces)) save.truces = old.truces.filter(x => Array.isArray(x) && pair(x[0]) && count(x[1]));
-        if (Array.isArray(old.decisions)) save.decisions = old.decisions.filter(x => x && x.type === 'peace' && CountriesDB[x.from]);
+        if (Array.isArray(old.decisions)) save.decisions = old.decisions.filter(x => x && GameData.DECISIONS.includes(x.type) && CountriesDB[x.from]);
+        if (Diplomacy.valid(old.diplomacy)) save.diplomacy = structuredClone(old.diplomacy);
+        if (Missions.valid(old.missions, old.stats)) { save.missions = structuredClone(old.missions); save.stats = { ...old.stats }; }
         if (Array.isArray(old.history)) save.history = old.history.filter(t => t && typeof t.date === 'string' && Array.isArray(t.logs) && t.financial && ['income', 'expense', 'net'].every(k => finite(t.financial[k])));
         if (Array.isArray(old.projects)) save.projects = old.projects.filter(p => p && RegionsDB[p.regionId] && CountriesDB[p.country] && DEVELOPMENT[p.kind] && count(p.remaining) && p.remaining >= 1 && count(p.cost));
         if (isObj(old.campaign)) for (const key of Object.keys(save.campaign)) save.campaign[key] = !!old.campaign[key];
@@ -1419,3 +1488,6 @@ class GameData {
         return save;
     }
 }
+
+// Предложения, которые ждут ответа игрока.
+GameData.DECISIONS = ['peace', 'deal', 'pact', 'alliance'];

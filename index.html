@@ -519,8 +519,8 @@ body { overscroll-behavior: none; }
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Exo+2:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;700&display=swap">
-<link rel="stylesheet" href="css/campaign.css?v=92c1697601">
-<link rel="stylesheet" href="css/theme.css?v=563f50ce6d">
+<link rel="stylesheet" href="css/campaign.css?v=fe17f3ba7c">
+<link rel="stylesheet" href="css/theme.css?v=7a73b8773f">
 <link rel="stylesheet" href="css/map.css?v=067de1c831">
 <link rel="stylesheet" href="css/start.css?v=0dd37db050">
 </head>
@@ -662,7 +662,7 @@ body { overscroll-behavior: none; }
         </div>
         <div class="stat-group" id="action-bar">
             <button id="diplo-btn" class="top-btn nav-btn"><span class="ico">🤝</span><span class="lbl">Дипломатия</span><span id="war-badge" class="war-badge"></span></button>
-            <button id="campaign-btn" class="top-btn nav-btn"><span class="ico">🎯</span><span class="lbl">Кампания</span><small id="campaign-count"></small></button>
+            <button id="campaign-btn" class="top-btn nav-btn"><span class="ico">🎯</span><span class="lbl">Задания</span><span id="campaign-count" class="mission-badge"></span></button>
             <button id="sci-btn" class="top-btn nav-btn"><span class="ico">🔬</span><span class="lbl">Наука</span><span id="sci-badge" class="sci-badge"></span></button>
             <button id="gov-btn" class="top-btn nav-btn warning"><span class="ico">🏛️</span><span class="lbl">Правительство</span></button>
             <button id="end-turn-btn" class="top-btn nav-btn primary"><span class="ico">⏭️</span><span class="lbl">Конец хода</span></button>
@@ -691,7 +691,7 @@ body { overscroll-behavior: none; }
     </div>
 
     <div id="campaign-modal" class="modal ui-element" role="dialog" aria-modal="true" aria-labelledby="campaign-title">
-        <div class="modal-content"><div class="modal-header"><h2 id="campaign-title">Ваша кампания</h2><button class="close-btn" id="close-campaign-btn" aria-label="Закрыть кампанию">✕</button></div>
+        <div class="modal-content"><div class="modal-header"><h2 id="campaign-title">Задания</h2><button class="close-btn" id="close-campaign-btn" aria-label="Закрыть задания">✕</button></div>
         <div class="modal-body"><div id="campaign-content"></div><button id="log-btn" class="top-btn">Журнал событий</button></div></div>
     </div>
     <!-- ВЫБОР ЦЕЛИ СПИСКОМ -->
@@ -877,13 +877,15 @@ body { overscroll-behavior: none; }
 <!-- Движок -->
 <script src="js/UnitsDB.js?v=8ed53808f1"></script>
 <script src="js/Tech.js?v=0dac26024b"></script>
-<script src="js/Economy.js?v=b80700a203"></script>
-<script src="js/GameData.js?v=f1653d9a22"></script>
-<script src="js/AI.js?v=9577cb414d"></script>
+<script src="js/Economy.js?v=0c8e41fcbf"></script>
+<script src="js/Diplomacy.js?v=326a5657e9"></script>
+<script src="js/Missions.js?v=fe83f7c237"></script>
+<script src="js/GameData.js?v=e30469e6f6"></script>
+<script src="js/AI.js?v=cf9f02fc04"></script>
 <script src="js/MapEngine.js?v=5e2af0e070"></script>
-<script src="js/UIManager.js?v=193b709969"></script>
-<script src="js/GameLoop.js?v=ea389ee9e2"></script>
-<script src="js/Tutorial.js?v=ca91505373"></script>
-<script src="js/main.js?v=b539934436"></script>
+<script src="js/UIManager.js?v=f8ad6682bb"></script>
+<script src="js/GameLoop.js?v=e417884ddb"></script>
+<script src="js/Tutorial.js?v=53ff18fd7f"></script>
+<script src="js/main.js?v=cc76979293"></script>
 </body>
 </html>

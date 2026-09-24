@@ -156,7 +156,7 @@ class GameLoop {
             date: this.formatDate(d.currentDate),
             financial: { income: player.income, expense: player.expense, net: player.income - player.expense },
             logs,
-            events: [...events, ...diplomacy].map(e => e.message),
+            events: [...events, ...diplomacy, ...d.takeDiploEvents(), ...Missions.update(d)].map(e => e.message),
             worldBattles,
         };
         d.saveTurnHistory(turnData);
@@ -189,29 +189,41 @@ class GameLoop {
         const next = d.decisions[0];
         if (!next) { this.revealChanges(); return; }
         const from = d.countries[next.from];
-        if (next.type !== 'peace' || !from?.alive || !d.isAtWar(next.from, d.playerCountry)) {
+        const finish = accept => {
+            if (accept) accept();
             d.decisions.shift();
-            SaveGame.save(d);
-            this.afterSummary();
-            return;
-        }
-        const info = d.warInfo(d.playerCountry, next.from);
-        const finish = accepted => {
-            if (accepted) {
-                d.makePeace(d.playerCountry, next.from);
-                this.map.refreshColors();
-                this.ui.toast(`Мир с ${from.name} заключён`);
-            }
-            d.decisions.shift();
-            this.updateTopBarUI();
+            if (accept) { this.map.refreshColors(); this.updateTopBarUI(); }
             SaveGame.save(d);
             this.afterSummary();
         };
+        const valid = from?.alive && (next.type === 'peace' ? d.isAtWar(next.from, d.playerCountry) : !d.isAtWar(next.from, d.playerCountry));
+        if (!valid) { finish(null); return; }
+        if (next.type === 'peace') {
+            const info = d.warInfo(d.playerCountry, next.from);
+            this.ui.showDecision({
+                title: `${from.name} предлагает мир`,
+                text: `Война идёт ${info.turns} ход. Вы заняли областей: ${info.taken}, потеряли: ${info.lost}. Мир сохранит текущие границы. Перемирие: ${RULES.TRUCE_TURNS} ходов.`,
+                accept: 'Заключить мир', decline: 'Продолжить войну',
+                onAccept: () => finish(() => { d.makePeace(d.playerCountry, next.from); this.ui.toast(`Мир с ${from.name} заключён`); }),
+                onDecline: () => finish(null),
+            });
+            return;
+        }
+        const texts = {
+            deal: ['торговый договор', `Ваши продажи на рынке станут на ${Math.round(DIPLOMACY.DEAL_BONUS * 100)}% дороже, закупки — дешевле (до ${DIPLOMACY.DEAL_MAX} договоров). Отношения улучшатся.`],
+            pact: ['пакт о ненападении', `${DIPLOMACY.PACT_TURNS} ходов ни вы, ни они не сможете объявить войну друг другу.`],
+            alliance: ['оборонительный союз', 'Если на одного из вас нападут, второй вступит в войну против нападающего. Напасть на союзника нельзя.'],
+        }[next.type];
         this.ui.showDecision({
-            title: `${from.name} предлагает мир`,
-            text: `Война идёт ${info.turns} ход. Вы заняли областей: ${info.taken}, потеряли: ${info.lost}. Мир сохранит текущие границы. Перемирие: ${RULES.TRUCE_TURNS} ходов.`,
-            accept: 'Заключить мир', decline: 'Продолжить войну',
-            onAccept: () => finish(true), onDecline: () => finish(false),
+            title: `${from.name} предлагает ${texts[0]}`,
+            text: `${texts[1]} Отношения сейчас: ${Diplomacy.relation(d, d.playerCountry, next.from)}.`,
+            accept: 'Согласиться', decline: 'Отказаться',
+            onAccept: () => finish(() => {
+                Diplomacy.sign(d, d.playerCountry, next.from, next.type);
+                if (next.type === 'deal') Missions.bump(d, 'deals');
+                this.ui.toast(`${from.name}: подписан ${texts[0]}`);
+            }),
+            onDecline: () => finish(() => Diplomacy.changeRelation(d, d.playerCountry, next.from, DIPLOMACY.DECLINE_RELATION)),
         });
     }
 
@@ -244,9 +256,12 @@ class GameLoop {
         this.ui.updateScienceBadge(this.data);
         document.getElementById('glob-date').textContent = this.formatDate(this.data.currentDate);
 
-        const progress = this.data.campaignProgress();
-        const campaignLabel = document.getElementById('campaign-count');
-        if (campaignLabel) campaignLabel.textContent = `${progress.controlled}/${progress.total}`;
+        const ready = Missions.readyCount(this.data);
+        const missionBadge = document.getElementById('campaign-count');
+        if (missionBadge) {
+            missionBadge.textContent = ready;
+            missionBadge.classList.toggle('visible', ready > 0);
+        }
         const wars = this.data.enemiesOf(this.data.playerCountry).length;
         const badge = document.getElementById('war-badge');
         if (badge) {

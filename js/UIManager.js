@@ -218,29 +218,93 @@ class UIManager {
         return `<h3 class="section-title">${title}</h3><div class="army-list">${rows}</div>`;
     }
 
-    // Кнопки войны и мира. Если действие недоступно — показываем почему.
+    // Шкала отношений −100…+100 и действующие договоры.
+    relationMeter(data, countryId) {
+        const player = data.playerCountry;
+        const rel = Diplomacy.relation(data, player, countryId);
+        const [, label, cls] = Diplomacy.level(rel);
+        const pact = Diplomacy.pactLeft(data, player, countryId);
+        const treaties = [
+            Diplomacy.isAllied(data, player, countryId) ? this.tag('🛡️ Союз', 'peace') : '',
+            Diplomacy.hasDeal(data, player, countryId) ? this.tag('🤝 Торговля', 'peace') : '',
+            pact ? this.tag(`📜 Пакт ${pact} ход.`, 'truce') : '',
+        ].join('');
+        return `<div class="relation">
+            <div class="relation-head"><span class="label">Отношения</span><b class="${cls}">${rel > 0 ? '+' : ''}${rel} · ${label}</b></div>
+            <div class="relation-bar"><span style="left:${(rel + 100) / 2}%"></span></div>
+            ${treaties ? `<div class="treaties">${treaties}</div>` : ''}
+        </div>`;
+    }
+
+    // Все дипломатические действия со страной. Недоступное — с причиной;
+    // для предложений заранее видно, согласятся ли.
     diplomacyButtons(data, countryId) {
         const player = data.playerCountry;
         if (countryId === player) return '';
         const target = data.countries[countryId];
         if (!target.playable) return '<div class="hint">Территория без собственного правительства.</div>';
+        const me = data.countries[player];
+        const meter = this.relationMeter(data, countryId);
 
         if (data.isAtWar(player, countryId)) {
             const info = data.warInfo(player, countryId);
-            const can = data.countries[player].influence >= RULES.PEACE_COST;
-            return `
+            const can = me.influence >= RULES.PEACE_COST;
+            return `${meter}
                 <div class="war-summary">Война идёт ${info.turns} ход. · заняли ${info.taken} · потеряли ${info.lost}</div>
                 <button class="action-btn peace" data-action="peace" data-country="${countryId}" ${can ? '' : 'disabled'}>
                     🕊️ Предложить мир <small>−${RULES.PEACE_COST} влияния</small>
                 </button>
                 ${can ? '' : `<div class="hint">Нужно ${RULES.PEACE_COST} влияния.</div>`}`;
         }
+
+        const row = (action, icon, name, cost, note, ok, cls = '') => `
+            <button class="diplo-act ${cls}" data-action="${action}" data-country="${countryId}" ${ok ? '' : 'disabled'}>
+                <span class="da-icon">${icon}</span>
+                <span class="da-text"><b>${name}</b><small class="${ok ? '' : 'neg'}">${note}</small></span>
+                <span class="da-cost">${cost}</span>
+            </button>`;
+        const infl = n => `${n} 🔷`;
+        const offer = (kind, icon, name, cost, benefit) => {
+            const answer = Diplomacy.willAccept(data, countryId, player, kind);
+            if (me.influence < cost) return row(kind, icon, name, infl(cost), `Нужно ${cost} влияния`, false);
+            return row(kind, icon, name, infl(cost), answer.likely ? `${benefit} · согласятся` : answer.reason, answer.likely);
+        };
+        const cancel = (kind, icon, name) => row(`cancel-${kind}`, icon, name, '', `Отношения ${DIPLOMACY.BREAK_RELATION}`, true, 'ghost');
+
+        const giftCost = Diplomacy.giftCost(data, countryId);
+        let html = row('gift', '🎁', 'Подарок', this.money(giftCost), 'Улучшает отношения', me.money >= giftCost);
+
+        if (Diplomacy.hasDeal(data, player, countryId)) html += cancel('deal', '🤝', 'Расторгнуть торговый договор');
+        else if (Diplomacy.dealCount(data, player) >= DIPLOMACY.DEAL_MAX) html += row('deal', '🤝', 'Торговый договор', infl(DIPLOMACY.DEAL_COST), `Уже ${DIPLOMACY.DEAL_MAX} договора — это максимум`, false);
+        else html += offer('deal', '🤝', 'Торговый договор', DIPLOMACY.DEAL_COST, `+${Math.round(DIPLOMACY.DEAL_BONUS * 100)}% к торговле`);
+
+        if (Diplomacy.pactLeft(data, player, countryId)) html += cancel('pact', '📜', 'Разорвать пакт');
+        else html += offer('pact', '📜', 'Пакт о ненападении', DIPLOMACY.PACT_COST, `${DIPLOMACY.PACT_TURNS} ходов без войны`);
+
+        if (Diplomacy.isAllied(data, player, countryId)) html += cancel('alliance', '🛡️', 'Выйти из союза');
+        else html += offer('alliance', '🛡️', 'Оборонительный союз', DIPLOMACY.ALLIANCE_COST, 'Защищаете друг друга');
+
+        const tribute = Diplomacy.willAccept(data, countryId, player, 'tribute');
+        const tributeNote = me.influence < DIPLOMACY.TRIBUTE_COST ? `Нужно ${DIPLOMACY.TRIBUTE_COST} влияния`
+            : tribute.likely ? `Заплатят ${this.money(Diplomacy.tributeAmount(data, countryId))} · отношения ${DIPLOMACY.TRIBUTE_RELATION}` : tribute.reason;
+        html += row('tribute', '💰', 'Потребовать дань', infl(DIPLOMACY.TRIBUTE_COST), tributeNote,
+            tribute.likely && me.influence >= DIPLOMACY.TRIBUTE_COST && !Diplomacy.isAllied(data, player, countryId));
+
         const check = data.canDeclareWar(player, countryId);
-        return `
+        return `${meter}<div class="diplo-acts">${html}</div>
             <button class="action-btn war" data-action="war" data-country="${countryId}" ${check.ok ? '' : 'disabled'}>
                 ⚔️ Объявить войну <small>−${RULES.WAR_COST} влияния</small>
             </button>
             ${check.ok ? '' : `<div class="hint">${this.escape(check.reason)}</div>`}`;
+    }
+
+    // В карточке страны дипломатия — главное, она сразу под заголовком;
+    // в карточке области — под гарнизоном.
+    placeDiplomacy(top) {
+        const block = document.getElementById('diplo-actions');
+        const anchor = document.getElementById(top ? 'panel-tags' : 'region-army-container');
+        if (anchor.nextElementSibling !== block) anchor.after(block);
+        block.classList.toggle('top', top);
     }
 
     resetPanelSections() {
@@ -271,6 +335,7 @@ class UIManager {
             + (seeArmy ? this.armyList(stats.army, 'Вооружённые силы', false)
                 : '<div class="hint">Точный состав армии известен только своих войск и противников.</div>');
 
+        this.placeDiplomacy(true);
         document.getElementById('diplo-actions').innerHTML = this.diplomacyButtons(data, country.id);
         document.getElementById('development-panel').innerHTML = '';
         document.getElementById('action-buttons-container').style.display = 'none';
@@ -324,6 +389,7 @@ class UIManager {
                 </div>`;
         }
         document.getElementById('region-army-container').innerHTML = html;
+        this.placeDiplomacy(false);
         document.getElementById('diplo-actions').innerHTML = isOwner ? '' : this.diplomacyButtons(data, region.owner);
         document.getElementById('action-buttons-container').style.display = isOwner ? 'block' : 'none';
         this.resetPanelSections();
@@ -546,34 +612,76 @@ class UIManager {
         container.innerHTML = html;
     }
 
+    // Задания: три цели с наградой. Выполнил — забрал деньги и влияние,
+    // на место приходит новое. Сверху — путь к победе.
     showCampaign(data) {
         this.closePanel();
-        const p = data.campaignProgress(), c = data.campaign;
-        const balance = data.countryBalance(data.playerCountry);
-        const steps = [
-            ['Бюджет государства', 'Выберите налог и политический курс.', c.budget, 'campaign-budget', 'Открыть'],
-            ['Развитие экономики', 'Закажите первый проект в своей области.', c.investment, 'campaign-invest', 'Развивать'],
-            ['Подготовка армии', 'Наберите войска в пределах бюджета.', c.recruited, 'campaign-recruit', 'Набрать'],
-            ['Внешняя политика', 'Сравните соседей. Объявите войну, когда готовы.', c.diplomacy, 'campaign-diplomacy', 'Соседи'],
-            ['Первое завоевание', 'Отправьте армию в соседнюю область противника.', c.conquest, 'campaign-region', 'На карту'],
-        ];
+        Missions.refill(data);
+        const p = data.campaignProgress();
+        const me = data.countries[data.playerCountry];
+        const cats = { army: 'Армия', economy: 'Экономика', science: 'Наука', people: 'Население', diplomacy: 'Дипломатия' };
+        const shown = (m, value, target) => {
+            if (m.value === 'money') return `${this.money(value)} / ${this.money(target)}`;
+            if (m.value === 'population') return `${this.formatNumber(value)} / ${this.formatNumber(target)}`;
+            if (m.value === 'surplus') return value ? 'хватает' : 'докупаете';
+            if (m.value === 'relation') return `${value > 0 ? '+' : ''}${value} / +${target}`;
+            return `${Math.max(0, value)} / ${target}`;
+        };
+        const cards = data.missions.map((m, i) => {
+            const kind = MISSION_KINDS[m.kind];
+            const pr = Missions.progress(data, m);
+            const reward = `+${this.money(m.reward.money)} · +${m.reward.influence} 🔷`;
+            const buttons = pr.done
+                ? `<button class="mini-btn peace claim" data-action="mission-claim" data-index="${i}">Забрать награду</button>`
+                : `<button class="mini-btn" data-action="mission-go" data-index="${i}">Перейти</button>
+                   <button class="mini-btn ghost" data-action="mission-skip" data-index="${i}" ${me.influence >= MISSION_RULES.SKIP_COST ? '' : 'disabled'}>Сменить · ${MISSION_RULES.SKIP_COST} 🔷</button>`;
+            return `<div class="mission ${pr.done ? 'done' : ''}">
+                <div class="mission-head"><span class="mission-icon">${kind.icon}</span>
+                    <div><span class="label">${cats[kind.cat]}</span><b>${this.escape(m.text)}</b></div></div>
+                <div class="mission-bar"><span style="width:${Math.round(pr.share * 100)}%"></span></div>
+                <div class="mission-meta"><span>${pr.done ? '✓ Выполнено' : shown(m, pr.value, pr.target)}</span><span class="mission-reward">${reward}</span></div>
+                <div class="mission-actions">${buttons}</div>
+            </div>`;
+        }).join('');
         document.getElementById('campaign-content').innerHTML = `
-            <div class="campaign-hero"><h3>${p.rank}</h3><strong>${p.controlled} / ${p.total}</strong><p>областей суверенных стран под вашим управлением · ${(p.share * 100).toFixed(1)}%</p><progress value="${p.controlled}" max="${p.total}" aria-label="Мировое господство"></progress><p>Победа — контроль всех этих областей. Укрепляйте экономику, удерживайте лояльность и расширяйте влияние.</p></div>
-            <div class="budget-row"><span>Прогноз на неделю</span><b class="${balance.income >= balance.expense ? 'pos' : 'neg'}">${this.money(balance.income - balance.expense)}</b></div>
-            <h3 class="section-title">Первые шаги</h3>
-            ${steps.map(([name, sub, done, action, label], i) => `<div class="campaign-step ${done ? 'done' : ''}"><span class="step-number">${i + 1}</span><div><b>${name}${done ? ' · выполнено' : ''}</b><small>${sub}</small></div><button class="mini-btn" data-action="${action}">${label}</button></div>`).join('')}
-            <h3 class="section-title">Ваши области</h3><label class="sr-only" for="owned-region-select">Выбрать область</label><select id="owned-region-select">${data.getCountryRegions(data.playerCountry).map(r => `<option value="${r.id}">${this.escape(r.name)} · лояльность ${Math.round(r.loyalty * 100)}%</option>`).join('')}</select><button class="mini-btn" data-action="campaign-region">Открыть область</button>
-            <p class="hint">Для океанских походов изучите «Глобальную логистику» в «Науке». Экспедиция: $500K + $25K за подразделение и 5 влияния. Территории без правительства интегрируются за $500K и 10 влияния при общей границе.</p><p class="hint">Активных строек: ${data.projects.filter(x => x.country === data.playerCountry).length}. Нажмите область на карте для набора, строительства или марша.</p>`;
+            <p class="hint">Выполняйте задания — за каждое платят деньгами и влиянием. Влияние нужно для договоров, войны и мира. Забранное задание сразу сменяется новым.</p>
+            <div class="missions">${cards || '<div class="muted">Новых заданий пока нет.</div>'}</div>
+            <p class="hint">Выполнено заданий: ${data.stats.missions || 0}. Неподходящее задание можно сменить; ставшее невыполнимым (например, война закончилась) сменится само в конце хода.</p>
+            <div class="campaign-hero"><h3>${p.rank}</h3><strong>${p.controlled} / ${p.total}</strong><p>областей суверенных стран под вашим управлением · ${(p.share * 100).toFixed(1)}%</p><progress value="${p.controlled}" max="${p.total}" aria-label="Мировое господство"></progress><p>Победа — контроль всех этих областей.</p></div>`;
         this.showModal('campaign-modal');
     }
 
     // --- дипломатия ----------------------------------------------------------------------------
+    // Сводка: войны, союзники и договоры, соседи и крупные державы. Строка
+    // страны открывает её карточку — там все действия.
     showDiplomacy(data) {
         const player = data.playerCountry;
         const me = data.countries[player];
         const name = cc => this.escape(data.countries[cc].name);
+        const myPower = Math.max(1, data.calculateMilitaryPower(player));
+        const rel = cc => {
+            const v = Diplomacy.relation(data, player, cc);
+            const [, label, cls] = Diplomacy.level(v);
+            return `<span class="rel-chip ${cls}">${v > 0 ? '+' : ''}${v} · ${label}</span>`;
+        };
+        const marks = cc => [
+            Diplomacy.isAllied(data, player, cc) ? '🛡️ союз' : '',
+            Diplomacy.hasDeal(data, player, cc) ? '🤝 торговля' : '',
+            Diplomacy.pactLeft(data, player, cc) ? `📜 пакт ${Diplomacy.pactLeft(data, player, cc)} ход.` : '',
+            data.truceLeft(player, cc) ? `🕊️ перемирие ${data.truceLeft(player, cc)} ход.` : '',
+        ].filter(Boolean).join(' · ');
+        const strength = cc => {
+            const ratio = data.calculateMilitaryPower(cc) / myPower;
+            const verdict = ratio > 1.5 ? ['сильнее вас', 'neg'] : ratio < 0.67 ? ['слабее вас', 'pos'] : ['на равных', ''];
+            return `армия <span class="${verdict[1]}">${verdict[0]}</span> (×${ratio.toFixed(1)})`;
+        };
+        const countryRow = (cc, sub) => `<button class="diplo-row country-row" data-action="open-country" data-country="${cc}">
+                <span class="swatch" style="background:${data.countries[cc].color}"></span>
+                <span class="cr-text"><b>${name(cc)}</b><small>${sub}</small></span>${rel(cc)}</button>`;
+
         let html = `<div class="diplo-influence">Влияние: <b>${me.influence}</b> / ${RULES.INFLUENCE_MAX}
-            <span class="muted">· +${RULES.INFLUENCE_PER_TURN} за ход · война −${RULES.WAR_COST}, мир −${RULES.PEACE_COST}</span></div>`;
+            <span class="muted">· +${RULES.INFLUENCE_PER_TURN} за ход и награды за задания</span></div>
+            <p class="hint">Отношения улучшают подарки и договоры. Торговый договор: +${Math.round(DIPLOMACY.DEAL_BONUS * 100)}% к выручке и −${Math.round(DIPLOMACY.DEAL_BONUS * 100)}% к закупкам на рынке (до ${DIPLOMACY.DEAL_MAX}). Союзник вступит в войну, если на вас нападут. Нажмите страну, чтобы договориться.</p>`;
 
         const enemies = data.enemiesOf(player);
         html += '<h3 class="section-title">Ваши войны</h3>';
@@ -581,30 +689,29 @@ class UIManager {
             const info = data.warInfo(player, cc);
             return `<div class="diplo-row">
                 <div><b>${name(cc)}</b><div class="muted">${info.turns} ход. · заняли ${info.taken} · потеряли ${info.lost}</div></div>
-                <button class="mini-btn peace" data-action="peace" data-country="${cc}" ${me.influence >= RULES.PEACE_COST ? '' : 'disabled'}>Мир</button>
+                <button class="mini-btn peace" data-action="peace" data-country="${cc}" ${me.influence >= RULES.PEACE_COST ? '' : 'disabled'}>Мир · ${RULES.PEACE_COST} 🔷</button>
             </div>`;
         }).join('') : '<div class="muted">Вы ни с кем не воюете.</div>';
 
-        const truces = [...data.truces.keys()].map(k => k.split('|')).filter(p => p.includes(player))
-            .map(p => (p[0] === player ? p[1] : p[0])).filter(cc => data.truceLeft(player, cc));
-        if (truces.length) {
-            html += '<h3 class="section-title">Перемирия</h3>'
-                + truces.map(cc => `<div class="diplo-row"><b>${name(cc)}</b><span class="muted">ещё ${data.truceLeft(player, cc)} ход.</span></div>`).join('');
-        }
+        const alive = cc => data.countries[cc] && data.countries[cc].alive && data.countries[cc].playable;
+        const partners = [...new Set([
+            ...Diplomacy.partners(data, player, data.alliances), ...Diplomacy.partners(data, player, data.deals),
+            ...Diplomacy.partners(data, player, data.pacts).filter(cc => Diplomacy.pactLeft(data, player, cc)),
+            ...[...data.truces.keys()].map(k => k.split('|')).filter(p => p.includes(player)).map(p => (p[0] === player ? p[1] : p[0])).filter(cc => data.truceLeft(player, cc)),
+        ])].filter(alive);
+        html += `<h3 class="section-title">Союзники и договоры · торговых ${Diplomacy.dealCount(data, player)}/${DIPLOMACY.DEAL_MAX}</h3>`;
+        html += partners.length ? partners.map(cc => countryRow(cc, marks(cc))).join('')
+            : '<div class="muted">Договоров пока нет. Начните с торгового — он выгоден обеим сторонам.</div>';
 
-        const myPower = Math.max(1, data.calculateMilitaryPower(player));
-        const neighbours = data.neighbourCountries(player).filter(cc => !data.isAtWar(player, cc))
-            .sort((a, b) => data.countries[a].name.localeCompare(data.countries[b].name, 'ru'));
+        const neighbours = data.neighbourCountries(player).filter(cc => alive(cc) && !data.isAtWar(player, cc) && !partners.includes(cc))
+            .sort((a, b) => Diplomacy.relation(data, player, b) - Diplomacy.relation(data, player, a));
         html += '<h3 class="section-title">Соседи</h3>';
-        html += neighbours.length ? neighbours.map(cc => {
-            const ratio = data.calculateMilitaryPower(cc) / myPower;
-            const verdict = ratio > 1.5 ? ['сильнее вас', 'neg'] : ratio < 0.67 ? ['слабее вас', 'pos'] : ['на равных', ''];
-            const check = data.canDeclareWar(player, cc);
-            return `<div class="diplo-row">
-                <div><b>${name(cc)}</b><div class="muted">армия <span class="${verdict[1]}">${verdict[0]}</span> (×${ratio.toFixed(1)})</div></div>
-                <button class="mini-btn war" data-action="war" data-country="${cc}" ${check.ok ? '' : 'disabled'} title="${this.escape(check.reason || '')}">Война</button>
-            </div>`;
-        }).join('') : '<div class="muted">Сухопутных соседей нет.</div>';
+        html += neighbours.length ? neighbours.map(cc => countryRow(cc, strength(cc))).join('') : '<div class="muted">Остальных сухопутных соседей нет.</div>';
+
+        const shown = new Set([player, ...enemies, ...partners, ...neighbours]);
+        const powers = Object.keys(data.countries).filter(cc => alive(cc) && !shown.has(cc))
+            .sort((a, b) => data.calculateMilitaryPower(b) - data.calculateMilitaryPower(a)).slice(0, 6);
+        if (powers.length) html += '<h3 class="section-title">Крупные державы</h3>' + powers.map(cc => countryRow(cc, strength(cc))).join('');
 
         const worldWars = [...data.wars.keys()].map(k => k.split('|')).filter(p => !p.includes(player));
         if (worldWars.length) {
