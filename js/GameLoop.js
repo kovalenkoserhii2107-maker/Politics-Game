@@ -241,6 +241,7 @@ class GameLoop {
 
         document.getElementById('glob-influence').textContent = player.influence;
         this.ui.updateResourceStatus(this.data);
+        this.ui.updateScienceBadge(this.data);
         document.getElementById('glob-date').textContent = this.formatDate(this.data.currentDate);
 
         const progress = this.data.campaignProgress();

@@ -68,7 +68,9 @@
    рисовать невидимые слои на каждом кадре панорамирования.
    lod-0: страны; lod-1: области, столицы и главные города; lod-2: все города. */
 #world-map.lod-0 #layer-region-labels { display: none; }
-/* издалека — только точки столиц, без подписей: страны подписаны крупно */
+/* издалека — только точки столиц, без подписей: страны подписаны крупно;
+   на всём мире сразу точек нет вовсе — в Европе и на островах они сливаются */
+#world-map.global-view .city-group,
 #world-map.lod-0 .city-group:not(.capital),
 #world-map.lod-0 .city-group text { display: none; }
 #world-map.lod-1 .city-group.tier-2 { display: none; }

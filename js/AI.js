@@ -19,6 +19,8 @@ const AI_RULES = {
     PEACEFUL_START_TURNS: 10,   // первые ходы никто не объявляет новых войн
     FIRST_ATTACK_TURN: 2,       // в уже идущей войне первые ходы ИИ только мобилизуется
     INVEST_PAYBACK: 10,         // строить, только если проект окупится быстрее, чем за столько ходов
+    RESERVE_TURNS: 3,           // запас казны в ходах содержания армии, который ИИ не тратит на науку
+    MODERNIZE_RESERVE: 1.5,     // модернизирует, когда денег больше этого числа запасов
 };
 
 class AI {
@@ -40,6 +42,7 @@ class AI {
             if (!country.alive || country.id === d.playerCountry) continue;
             if (!d.regionsByCountry[country.id].length) continue;
             this.balanceTaxes(country);
+            this.planScience(country);
             const enemies = d.enemiesOf(country.id);
             this.disbandIfBroke(country, enemies);
             if (enemies.length) this.planWar(country, enemies);
@@ -67,6 +70,31 @@ class AI {
             }
         }
         if (best && best.score >= 1 / AI_RULES.INVEST_PAYBACK) d.invest(best.region.id, best.kind, country.id);
+    }
+
+    // Наука: свободные деньги сверх запаса уходят в исследования, а у
+    // богатых — ещё и в модернизацию. Воюющие сначала берут военные ветки.
+    planScience(country) {
+        const d = this.data;
+        Tech.init(country);
+        const upkeep = d.countryBalance(country.id).upkeep;
+        const reserve = upkeep * AI_RULES.RESERVE_TURNS + 3e6;
+        if (!country.research) {
+            const atWar = d.enemiesOf(country.id).length > 0;
+            const order = atWar ? AI.WAR_SCIENCE : AI.PEACE_SCIENCE;
+            const next = order.find(id => !Tech.has(country, id) && TECH_TREE[id].requires.every(r => Tech.has(country, r)));
+            if (next && country.money - TECH_TREE[next].cost >= reserve) d.startResearch(country.id, next);
+        }
+        for (let i = 0; i < 3 && country.money > reserve * AI_RULES.MODERNIZE_RESERVE; i++) {
+            // модернизируем тот род войск, которого больше всего — так польза выше;
+            // когда свои дошли до потолка, очередь доходит и до новых
+            const army = d.getCountryStats(country.id).army;
+            const options = Object.keys(UnitsDB)
+                .map(id => ({ id, cost: d.techCost(country.id, id), weight: ((army[id] || 0) + 1) * UnitsDB[id].buildCost }))
+                .filter(o => o.cost !== null && country.money - o.cost >= reserve * AI_RULES.MODERNIZE_RESERVE)
+                .sort((a, b) => b.weight / b.cost - a.weight / a.cost);
+            if (!options.length || !d.research(country.id, options[0].id).ok) break;
+        }
     }
 
     // Налог подстраивается под расходы: ИИ не должен банкротиться.
@@ -150,7 +178,7 @@ class AI {
                 for (const unitId of Object.keys(UnitsDB)) enemyArmy[unitId] += other.army[unitId] || 0;
             }
         }
-        const choice = this.bestUnits(enemyArmy);
+        const choice = this.bestUnits(enemyArmy, country);
 
         // сначала самые угрожаемые области
         const threat = r => d.getNeighbors(r.id).reduce((sum, id) => {
@@ -178,7 +206,7 @@ class AI {
 
     // Лучшие рода войск против такой армии противника: сила за доллар
     // с учётом того, кого этот род войск контрит. Пехота — всегда запасной вариант.
-    bestUnits(enemyArmy) {
+    bestUnits(enemyArmy, country) {
         let total = 0;
         for (const n of Object.values(enemyArmy)) total += n;
         const score = unitId => {
@@ -188,7 +216,7 @@ class AI {
             const share = total > 0 ? countered / total : 0;
             return ((unit.baseAttack + unit.baseDefense) * (1 + RULES.COUNTER_BONUS * share)) / unit.buildCost;
         };
-        const ranked = Object.keys(UnitsDB).sort((a, b) => score(b) - score(a));
+        const ranked = Object.keys(UnitsDB).filter(id => !country || Tech.unitUnlocked(country, id)).sort((a, b) => score(b) - score(a));
         const picks = ranked.slice(0, 2);
         if (!picks.includes('infantry')) picks.push('infantry');
         return picks;
@@ -422,3 +450,9 @@ class AI {
         return info.turns >= 10 ? 0.12 : 0;
     }
 }
+
+// Порядок исследований ИИ: в мире сначала экономика, на войне — оружие.
+AI.PEACE_SCIENCE = ['agrotech', 'powergrid', 'medicine', 'logistics1', 'drones', 'motorized', 'automation', 'fortify',
+    'ewar', 'specops', 'digital', 'missiles', 'stealth', 'fusion', 'logistics2'];
+AI.WAR_SCIENCE = ['drones', 'medicine', 'motorized', 'fortify', 'ewar', 'specops', 'missiles', 'stealth',
+    'agrotech', 'powergrid', 'logistics1', 'automation', 'digital', 'fusion', 'logistics2'];

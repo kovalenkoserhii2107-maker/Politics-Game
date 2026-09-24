@@ -9,10 +9,6 @@ const RULES = {
     COUNTER_BONUS: 0.4,         // бонус рода войск против тех, кого он контрит
     CAPITAL_DEFENSE: 0.25,      // бонус обороны столицы
     DEFENSE_BONUS: 1.5,         // окопы и знание местности: обороняться легче, чем наступать
-    TECH_STEP: 0.2,             // +20% силы за уровень техники
-    TECH_MAX: 5,
-    TECH_COSTS: [0, 1000000, 3000000, 6000000, 10000000],   // цена перехода на уровень 2..5
-    MARCH_COSTS: [0, 4000000, 12000000],                    // скорость марша 2 и 3
     INFLUENCE_PER_TURN: 2,
     INFLUENCE_MAX: 100,
     WAR_COST: 20,               // влияние на объявление войны
@@ -116,7 +112,9 @@ class GameData {
                 policy: 'balanced',
                 policyChangedAt: -3,
                 lastNetIncome: 0,
-                tech: this.baseTech(),
+                tech: this.baseTech(),      // ступени модернизации родов войск и скорость марша
+                techs: [],                  // изученные технологии дерева (js/Tech.js)
+                research: null,             // идущее исследование: { id, remaining }
             };
             this.regionsByCountry[id] = [];
         }
@@ -272,7 +270,7 @@ class GameData {
     techMultiplier(countryId, unitId) {
         const country = this.countries[countryId];
         const level = country ? country.tech[unitId] || 1 : 1;
-        return 1 + (level - 1) * RULES.TECH_STEP;
+        return 1 + (level - 1) * MODERNIZATION.STEP;
     }
 
     calculateRegionMilitaryPower(regionId) {
@@ -503,6 +501,9 @@ class GameData {
         if (this.gameOver || !region || !unit || !country || region.owner !== countryId || !Number.isSafeInteger(amount) || amount <= 0) {
             return { ok: false, reason: 'Нельзя набрать здесь' };
         }
+        if (!Tech.unitUnlocked(country, unitId)) {
+            return { ok: false, reason: `Сначала исследуйте: ${TECH_TREE[unit.requires].name}` };
+        }
         if (unit.industryCost * amount > this.recruitCapacityLeft(regionId)) {
             return { ok: false, reason: 'Не хватает мощности индустрии области' };
         }
@@ -533,23 +534,65 @@ class GameData {
     }
 
     // --- исследования -----------------------------------------------------------
-    techCost(countryId, key) {
-        const country = this.countries[countryId];
-        const level = country.tech[key] || 1;
-        if (key === 'marchSpeed') return level < 3 ? RULES.MARCH_COSTS[level] : null;
-        return level < RULES.TECH_MAX ? RULES.TECH_COSTS[level] : null;
+    // Цена следующей ступени модернизации рода войск (null — нельзя).
+    techCost(countryId, unitId) {
+        const country = this.countries[countryId], unit = UnitsDB[unitId];
+        if (!country || !unit || !Tech.unitUnlocked(country, unitId)) return null;
+        const level = country.tech[unitId] || 1;
+        if (level >= MODERNIZATION.MAX) return null;
+        return Math.round(unit.buildCost * MODERNIZATION.BASE * Math.pow(MODERNIZATION.GROWTH, level - 1));
     }
 
-    research(countryId, key) {
+    // Модернизация — сразу; технологии дерева — через startResearch.
+    research(countryId, unitId) {
         if (this.gameOver) return { ok: false, reason: 'Кампания завершена' };
         const country = this.countries[countryId];
-        if (!country || (key !== 'marchSpeed' && !Object.hasOwn(UnitsDB, key))) return { ok: false, reason: 'Неизвестное исследование' };
-        const cost = this.techCost(countryId, key);
-        if (cost === null) return { ok: false, reason: 'Максимальный уровень' };
+        if (!country || !Object.hasOwn(UnitsDB, unitId)) return { ok: false, reason: 'Неизвестный род войск' };
+        const cost = this.techCost(countryId, unitId);
+        if (cost === null) return { ok: false, reason: Tech.unitUnlocked(country, unitId) ? 'Максимальная ступень' : 'Род войск ещё не открыт' };
         if (country.money < cost) return { ok: false, reason: 'Недостаточно средств' };
         country.money -= cost;
-        country.tech[key] = (country.tech[key] || 1) + 1;
+        country.tech[unitId] = (country.tech[unitId] || 1) + 1;
         return { ok: true };
+    }
+
+    startResearch(countryId, techId) {
+        if (this.gameOver) return { ok: false, reason: 'Кампания завершена' };
+        const country = this.countries[countryId];
+        if (!country) return { ok: false, reason: 'Неизвестная страна' };
+        Tech.init(country);
+        const check = Tech.canStart(country, techId);
+        if (!check.ok) return check;
+        const tech = TECH_TREE[techId];
+        country.money -= tech.cost;
+        country.research = { id: techId, remaining: tech.turns, started: this.turn };
+        return { ok: true };
+    }
+
+    // В тот же ход — полный возврат (передумали), позже — половина.
+    cancelResearch(countryId) {
+        const country = this.countries[countryId];
+        if (!country || !country.research) return 0;
+        const tech = TECH_TREE[country.research.id];
+        const refund = country.research.started === this.turn ? tech.cost : Math.round(tech.cost / 2);
+        country.money += refund;
+        country.research = null;
+        return refund;
+    }
+
+    processResearch(events) {
+        for (const country of Object.values(this.countries)) {
+            if (!country.alive || !country.research) continue;
+            country.research.remaining--;
+            if (country.research.remaining > 0) continue;
+            const tech = TECH_TREE[country.research.id];
+            Tech.grant(country, country.research.id);
+            country.research = null;
+            if (country.id !== this.playerCountry) continue;
+            const unit = tech.unlocks ? UnitsDB[tech.unlocks] : null;
+            events.push({ type: 'tech', message: `🔬 Исследование завершено: ${tech.icon} ${tech.name}.`
+                + (unit ? ` Открыт новый род войск — ${unit.icon} ${unit.name}: набирайте в своих областях.` : ` ${tech.text}`) });
+        }
     }
 
     // --- приказы ----------------------------------------------------------------
@@ -745,8 +788,8 @@ class GameData {
         // теряет больше обороняющегося, при подавляющем перевесе — наоборот.
         const ratio = powerAtt / powerDef;
         let success = ratio >= RULES.ATTACK_ADVANTAGE;
-        let defLossPct = Math.min(0.6, Math.max(0.05, 0.15 * ratio));
-        let attLossPct = Math.min(0.6, Math.max(0.05, 0.2 / ratio));
+        let defLossPct = Math.min(0.6, Math.max(0.05, 0.15 * ratio)) * Tech.factor(this.countries[defender], 'losses');
+        let attLossPct = Math.min(0.6, Math.max(0.05, 0.2 / ratio)) * Tech.factor(this.countries[attacker], 'losses');
         if (this.cheatMode && attacker === this.playerCountry) {
             success = true; attLossPct = 0; defLossPct = 1;
         }
@@ -824,7 +867,7 @@ class GameData {
     // используется ИИ для оценки целей.
     defensePower(target, attackers) {
         let power = this.sidePower(target.army, target.owner, 'baseDefense', attackers) + this.militia(target) + 1;
-        power *= RULES.DEFENSE_BONUS;
+        power *= RULES.DEFENSE_BONUS * Tech.factor(this.countries[target.owner], 'defense');
         if (this.countries[target.owner].capital === target.id) power *= 1 + RULES.CAPITAL_DEFENSE;
         power *= 0.7 + 0.3 * target.loyalty;
         return power;
@@ -934,7 +977,7 @@ class GameData {
             social += region.population * policy.socialCost;
             upkeep += this.armyUpkeep(region.army);
         }
-        tax *= Economy.taxFactor(country);
+        tax *= Economy.taxFactor(country) * Tech.factor(country, 'tax');
         const trade = Economy.projectTrade(this, countryId);
         return {
             income: tax + trade.sales, expense: upkeep + social + trade.purchases,
@@ -954,6 +997,7 @@ class GameData {
     // гибель стран. Возвращает события для отчёта игроку.
     applyEndOfTurn() {
         const events = this.processProjects();
+        this.processResearch(events);
         const balances = {};
         const markets = Economy.runMarkets(this);
 
@@ -1140,7 +1184,8 @@ class GameData {
                 sat[key] = c.economy ? Math.round(c.economy.sat[key] * 1000) / 1000 : 1;
             }
             countries[c.id] = [Math.round(c.money), c.taxRate, c.influence, c.tech, c.lastNetIncome, c.alive, c.capital, c.policy, c.policyChangedAt,
-                stock, { ...(c.trade || { food: 'sell', energy: 'sell', goods: 'sell' }) }, sat];
+                stock, { ...(c.trade || { food: 'sell', energy: 'sell', goods: 'sell' }) }, sat,
+                [...(c.techs || [])], c.research ? { ...c.research } : null];
         }
         return {
             v: 3,
@@ -1184,7 +1229,8 @@ class GameData {
         for (const id of Object.keys(CountriesDB)) {
             const c = save.countries[id];
             if (!Array.isArray(c) || !finite(c[0]) || !finite(c[1]) || c[1] < 0.01 || c[1] > 0.3 || !finite(c[2]) || c[2] < 0 || c[2] > 100 || !finite(c[4]) || typeof c[5] !== 'boolean' || (c[6] !== null && (!RegionsDB[c[6]] || save.regions[c[6]][0] !== id)) || !POLICIES[c[7]] || !Number.isInteger(c[8])) fail();
-            for (const key of [...save.units, 'marchSpeed']) if (!count(c[3]?.[key]) || c[3][key] < 1 || c[3][key] > (key === 'marchSpeed' ? 3 : RULES.TECH_MAX)) fail();
+            for (const key of [...save.units, 'marchSpeed']) if (!count(c[3]?.[key]) || c[3][key] < 1 || c[3][key] > (key === 'marchSpeed' ? 3 : MODERNIZATION.MAX)) fail();
+            if (c[12] !== undefined && !GameData.validTechs(c[12], c[13])) fail();
             if (c[9] !== undefined && !GameData.validEconomy(c[9], c[10], c[11])) fail();
         }
         const pair = key => typeof key === 'string' && key.split('|').length === 2 && key.split('|').every(cc => CountriesDB[cc]);
@@ -1215,6 +1261,13 @@ class GameData {
             && keys.every(k => finite(stock[k]) && stock[k] >= 0 && Object.hasOwn(TRADE_MODES, trade[k]) && finite(sat[k]) && sat[k] >= 0 && sat[k] <= 1);
     }
 
+    static validTechs(techs, research) {
+        if (!Array.isArray(techs) || techs.some(id => !Object.hasOwn(TECH_TREE, id)) || new Set(techs).size !== techs.length) return false;
+        if (research === null || research === undefined) return true;
+        return typeof research === 'object' && Object.hasOwn(TECH_TREE, research.id) && !techs.includes(research.id)
+            && Number.isInteger(research.remaining) && research.remaining >= 1 && research.remaining <= TECH_TREE[research.id].turns;
+    }
+
     static validMarket(market) {
         return !!market && Object.keys(RESOURCES).every(k => typeof market[k] === 'number' && Number.isFinite(market[k]) && market[k] > 0);
     }
@@ -1243,6 +1296,15 @@ class GameData {
             const saved = save.countries[c.id];
             if (!saved) continue;
             [c.money, c.taxRate, c.influence, c.tech, c.lastNetIncome, c.alive, c.capital, c.policy, c.policyChangedAt] = saved;
+            c.techs = [];
+            c.research = null;
+            if (saved[12]) {
+                c.techs = [...saved[12]];
+                c.research = saved[13] ? { ...saved[13] } : null;
+            }
+            // логистика раньше была уровнем, а не технологией
+            if (c.tech.marchSpeed >= 2) Tech.grant(c, 'logistics1');
+            if (c.tech.marchSpeed >= 3) Tech.grant(c, 'logistics2');
             if (saved[9]) {
                 c.stock = { ...saved[9] };
                 c.trade = { ...saved[10] };
@@ -1316,13 +1378,14 @@ class GameData {
                 if (finite(o[1])) c[1] = clamp(o[1], 0.01, 0.3);
                 if (finite(o[2])) c[2] = clamp(Math.round(o[2]), 0, RULES.INFLUENCE_MAX);
                 if (isObj(o[3])) for (const key of [...units, 'marchSpeed']) {
-                    if (count(o[3][key])) c[3][key] = clamp(o[3][key], 1, key === 'marchSpeed' ? 3 : RULES.TECH_MAX);
+                    if (count(o[3][key])) c[3][key] = clamp(o[3][key], 1, key === 'marchSpeed' ? 3 : MODERNIZATION.MAX);
                 }
                 if (finite(o[4])) c[4] = Math.round(o[4]);
                 if (RegionsDB[o[6]]) c[6] = o[6];
                 if (POLICIES[o[7]]) c[7] = o[7];
                 if (Number.isInteger(o[8])) c[8] = o[8];
                 if (GameData.validEconomy(o[9], o[10], o[11])) { c[9] = { ...o[9] }; c[10] = { ...o[10] }; c[11] = { ...o[11] }; }
+                if (GameData.validTechs(o[12], o[13])) { c[12] = [...o[12]]; c[13] = o[13] ? { ...o[13] } : null; }
             }
             // столица — только своя область, иначе самая населённая из своих
             const mine = owned[id] || [];
