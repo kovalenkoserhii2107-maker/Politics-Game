@@ -9,6 +9,7 @@ const SaveGame = {
     BACKUP_KEY: 'politics-game-save-backup',
     migrated: false,
     suspended: false,
+    disabled: false,
     error: '',
     signature: null,
 
@@ -28,6 +29,7 @@ const SaveGame = {
 
     save(data) {
         if (this.suspended) return false;
+        if (this.disabled) return true;   // гость сетевой игры: мир хранит сервер
         try {
             const payload = { map: this.mapId(), savedAt: Date.now(), game: data.serialize() };
             localStorage.setItem(this.KEY, JSON.stringify(payload));
@@ -123,11 +125,38 @@ class GameLoop {
     processTurn() {
         const d = this.data;
         if (this.failed || this.busy || d.gameOver || this.awaitingSummary || d.decisions.length) return;
+        // в сетевой игре ход считается, когда готовы все — это решает Net
+        if (this.net) { this.net.toggleReady(); return; }
+        this.runTurn();
+    }
+
+    // Посчитать ход и показать свой отчёт. before — что сделать до расчёта
+    // (в сетевой игре — повторить команды гостей). Возвращает отчёты всех людей.
+    runTurn(before) {
+        const d = this.data;
         this.busy = true;
         this.endTurnBtn.disabled = true;
-
         try {
-        // Кто чем владел до хода — чтобы потом отметить на карте перемены.
+            if (before) before();
+            const reports = this.resolveTurn();
+            this.showReport(reports[d.playerCountry]);
+            return reports;
+        } catch (error) {
+            console.error(error);
+            this.ui.toast('Не удалось завершить ход. Перезагрузите последнее сохранение.');
+            this.failed = true;
+            SaveGame.suspended = true; // Preserve the last complete save after a failed turn.
+            return null;
+        } finally {
+            this.busy = false;
+            this.syncTurnButton();
+        }
+    }
+
+    // Расчёт хода — один на всех. Каждому человеку — свой отчёт: его бои,
+    // его события, его доходы, его захваченные и потерянные области.
+    resolveTurn() {
+        const d = this.data;
         const before = {};
         for (const region of Object.values(d.regions)) before[region.id] = region.owner;
 
@@ -137,43 +166,44 @@ class GameLoop {
         d.turn++;
         d.currentDate.setDate(d.currentDate.getDate() + 7);
         const diplomacy = d.gameOver ? [] : this.ai.diplomacy();
+        const shared = [...events, ...diplomacy, ...d.takeDiploEvents()];
 
-        const gained = [], lost = [];
-        for (const region of Object.values(d.regions)) {
-            if (before[region.id] === region.owner) continue;
-            if (region.owner === d.playerCountry) gained.push(region.id);
-            else if (before[region.id] === d.playerCountry) lost.push(region.id);
+        const reports = {};
+        for (const cc of d.humans) {
+            const gained = [], lost = [];
+            for (const region of Object.values(d.regions)) {
+                if (before[region.id] === region.owner) continue;
+                if (region.owner === cc) gained.push(region.id);
+                else if (before[region.id] === cc) lost.push(region.id);
+            }
+            const missions = d.withPlayer(cc, () => Missions.update(d));
+            const balance = balances[cc] || { income: 0, expense: 0 };
+            const turnData = {
+                date: this.formatDate(d.currentDate),
+                financial: { income: balance.income, expense: balance.expense, net: balance.income - balance.expense },
+                logs: logs.filter(l => l.for === cc),
+                events: [...shared.filter(e => !e.for || e.for === cc), ...missions].map(e => e.message),
+                worldBattles,
+            };
+            d.withPlayer(cc, () => d.saveTurnHistory(turnData));
+            reports[cc] = { turnData, gained, lost };
         }
-        this.lastChanges = { gained, lost };
+        return reports;
+    }
 
+    showReport(report) {
+        const d = this.data;
+        const { turnData, gained, lost } = report;
+        this.lastChanges = { gained, lost };
         this.map.refreshColors();
         this.map.markChanges(gained, lost);
         this.map.createCountryLabels();
+        this.map.drawArmyMarkers();
         this.updateTopBarUI();
-
-        const player = balances[d.playerCountry] || { income: 0, expense: 0 };
-        const turnData = {
-            date: this.formatDate(d.currentDate),
-            financial: { income: player.income, expense: player.expense, net: player.income - player.expense },
-            logs,
-            events: [...events, ...diplomacy, ...d.takeDiploEvents(), ...Missions.update(d)].map(e => e.message),
-            worldBattles,
-        };
-        d.saveTurnHistory(turnData);
         if (!SaveGame.save(d)) this.ui.toast(SaveGame.error);
-
         this.ui.updateOrdersPanel(d);
         this.awaitingSummary = true;
         this.ui.showTurnSummary(turnData, () => { this.awaitingSummary = false; this.afterSummary(); });
-        } catch (error) {
-            console.error(error);
-            this.ui.toast('Не удалось завершить ход. Перезагрузите последнее сохранение.');
-            this.failed = true;
-            SaveGame.suspended = true; // Preserve the last complete save after a failed turn.
-        } finally {
-            this.busy = false;
-            this.syncTurnButton();
-        }
     }
 
     // После отчёта: сначала решения, которых ждёт ИИ, потом — конец игры.
@@ -190,22 +220,27 @@ class GameLoop {
         if (!next) { this.revealChanges(); return; }
         const from = d.countries[next.from];
         const finish = accept => {
-            if (accept) accept();
-            d.decisions.shift();
-            if (accept) { this.map.refreshColors(); this.updateTopBarUI(); }
+            const result = d.act('answerDecision', accept);
+            if (accept && result.ok && !result.stale) {
+                const what = { peace: 'мир', deal: 'торговый договор', pact: 'пакт о ненападении', alliance: 'оборонительный союз' }[next.type];
+                this.ui.toast(`${from.name}: ${next.type === 'peace' ? 'мир заключён' : `подписан ${what}`}`);
+            }
+            if (this.map) this.map.refreshColors();
+            this.updateTopBarUI();
             SaveGame.save(d);
             this.afterSummary();
         };
         const valid = from?.alive && (next.type === 'peace' ? d.isAtWar(next.from, d.playerCountry) : !d.isAtWar(next.from, d.playerCountry));
-        if (!valid) { finish(null); return; }
+        if (!valid) { d.act('answerDecision', false); this.afterSummary(); return; }
+        const human = d.isHuman(next.from) ? ' (игрок)' : '';
         if (next.type === 'peace') {
             const info = d.warInfo(d.playerCountry, next.from);
             this.ui.showDecision({
-                title: `${from.name} предлагает мир`,
+                title: `${from.name}${human} предлагает мир`,
                 text: `Война идёт ${info.turns} ход. Вы заняли областей: ${info.taken}, потеряли: ${info.lost}. Мир сохранит текущие границы. Перемирие: ${RULES.TRUCE_TURNS} ходов.`,
                 accept: 'Заключить мир', decline: 'Продолжить войну',
-                onAccept: () => finish(() => { d.makePeace(d.playerCountry, next.from); this.ui.toast(`Мир с ${from.name} заключён`); }),
-                onDecline: () => finish(null),
+                onAccept: () => finish(true),
+                onDecline: () => finish(false),
             });
             return;
         }
@@ -215,15 +250,11 @@ class GameLoop {
             alliance: ['оборонительный союз', 'Если на одного из вас нападут, второй вступит в войну против нападающего. Напасть на союзника нельзя.'],
         }[next.type];
         this.ui.showDecision({
-            title: `${from.name} предлагает ${texts[0]}`,
+            title: `${from.name}${human} предлагает ${texts[0]}`,
             text: `${texts[1]} Отношения сейчас: ${Diplomacy.relation(d, d.playerCountry, next.from)}.`,
             accept: 'Согласиться', decline: 'Отказаться',
-            onAccept: () => finish(() => {
-                Diplomacy.sign(d, d.playerCountry, next.from, next.type);
-                if (next.type === 'deal') Missions.bump(d, 'deals');
-                this.ui.toast(`${from.name}: подписан ${texts[0]}`);
-            }),
-            onDecline: () => finish(() => Diplomacy.changeRelation(d, d.playerCountry, next.from, DIPLOMACY.DECLINE_RELATION)),
+            onAccept: () => finish(true),
+            onDecline: () => finish(false),
         });
     }
 

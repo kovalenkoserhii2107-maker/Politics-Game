@@ -201,9 +201,8 @@ class Diplomacy {
             if (until > d.turn) continue;
             delete d.pacts[key];
             const [a, b] = key.split('|');
-            if (a === d.playerCountry || b === d.playerCountry) {
-                const other = a === d.playerCountry ? b : a;
-                events.push({ type: 'diplomacy', message: `📜 Пакт о ненападении с ${d.countries[other].name} истёк.` });
+            for (const [me, other] of [[a, b], [b, a]]) {
+                if (d.isHuman(me)) events.push({ type: 'diplomacy', for: me, message: `📜 Пакт о ненападении: ${d.countries[other].name} — срок истёк.` });
             }
         }
         for (const key of Object.keys(d.relations)) {
