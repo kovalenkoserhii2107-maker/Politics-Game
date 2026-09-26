@@ -185,3 +185,105 @@ test('missions: done is announced once and missions survive save', () => {
     assert.equal(JSON.stringify(back.missions), JSON.stringify(d.missions));
     assert.equal(Missions.progress(back, back.missions[0]).done, true);
 });
+
+// --- сетевая игра: несколько людей ---
+const mpLoop = (GameLoop, AI, d) => Object.assign(Object.create(GameLoop.prototype), { data: d, ai: new AI(d), monthNames: Array(12).fill('м') });
+
+test('multiplayer: AI never commands a human country, each human gets own report', () => {
+    const { GameData, GameLoop, AI } = engine(), d = new GameData('DE', { humans: ['PL'] });
+    assert.deepEqual([...d.humans], ['DE', 'PL']);
+    assert.equal(d.seats.PL.missions.length, 3, 'у гостя свои задания');
+    d.countries.PL.money = 1e9;
+    const loop = mpLoop(GameLoop, AI, d);
+    for (let i = 0; i < 12; i++) {
+        loop.ai.planTurn();
+        assert.ok(!Object.values(d.orders).flat().some(o => o.country === 'PL' || o.country === 'DE'), 'ИИ не отдаёт приказов за людей');
+        d.orders = d.emptyOrders();
+        const reports = loop.resolveTurn();
+        assert.ok(reports.DE && reports.PL);
+        assert.ok(reports.PL.turnData.logs.every(l => l.for === 'PL'));
+    }
+    assert.equal(d.seats.PL.history.length, 12, 'журнал гостя ведётся отдельно');
+    assert.equal(d.history.length, 12);
+});
+
+test('multiplayer: guest commands replay on the host in the guest name only', () => {
+    const { GameData } = engine(), host = new GameData('DE', { humans: ['PL'] });
+    const guest = GameData.restore(JSON.parse(JSON.stringify(host.serialize())));
+    guest.becomePlayer('PL');
+    assert.equal(guest.playerCountry, 'PL');
+    assert.equal(guest.missions.length, 3);
+    guest.recorder = [];
+    const region = guest.getCountryRegions('PL')[0].id;
+    assert.equal(guest.act('queueRecruitment', region, 'infantry', 2).ok, true);
+    guest.act('setTaxRate', 'PL', 0.12);
+    guest.act('queueRecruitment', host.getCountryRegions('DE')[0].id, 'infantry', 1, 'DE');   // чужая страна
+    const failed = host.replay('PL', JSON.parse(JSON.stringify(guest.recorder)));
+    assert.equal(failed, 1);
+    assert.equal(host.orders.recruitment.filter(o => o.country === 'PL').length, 1);
+    assert.equal(host.orders.recruitment.filter(o => o.country === 'DE').length, 0);
+    assert.equal(host.countries.PL.taxRate, 0.12);
+    assert.equal(host.playerCountry, 'DE', 'после повтора сервер снова смотрит своими глазами');
+    assert.equal(host.seats.PL.stats.recruited, 2);
+    // отмена своего приказа по номеру среди своих
+    host.act('queueRecruitment', host.getCountryRegions('DE')[0].id, 'infantry', 1);
+    assert.equal(host.replay('PL', [{ name: 'cancelOwnOrder', args: ['recruitment', 0] }]), 0);
+    assert.equal(host.orders.recruitment.map(o => o.country).join(), 'DE');
+    assert.equal(host.replay('PL', [{ name: 'constructor', args: [] }, { name: 'setTaxRate', args: ['DE', 0.3] }]), 2);
+});
+
+test('multiplayer: proposals between humans wait for the answer, peace too', () => {
+    const { GameData, Diplomacy } = engine(), d = new GameData('DE', { humans: ['PL'] });
+    d.countries.DE.influence = 100; d.countries.PL.influence = 100;
+    const r = d.act('diplomacyAction', 'PL', 'deal');
+    assert.equal(r.pending, true);
+    assert.equal(Diplomacy.hasDeal(d, 'DE', 'PL'), false);
+    assert.equal(d.act('diplomacyAction', 'PL', 'deal').ok, false, 'второй раз то же не отправить');
+    assert.equal(d.act('diplomacyAction', 'PL', 'tribute').ok, false);
+    d.withPlayer('PL', () => assert.equal(d.act('answerDecision', true).accepted, true));
+    assert.equal(Diplomacy.hasDeal(d, 'DE', 'PL'), true);
+    assert.ok(d.takeDiploEvents().some(e => e.for === 'DE' && e.message.includes('принимает')));
+    d.act('diplomacyAction', 'PL', 'cancel-deal');
+    d.turn = 10;
+    assert.equal(d.act('declareWar', 'DE', 'PL').ok, true);
+    assert.equal(d.act('proposePeace', 'PL').pending, true);
+    assert.equal(d.isAtWar('DE', 'PL'), true);
+    d.withPlayer('PL', () => d.act('answerDecision', true));
+    assert.equal(d.isAtWar('DE', 'PL'), false);
+});
+
+test('multiplayer: seats survive save, one human defeated does not end the game', () => {
+    const { GameData, GameLoop, AI } = engine(), d = new GameData('DE', { humans: ['PL'] });
+    d.seats.PL.stats.recruited = 5;
+    d.net = { code: 'AB12', clients: { x1: 'PL' } };
+    const back = GameData.restore(JSON.parse(JSON.stringify(d.serialize())));
+    assert.deepEqual([...back.humans], ['DE', 'PL']);
+    assert.equal(back.seats.PL.stats.recruited, 5);
+    assert.equal(back.net.code, 'AB12');
+    for (const r of back.getCountryRegions('PL')) back.setOwner(r.id, 'DE');
+    const reports = mpLoop(GameLoop, AI, back).resolveTurn();
+    assert.equal(back.countries.PL.alive, false);
+    assert.equal(back.gameOver, false);
+    assert.ok(reports.PL.turnData.events.some(e => e.includes('потеряла все области')));
+    const bad = d.serialize(); bad.humans = ['DE', 'DE'];
+    assert.throws(() => GameData.restore(bad));
+});
+
+test('network framing: long messages are chunked under the PeerJS byte limit and reassembled', () => {
+    const context = vm.createContext({ console, JSON, Math, Map, String, Number, Array, Object });
+    vm.runInContext(fs.readFileSync(path.join(__dirname, '../js/Net.js'), 'utf8') + ';this.NetLink = NetLink;', context);
+    const handlers = {}, sent = [];
+    const conn = { open: true, send: x => sent.push(x), on: (e, f) => { handlers[e] = f; }, close() {} };
+    const got = [];
+    const link = new context.NetLink(conn, m => got.push(m));
+    const big = { t: 'state', text: 'Польша "Лодзь" 🎮 '.repeat(20000) };
+    assert.equal(link.send(big), true);
+    assert.ok(sent.length > 1);
+    for (const piece of sent) assert.ok(Buffer.byteLength(JSON.stringify(piece)) < 16300, 'кусок влезает в канал PeerJS');
+    for (const piece of [...sent].reverse()) handlers.data(piece);   // порядок не важен
+    assert.equal(got.length, 1);
+    assert.equal(got[0].text, big.text);
+    handlers.data({ c: 'x', i: 0, n: 2, d: '{"t":' });              // неполное — ждём
+    handlers.data('мусор');
+    assert.equal(got.length, 1);
+});

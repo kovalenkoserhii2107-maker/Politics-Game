@@ -67,9 +67,9 @@ class GameCore {
         if (d.gameOver) return;
         if (['invest', 'cancel-project', 'integrate'].includes(action)) {
             const id = btn.dataset.region;
-            const result = action === 'invest' ? d.invest(id, btn.dataset.kind)
-                : action === 'integrate' ? d.integrateTerritory(id)
-                : { ok: d.cancelProject(id) };
+            const result = action === 'invest' ? d.act('invest', id, btn.dataset.kind)
+                : action === 'integrate' ? d.act('integrateTerritory', id)
+                : { ok: d.act('cancelProject', id) };
             if (!result.ok) { this.ui.toast(result.reason || 'Проект недоступен'); return; }
             this.ui.toast(action === 'invest' ? 'Строительство начато' : action === 'integrate' ? 'Территория интегрирована' : 'Средства возвращены');
             this.showRegion(id);
@@ -81,7 +81,7 @@ class GameCore {
         }
 
         if (action === 'mission-claim') {
-            const reward = Missions.claim(d, +btn.dataset.index);
+            const reward = d.act('claimMission', d.missions[+btn.dataset.index]?.kind);
             if (!reward) return;
             this.ui.haptic(30);
             this.ui.toast(`Награда: +${this.ui.money(reward.money)} и +${reward.influence} влияния`);
@@ -89,7 +89,7 @@ class GameCore {
             return;
         }
         if (action === 'mission-skip') {
-            if (!Missions.skip(d, +btn.dataset.index)) { this.ui.toast(`Нужно ${MISSION_RULES.SKIP_COST} влияния`); return; }
+            if (!d.act('skipMission', d.missions[+btn.dataset.index]?.kind)) { this.ui.toast(`Нужно ${MISSION_RULES.SKIP_COST} влияния`); return; }
             this.afterMissions();
             return;
         }
@@ -101,25 +101,22 @@ class GameCore {
         if (btn.dataset.action === 'war') {
             const allies = Diplomacy.allies(d, cc).filter(x => x !== player && !d.isAtWar(x, player));
             if (allies.length && !confirm(`У страны ${d.countries[cc].name} есть союзники: ${allies.map(x => d.countries[x].name).join(', ')}. Они тоже вступят в войну. Объявить?`)) return;
-            const result = d.declareWar(player, cc);
+            const result = d.act('declareWar', player, cc);
             if (!result.ok) { this.ui.toast(result.reason); return; }
             this.ui.haptic(40);
             const joined = result.joined || [];
             this.ui.toast(`Вы объявили войну: ${d.countries[cc].name}${joined.length ? `. Её союзники вступили в войну: ${joined.map(x => d.countries[x].name).join(', ')}` : ''}`);
             this.afterStateChange();
         } else if (btn.dataset.action === 'peace') {
-            if (d.countries[player].influence < RULES.PEACE_COST) { this.ui.toast(`Нужно ${RULES.PEACE_COST} влияния`); return; }
-            d.countries[player].influence -= RULES.PEACE_COST;
-            if (this.ai.acceptsPeace(cc, player)) {
-                d.makePeace(player, cc);
-                this.ui.toast(`${d.countries[cc].name} согласилась на мир`);
-            } else {
-                this.ui.toast(`${d.countries[cc].name} отвергла мир: она считает, что побеждает`);
-            }
+            const result = d.act('proposePeace', cc);
+            if (!result.ok) { this.ui.toast(result.reason); return; }
+            if (result.pending) this.ui.toast(`${d.countries[cc].name}: предложение мира отправлено, ответ — после хода`);
+            else if (result.accepted) this.ui.toast(`${d.countries[cc].name}: мир заключён`);
+            else this.ui.toast(`${d.countries[cc].name}: мир отвергнут — там считают, что побеждают`);
             this.afterStateChange();
         } else if (btn.dataset.action === 'spy') {
             const region = d.getRegion(btn.dataset.region);
-            if (!d.queueRecon(region.id, RULES.SPY_COST, parseInt(btn.dataset.chance, 10), region.name)) {
+            if (!d.act('queueRecon', region.id, RULES.SPY_COST, parseInt(btn.dataset.chance, 10), region.name)) {
                 this.ui.toast(`Недостаточно средств для разведки (${this.ui.money(RULES.SPY_COST)})`);
                 return;
             }
@@ -129,25 +126,25 @@ class GameCore {
             this.loop.updateTopBarUI();
             SaveGame.save(d);
         } else if (btn.dataset.action === 'trade') {
-            d.setTrade(player, btn.dataset.key, btn.checked ? 'sell' : 'keep');
+            d.act('setTrade', player, btn.dataset.key, btn.checked ? 'sell' : 'keep');
             this.ui.renderGovernment(d);
             this.loop.updateTopBarUI();
             SaveGame.save(d);
         } else if (btn.dataset.action === 'research') {
-            const result = d.research(player, btn.dataset.key);
+            const result = d.act('research', player, btn.dataset.key);
             if (!result.ok) { this.ui.toast(result.reason); return; }
             this.ui.haptic(20);
             this.ui.toast(`Модернизация: ${UnitsDB[btn.dataset.key].name} — ступень ${d.countries[player].tech[btn.dataset.key]}`);
             this.afterScience();
         } else if (btn.dataset.action === 'tech') {
-            const result = d.startResearch(player, btn.dataset.key);
+            const result = d.act('startResearch', player, btn.dataset.key);
             if (!result.ok) { this.ui.toast(result.reason); return; }
             this.ui.haptic(20);
             const tech = TECH_TREE[btn.dataset.key];
             this.ui.toast(`Исследование начато: ${tech.name}. Готово через ${tech.turns} ход.`);
             this.afterScience();
         } else if (btn.dataset.action === 'tech-cancel') {
-            const refund = d.cancelResearch(player);
+            const refund = d.act('cancelResearch', player);
             this.ui.toast(`Исследование отменено, возвращено ${this.ui.money(refund)}`);
             this.afterScience();
         }
@@ -160,12 +157,13 @@ class GameCore {
             const what = { 'cancel-deal': 'расторгнуть торговый договор', 'cancel-pact': 'разорвать пакт о ненападении', 'cancel-alliance': 'выйти из союза' }[action];
             if (!confirm(`${name}: ${what}? Отношения ухудшатся на ${-DIPLOMACY.BREAK_RELATION}.`)) return;
         }
-        const result = d.diplomacyAction(cc, action);
+        const result = d.act('diplomacyAction', cc, action);
         if (!result.ok) { this.ui.toast(result.reason); return; }
         const names = { deal: 'торговый договор', pact: 'пакт о ненападении', alliance: 'оборонительный союз' };
         if (action === 'gift') this.ui.toast(`${name}: подарок принят (−${this.ui.money(result.cost)}), отношения +${result.gain}`);
         else if (action === 'tribute') this.ui.toast(result.paid ? `${name}: дань выплачена, +${this.ui.money(result.paid)}` : `${name}: платить отказались — ${result.reason.toLowerCase()}`);
         else if (action.startsWith('cancel-')) this.ui.toast(`${name}: договор расторгнут`);
+        else if (result.pending) this.ui.toast(`${name}: предложение отправлено, ответ — после хода`);
         else this.ui.toast(result.accepted ? `${name}: подписан ${names[action]}` : `${name}: отказ — ${result.reason.toLowerCase()}`);
         this.ui.haptic(20);
         this.afterStateChange();
@@ -203,6 +201,70 @@ class GameCore {
         SaveGame.save(this.data);
     }
 
+    // --- сетевая игра ---------------------------------------------------------
+    attachNet(session) {
+        this.net = session;
+        document.body.classList.add('net-session');
+        const callbacks = session.callbacks;
+        callbacks.onChange = () => this.renderNetStatus();
+        callbacks.onToast = text => this.ui.toast(text);
+        callbacks.onLost = () => { this.renderNetStatus(); };
+        callbacks.onError = text => { this.ui.toast(text); this.renderNetStatus(); };
+        document.getElementById('net-wait-back').addEventListener('click', () => { if (this.net.ready) this.net.toggleReady(); });
+        session.attach(this);
+        this.renderNetStatus();
+    }
+
+    // Кто уже закончил ход, кого ждём. Пока ждём — поверх карты табличка,
+    // из которой можно вернуться к своему ходу.
+    renderNetStatus() {
+        const net = this.net;
+        if (!net) return;
+        const d = this.data;
+        const info = net.role === 'host' ? net.status() : net.statusInfo;
+        const pill = document.getElementById('net-status');
+        const wait = document.getElementById('net-wait');
+        const players = info ? info.players.filter(p => p.cc) : [];
+        const offline = net.role === 'guest' && !net.connected;
+        const row = p => {
+            const name = CountriesDB[p.cc] ? CountriesDB[p.cc].name : p.cc;
+            const state = !p.alive ? '🏳️' : !p.connected ? '📵' : p.ready ? '✅' : '⏳';
+            return `<span class="np ${p.ready ? 'ready' : ''}">${state} ${this.ui.escape(p.name)} · ${this.ui.escape(name)}</span>`;
+        };
+        pill.hidden = false;
+        pill.innerHTML = `<b>📶 ${net.code || ''}</b>${offline ? '<span class="np off">нет связи — переподключаемся…</span>' : players.map(row).join('')}`;
+        const waiting = !!net.ready && !d.gameOver;
+        wait.hidden = !waiting;
+        document.body.classList.toggle('net-waiting', waiting);
+        if (waiting) {
+            const others = players.filter(p => p.cc !== d.playerCountry && p.alive && !p.ready);
+            document.getElementById('net-wait-text').textContent = offline ? 'Связь с сервером пропала. Переподключаемся…'
+                : others.length ? `Ждём: ${others.map(p => p.name).join(', ')}` : 'Все готовы — считаем ход…';
+            document.getElementById('net-wait-list').innerHTML = players.map(row).join('');
+        }
+        const btn = this.loop.endTurnBtn.querySelector('.lbl');
+        if (btn) btn.textContent = waiting ? 'Ждём…' : 'Конец хода';
+    }
+
+    // Гостю пришёл мир от сервера: всё на экране — заново.
+    onNewWorld(report) {
+        this.cancelTargeting();
+        this.ui.closePanel();
+        for (const id of ['diplo-modal', 'campaign-modal', 'gov-modal', 'science-modal']) this.ui.hideModal(id);
+        this.loop.failed = false;
+        this.loop.awaitingSummary = false;
+        if (report) this.loop.showReport(report);
+        else {
+            this.map.refreshColors();
+            this.map.createCountryLabels();
+            this.map.drawArmyMarkers();
+            this.loop.updateTopBarUI();
+            this.ui.updateOrdersPanel(this.data);
+            this.loop.afterSummary();
+        }
+        this.renderNetStatus();
+    }
+
     afterScience() {
         this.ui.showScience(this.data);
         this.loop.updateTopBarUI();
@@ -222,8 +284,11 @@ class GameCore {
     }
 
     cancelOrder(btn) {
-        const index = parseInt(btn.dataset.orderIndex, 10);
-        const order = this.data.cancelOrder(btn.dataset.type, index);
+        const index = parseInt(btn.dataset.orderIndex, 10), type = btn.dataset.type;
+        // номер среди своих приказов — так команду можно повторить на сервере
+        const list = this.data.orders[type] || [];
+        const own = list.slice(0, index).filter(o => o.country === this.data.playerCountry).length;
+        const order = this.data.act('cancelOwnOrder', type, own);
         if (!order) return;
         this.ui.updateOrdersPanel(this.data);
         this.loop.updateTopBarUI();
@@ -337,7 +402,7 @@ class GameCore {
             if (this.armyAction.type === 'disband') {
                 let saved = 0;
                 for (const unitId of Object.keys(forces)) saved += (forces[unitId] || 0) * UnitsDB[unitId].maintenanceCost;
-                const removed = this.data.disband(regionId, forces);
+                const removed = this.data.act('disband', regionId, forces);
                 this.ui.toast(`Распущено подразделений: ${removed}. Экономия ${this.ui.money(saved)} за ход`);
                 this.map.drawArmyMarkers();
                 this.loop.updateTopBarUI();
@@ -435,7 +500,7 @@ class GameCore {
             let ordered = 0;
             for (const unitId of Object.keys(amounts)) {
                 if (!amounts[unitId]) continue;
-                const result = this.data.queueRecruitment(this.panelRegion, unitId, amounts[unitId]);
+                const result = this.data.act('queueRecruitment', this.panelRegion, unitId, amounts[unitId]);
                 if (!result.ok) { this.ui.toast(result.reason); break; }
                 ordered += amounts[unitId];
             }
@@ -501,14 +566,14 @@ class GameCore {
     // --- правительство, дипломатия, журнал ----------------------------------------------
     initGovernment() {
         document.getElementById('gov-policy').addEventListener('change', e => {
-            const result = this.data.setPolicy(this.data.playerCountry, e.target.value);
+            const result = this.data.act('setPolicy', this.data.playerCountry, e.target.value);
             if (!result.ok) this.ui.toast(result.reason);
             this.ui.renderGovernment(this.data);
             this.loop.updateTopBarUI();
             SaveGame.save(this.data);
         });
         document.getElementById('gov-tax-slider').addEventListener('input', e => {
-            this.data.countries[this.data.playerCountry].taxRate = parseFloat(e.target.value);
+            this.data.act('setTaxRate', this.data.playerCountry, parseFloat(e.target.value));
             this.ui.renderGovernment(this.data);
             this.loop.updateTopBarUI();
             SaveGame.save(this.data);
@@ -602,7 +667,7 @@ class GameCore {
                     text: `Перевозка за один ход: ${this.ui.money(transport.cost)} и ${transport.influence} влияния.${odds ? ` Шансы атаки: ${odds.label}. Сила ${odds.attack}, нужно ${odds.needed}.` : ''} При отмене приказа затраты возвращаются.`,
                     accept: 'Отправить', decline: 'Отменить',
                     onAccept: () => {
-                        const result = isMove ? this.data.queueMovement(state.fromId, regionId, state.forces) : this.data.queueAttack(state.fromId, regionId, state.forces);
+                        const result = this.data.act(isMove ? 'queueMovement' : 'queueAttack', state.fromId, regionId, state.forces);
                         if (!result.ok) { this.ui.toast(result.reason); return; }
                         this.loop.updateTopBarUI();
                         this.afterOrder('Экспедиция запланирована');
@@ -611,7 +676,7 @@ class GameCore {
                 return;
             }
             if (isMove) {
-                const result = this.data.queueMovement(state.fromId, regionId, state.forces);
+                const result = this.data.act('queueMovement', state.fromId, regionId, state.forces);
                 if (!result.ok) { this.ui.toast(result.reason); return; }
                 this.afterOrder('Марш запланирован');
                 return;
@@ -620,7 +685,7 @@ class GameCore {
             // заведомо проигрышную атаку лучше переспросить, чем молча отправить.
             const odds = this.attackOdds(regionId, state.forces);
             const queue = () => {
-                const result = this.data.queueAttack(state.fromId, regionId, state.forces);
+                const result = this.data.act('queueAttack', state.fromId, regionId, state.forces);
                 if (!result.ok) { this.ui.toast(result.reason); return; }
                 this.afterOrder(`Наступление запланировано · шансы ${odds.label}`);
             };
@@ -734,13 +799,168 @@ class GameCore {
             return '$' + Math.round(v);
         };
 
-        const launch = (data, tutorial = false) => {
+        const launch = (data, tutorial = false, session = null) => {
             $('start-screen').style.display = 'none';
             document.body.classList.add('in-game');
+            // стартовый экран мог быть прокручен — игра рисуется от верха
+            window.scrollTo(0, 0);
+            // гость не пишет чужой мир поверх своей одиночной партии
+            if (session && session.role === 'guest') SaveGame.disabled = true;
             window.game = new GameCore(data);
-            if (tutorial) new Tutorial(window.game).start();
+            if (session) window.game.attachNet(session);
+            if (tutorial && !session) new Tutorial(window.game).start();
             else if (!data.gameOver && !data.decisions.length && data.turn === 0 && !data.campaign.budget) window.game.ui.showCampaign(data);
         };
+
+        // --- игра по Wi-Fi: лобби ------------------------------------------
+        // net — открытая сессия (хозяин или гость), пока выбирают страны.
+        let net = null;
+        let netView = 'idle';
+        let netNote = '';
+        let netGames = null;
+        const taken = id => (net ? net.takenBy(id) : null);
+        const savedName = () => { try { return localStorage.getItem('politics-net-name') || ''; } catch (e) { return ''; } };
+        const playerName = () => {
+            const name = Net.cleanName(($('net-name') || {}).value || savedName());
+            try { localStorage.setItem('politics-net-name', name); } catch (e) { /* не критично */ }
+            return name;
+        };
+        const lobbyPlayers = () => (net.role === 'host' ? net.players : (net.lobby ? net.lobby.players : []));
+        const renderNet = () => {
+            const body = $('net-body');
+            document.body.classList.toggle('net-lobby', !!net);
+            document.body.classList.toggle('net-guest-lobby', !!net && net.role === 'guest');
+            document.body.classList.toggle('net-searching', netView === 'search' || netView === 'busy');
+            const note = netNote ? `<p class="net-note">${escape(netNote)}</p>` : '';
+            if (netView === 'idle') {
+                const last = Net.lastGame();
+                body.innerHTML = `
+                    <label class="net-field"><span class="label">Ваше имя</span><input id="net-name" maxlength="16" autocomplete="nickname" placeholder="Например, Папа" value="${escape(savedName())}"></label>
+                    <div class="net-actions">
+                        <button id="net-host-btn" class="btn btn-light" type="button">Создать игру</button>
+                        <button id="net-find-btn" class="btn btn-ghost" type="button">Найти игру</button>
+                    </div>
+                    ${last ? `<button id="net-rejoin-btn" class="btn btn-ghost btn-sm net-rejoin" type="button">↩ Вернуться в игру ${escape(last.code)}</button>` : ''}
+                    ${note}`;
+                return;
+            }
+            if (netView === 'busy') { body.innerHTML = `<p class="net-wait-line"><span class="spinner"></span>${escape(netNote || 'Подключаемся…')}</p>`; return; }
+            if (netView === 'search') {
+                body.innerHTML = `<div class="net-found">${foundList()}</div>
+                    <div class="net-code-row"><label class="sr-only" for="net-code-input">Код игры</label><input id="net-code-input" maxlength="4" autocapitalize="characters" autocomplete="off" placeholder="Код: ABCD"><button id="net-join-btn" class="btn btn-light" type="button">Войти</button></div>
+                    <div class="net-actions"><button id="net-leave-btn" class="btn btn-ghost btn-sm" type="button">Назад</button></div>${note}`;
+                return;
+            }
+            // лобби: хозяин или гость
+            renderLobby(body, note);
+        };
+        const foundList = () => {
+                const list = netGames === null ? '<p class="net-wait-line"><span class="spinner"></span>Ищем игры в вашей сети…</p>'
+                    : netGames.games.length ? netGames.games.map(g => `<button class="net-game" type="button" data-code="${escape(g.code)}">
+                        <span><b>${escape(g.host)}</b><small>${g.cc && CountriesDB[g.cc] ? escape(CountriesDB[g.cc].name) + ' · ' : ''}${g.started ? 'партия идёт' : 'ждёт игроков'} · игроков: ${g.players}</small></span><span class="net-code">${escape(g.code)}</span></button>`).join('')
+                    : `<p class="net-wait-line"><span class="spinner"></span>${netGames.lan ? 'Ищем… Игр в этой сети пока нет — попросите создать игру.' : 'Сеть не удалось определить — введите код с экрана хозяина.'}</p>`;
+                return list;
+        };
+        const renderLobby = (body, note) => {
+            const you = net.role === 'host' ? 'host' : net.clientId;
+            const rows = lobbyPlayers().map(p => `<li class="${p.connected === false ? 'off' : ''}">
+                <span>${p.host ? '👑' : '🎮'} <b>${escape(p.name)}</b>${p.id === you ? ' (вы)' : ''}</span>
+                <span class="net-pick">${p.cc && CountriesDB[p.cc] ? flagImg(p.cc, 40) + escape(CountriesDB[p.cc].name) : 'выбирает страну…'}</span></li>`).join('');
+            const lan = net.role === 'host'
+                ? (net.lan === null ? 'Проверяем сеть…' : net.lan ? 'Устройства в этой сети Wi-Fi увидят игру сами — нажмите там «Найти игру».' : 'Автопоиск в этой сети недоступен — пусть введут код.')
+                : `Вы в игре у ${escape((lobbyPlayers().find(p => p.host) || {}).name || 'хозяина')}. Выберите страну ниже и ждите начала.`;
+            body.innerHTML = `
+                <div class="net-lobby-head"><span class="label">Код игры</span><b class="net-big-code">${escape(net.code || '····')}</b></div>
+                <p class="net-note">${lan}</p>
+                <ul class="net-players">${rows}</ul>
+                ${note}
+                <div class="net-actions"><button id="net-leave-btn" class="btn btn-ghost btn-sm" type="button">${net.role === 'host' ? 'Отменить игру' : 'Выйти'}</button></div>`;
+        };
+        const refreshLobby = () => { renderNet(); renderFeatured(); renderList(); updateCta(); };
+        const leaveNet = () => {
+            if (net) { if (net.role === 'host') net.stop(); else net.leave(); }
+            net = null; netView = 'idle'; netGames = null;
+            for (const input of document.querySelectorAll('input[name="scenario"], input[name="difficulty"]')) input.disabled = false;
+            refreshLobby();
+        };
+        const netError = text => { if (net) { if (net.role === 'host') net.stop(); else net.leave(); } net = null; netView = 'idle'; netNote = text; refreshLobby(); };
+        const hostOptions = () => ({ scenario: scenario(), difficulty: difficulty() });
+        const startHost = async () => {
+            const name = playerName();
+            netNote = 'Создаём игру…'; netView = 'busy'; renderNet();
+            const session = new NetHost(name, { onChange: () => refreshLobby() });
+            try {
+                await session.start();
+            } catch (err) { netError(err.message); return; }
+            net = session; netView = 'lobby'; netNote = '';
+            net.setOptions(hostOptions());
+            if (selectedId) net.pick(selectedId);
+            refreshLobby();
+        };
+        const joinGame = async code => {
+            code = Net.normalizeCode(code);
+            if (code.length !== 4) { netNote = 'Код — четыре знака с экрана хозяина'; renderNet(); return; }
+            const name = playerName();
+            netNote = `Подключаемся к игре ${code}…`; netView = 'busy'; renderNet();
+            const session = new NetGuest(name, {
+                onLobby: lobby => {
+                    // режим и уровень выбирает хозяин
+                    for (const input of document.querySelectorAll('input[name="scenario"], input[name="difficulty"]')) {
+                        input.checked = input.value === lobby.scenario || input.value === lobby.difficulty;
+                        input.disabled = true;
+                    }
+                    showLevel();
+                    const mine = lobby.players.find(p => p.id === session.clientId);
+                    if (mine && !mine.cc && selectedId && !taken(selectedId)) session.pick(selectedId);
+                    refreshLobby();
+                },
+                onToast: text => { netNote = text; renderNet(); },
+                onError: text => netError(text),
+                onLost: () => { netNote = 'Связь пропала — переподключаемся…'; renderNet(); },
+                onStart: (data, report) => {
+                    net = null;
+                    for (const input of document.querySelectorAll('input[name="scenario"], input[name="difficulty"]')) input.disabled = false;
+                    document.body.classList.remove('net-lobby', 'net-guest-lobby');
+                    launch(data, false, session);
+                    if (report) window.game.loop.showReport(report);
+                },
+            });
+            net = session;
+            try {
+                await session.join(code);
+            } catch (err) { netError(err.message); return; }
+            if (session.game) return;   // партия уже идёт — мир пришёл сразу
+            netView = 'lobby'; netNote = '';
+            refreshLobby();
+        };
+        // Поиск идёт, пока открыт экран поиска: новые игры появляются сами.
+        // Обновляем только список — введённый код не сбрасывается.
+        let scanning = false;
+        const scan = async () => {
+            if (scanning) return;
+            scanning = true;
+            let result;
+            try { result = await NetGuest.scan(); } catch (err) { result = { lan: false, games: [] }; netNote = err.message; }
+            scanning = false;
+            if (netView !== 'search') return;
+            netGames = result;
+            const found = document.querySelector('#net-body .net-found');
+            if (found) found.innerHTML = foundList(); else renderNet();
+            if (result.lan) setTimeout(() => { if (netView === 'search') scan(); }, 2500);
+        };
+        $('net-box').addEventListener('click', e => {
+            const btn = e.target.closest('button');
+            if (!btn) return;
+            if (btn.id === 'net-host-btn') { netNote = ''; startHost(); }
+            else if (btn.id === 'net-find-btn') { playerName(); netNote = ''; netView = 'search'; netGames = null; renderNet(); scan(); }
+            else if (btn.id === 'net-leave-btn') { netNote = ''; leaveNet(); }
+            else if (btn.id === 'net-join-btn') joinGame($('net-code-input').value);
+            else if (btn.id === 'net-rejoin-btn') { const last = Net.lastGame(); if (last) joinGame(last.code); }
+            else if (btn.dataset.code) joinGame(btn.dataset.code);
+        });
+        $('net-box').addEventListener('keydown', e => {
+            if (e.key === 'Enter' && e.target.id === 'net-code-input') joinGame(e.target.value);
+        });
         $('tutorial-toggle').checked = !Tutorial.isDone();
 
         // Сохранённая партия — первым делом предлагаем продолжить.
@@ -764,19 +984,34 @@ class GameCore {
             $('continue-info').innerHTML =
                 `Ход ${g.turn} · ${date.getDate()}.${String(date.getMonth() + 1).padStart(2, '0')}.${date.getFullYear()}`
                 + (SaveGame.migrated ? ' · <span class="migrated">перенесена из прошлой версии</span>' : '');
-            $('continue-btn').addEventListener('click', () => {
-                try { launch(GameData.restore(g)); }
-                catch (e) { alert('Не удалось загрузить партию. Сохранение оставлено в хранилище.'); }
+            if (g.humans && g.humans.length > 1) {
+                $('continue-info').innerHTML += ` · <span class="migrated">📶 сетевая, код ${escape((g.net && g.net.code) || '')}</span>`;
+            }
+            $('continue-btn').addEventListener('click', async () => {
+                let data;
+                try { data = GameData.restore(g); }
+                catch (e) { alert('Не удалось загрузить партию. Сохранение оставлено в хранилище.'); return; }
+                if (!data.multiplayer) { launch(data); return; }
+                // сетевая партия: снова открываем игру с тем же кодом и ждём гостей
+                netNote = 'Открываем сетевую партию…'; netView = 'busy'; renderNet();
+                $('net-box').scrollIntoView({ block: 'nearest' });
+                const names = (data.net && data.net.names) || {};
+                const session = new NetHost(names[data.playerCountry] || playerName());
+                try { await session.start(data); }
+                catch (err) { netView = 'idle'; netNote = err.message; renderNet(); return; }
+                launch(data, false, session);
+                window.game.ui.toast(`Сетевая игра ${session.code}: гости могут вернуться — «Найти игру» у себя`);
             });
         }
 
         const renderFeatured = () => {
             $('quick-countries').innerHTML = featured.map(id => {
                 const a = assess(id);
-                return `<button class="quick-country" type="button" data-id="${id}" aria-pressed="${id === selectedId}">
+                const who = taken(id);
+                return `<button class="quick-country${who ? ' taken' : ''}" type="button" data-id="${id}" aria-pressed="${id === selectedId}">
                     ${flagImg(id, 80)}
                     <b>${escape(CountriesDB[id].name)}</b>
-                    <span class="quick-meta">${bars(a.level)}${LEVELS[a.level]}</span>
+                    <span class="quick-meta">${who ? `🎮 ${escape(who)}` : `${bars(a.level)}${LEVELS[a.level]}`}</span>
                 </button>`;
             }).join('');
         };
@@ -789,9 +1024,10 @@ class GameCore {
             $('list-label').textContent = query ? `Найдено: ${matches.length}` : `Все страны · ${playable.length}`;
             listEl.innerHTML = shown.length ? shown.map(id => {
                 const a = assess(id);
-                return `<button class="country-list-item${id === selectedId ? ' selected' : ''}" type="button" data-id="${id}" aria-pressed="${id === selectedId}">
+                const who = taken(id);
+                return `<button class="country-list-item${id === selectedId ? ' selected' : ''}${who ? ' taken' : ''}" type="button" data-id="${id}" aria-pressed="${id === selectedId}">
                     ${flagImg(id, 40)}
-                    <span class="name">${escape(CountriesDB[id].name)}</span>
+                    <span class="name">${escape(CountriesDB[id].name)}${who ? ` <small class="taken-by">🎮 ${escape(who)}</small>` : ''}</span>
                     <span class="list-regions">${a.regions} обл.</span>
                     ${bars(a.level)}<span class="sr-only">${LEVELS[a.level]}</span>
                 </button>`;
@@ -837,6 +1073,21 @@ class GameCore {
         // Кнопка говорит, что именно начнётся: страна и режим.
         const updateCta = () => {
             if (!selectedId) return;
+            if (net && net.role === 'guest') {
+                const host = (lobbyPlayers().find(p => p.host) || {}).name || 'хозяин';
+                startBtn.disabled = true;
+                startBtn.innerHTML = `<span>Ждём, когда ${escape(host)} начнёт</span><small>Ваша страна: ${escape(CountriesDB[selectedId].name)}</small>`;
+                return;
+            }
+            if (net && net.role === 'host') {
+                const check = net.canStart();
+                startBtn.disabled = !check.ok;
+                const count = net.players.filter(p => p.connected).length;
+                startBtn.innerHTML = check.ok
+                    ? `<span>Начать сетевую игру ▶</span><small>${escape(CountriesDB[selectedId].name)} · игроков: ${count}</small>`
+                    : `<span>${escape(check.reason)}</span><small>Код игры: ${escape(net.code)}</small>`;
+                return;
+            }
             const mode = scenario() === 'war2024' ? 'Сценарий 2024' : 'Мирный старт';
             const level = difficulty() === 'normal' ? '' : ' · ' + DIFFICULTY[difficulty()].name;
             startBtn.innerHTML = `<span>Начать игру ▶</span><small>${escape(CountriesDB[selectedId].name)} · ${mode}${level}</small>`;
@@ -854,7 +1105,9 @@ class GameCore {
         }, true);
 
         const select = (id, fromTap) => {
+            if (net && taken(id)) { netNote = `${CountriesDB[id].name} уже выбрал(а) ${taken(id)}`; renderNet(); return; }
             selectedId = id;
+            if (net) { netNote = ''; net.pick(id); renderNet(); }
             for (const el of document.querySelectorAll('#start-screen [data-id]')) {
                 const on = el.dataset.id === id;
                 el.setAttribute('aria-pressed', String(on));
@@ -881,11 +1134,23 @@ class GameCore {
         });
         moreBtn.addEventListener('click', () => { expanded = true; renderList(); });
         for (const radio of document.querySelectorAll('input[name="scenario"]')) {
-            radio.addEventListener('change', () => { renderFeatured(); renderList(); if (selectedId) renderDossier(); });
+            radio.addEventListener('change', () => { renderFeatured(); renderList(); if (selectedId) renderDossier(); if (net && net.role === 'host') net.setOptions(hostOptions()); });
         }
 
         startBtn.addEventListener('click', () => {
             if (!selectedId || !CountriesDB[selectedId]) return;
+            if (net) {
+                if (net.role !== 'host') return;
+                if ((saved || saveProblem) && !confirm('Начать сетевую игру? Сохранённая партия будет удалена.')) return;
+                const data = net.createGame(hostOptions());
+                if (!data) { updateCta(); return; }
+                const session = net;
+                net = null;
+                SaveGame.clear();
+                SaveGame.save(data);
+                launch(data, false, session);
+                return;
+            }
             if ((saved || saveProblem) && !confirm('Начать новую игру? Сохранённая партия будет удалена.')) return;
             SaveGame.clear();
             launch(new GameData(selectedId, { cheat: $('cheat-toggle').checked, scenario: scenario(), difficulty: difficulty() }),
@@ -916,6 +1181,7 @@ class GameCore {
         const initial = saved && playable.includes(saved.game.player) ? saved.game.player
             : (playable.includes('UA') ? 'UA' : playable[0]);
         selectedId = initial;
+        renderNet();
         renderFeatured();
         renderList();
         select(initial, false);
