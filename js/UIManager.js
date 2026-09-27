@@ -1038,8 +1038,9 @@ class UIManager {
         const lines = [];
         const c = data.council;
         if (c) {
-            const title = COUNCIL_KINDS[c.kind].title(data, c);
-            const mine = data.playerCountry in c.votes ? (c.votes[data.playerCountry] ? 'вы — за' : 'вы — против') : 'ваш голос ещё не отдан';
+            const title = c.target === data.playerCountry ? 'санкции против вас' : COUNCIL_KINDS[c.kind].title(data, c);
+            const mine = c.target === data.playerCountry ? 'ваш голос — против; соседей склонят подарки и договоры'
+                : data.playerCountry in c.votes ? (c.votes[data.playerCountry] ? 'вы — за' : 'вы — против') : 'ваш голос ещё не отдан';
             lines.push(`🏛️ На голосовании совета: <b>${this.escape(title)}</b> · ${mine}`);
         }
         const until = data.sanctions || {};

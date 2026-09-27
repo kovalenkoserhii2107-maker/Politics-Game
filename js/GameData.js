@@ -585,6 +585,8 @@ class GameData {
         }
         if (next.type === 'council') {
             if (!this.council || this.council.kind !== next.kind) return { ok: true, stale: true, ...next };
+            // санкции против нас самих: голос — «против», без вопроса
+            if (this.council.target === p) { this.council.votes[p] = false; return { ok: true, stale: true, ...next }; }
             Council.vote(this, p, accept);
             return { ok: true, accepted: !!accept, ...next };
         }

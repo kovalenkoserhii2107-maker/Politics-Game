@@ -268,7 +268,7 @@ class GameLoop {
                 date: this.formatDate(d.currentDate),
                 financial: { income: balance.income, expense: balance.expense, net: balance.income - balance.expense },
                 logs: logs.filter(l => l.for === cc),
-                events: [...shared.filter(e => !e.for || e.for === cc), ...missions].map(e => e.message),
+                events: [...shared.filter(e => (!e.for || e.for === cc) && e.exceptFor !== cc), ...missions].map(e => e.message),
                 worldBattles,
             };
             d.withPlayer(cc, () => d.saveTurnHistory(turnData));

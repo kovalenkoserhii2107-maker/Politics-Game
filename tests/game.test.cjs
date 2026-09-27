@@ -731,8 +731,8 @@ test('council: convenes on schedule, humans vote, sanctions cut trade and expire
     Council.convene(d, events);
     assert.equal(d.council.kind, 'sanctions');
     assert.equal(d.council.target, 'DE');
-    assert.ok(events[0].message.includes('Мировой совет'));
-    assert.equal(d.decisions[0].type, 'council');
+    assert.ok(events.some(e => e.message.includes('Мировой совет')));
+    assert.equal(d.decisions.length, 0, 'цель санкций не голосует');
     assert.equal(d.seatOf('PL').decisions[0].type, 'council');
     // Польша голосует «за» — командой, как в сетевой игре
     const guest = GameData.restore(JSON.parse(JSON.stringify(d.serialize())));
@@ -740,8 +740,7 @@ test('council: convenes on schedule, humans vote, sanctions cut trade and expire
     guest.act('answerDecision', true);
     d.replay('PL', guest.recorder);
     assert.equal(d.council.votes.PL, true);
-    d.act('answerDecision', false);
-    assert.equal(d.council.votes.DE, false);
+    assert.equal(d.council.votes.DE, false, 'голос цели — против сам');
     const back = GameData.restore(JSON.parse(JSON.stringify(d.serialize())));
     assert.equal(JSON.stringify(back.council), JSON.stringify(d.council));
     // соседи Германии не любят захватчиков: принимают
@@ -816,4 +815,26 @@ test('a country with debt that loses its last region keeps a finite treasury; br
     // что именно не так — видно в сообщении
     const bad = JSON.parse(JSON.stringify(d.serialize())); bad.countries.KG[1] = 5;
     assert.throws(() => GameData.restore(bad), /страна KG/);
+});
+
+test('council: the sanctioned human does not vote against themselves', () => {
+    const { GameData, Council, COUNCIL } = engine(), d = new GameData('FR', { humans: ['DE'] });
+    d.startWar('FR', 'ES');
+    for (const r of d.getCountryRegions('ES').filter(r => r.id !== d.countries.ES.capital).slice(0, 3)) d.setOwner(r.id, 'FR');
+    d.turn = COUNCIL.FIRST;
+    const events = [];
+    Council.convene(d, events);
+    assert.equal(d.council.target, 'FR');
+    assert.equal(d.decisions.filter(x => x.type === 'council').length, 0, 'Франции не предлагают голосовать против себя');
+    assert.equal(d.seatOf('DE').decisions.filter(x => x.type === 'council').length, 1, 'Германия голосует');
+    assert.equal(d.council.votes.FR, false, 'голос цели — против');
+    assert.ok(events.some(e => e.for === 'FR' && e.message.includes('против вас') && e.message.includes('3 области')));
+    assert.ok(events.some(e => e.exceptFor === 'FR' && e.message.includes('созван')));
+    assert.equal(Council.vote(d, 'FR', true), false, 'и командой «за» тоже нельзя');
+    assert.equal(d.council.votes.FR, false);
+    // старое сохранение, где решение уже лежит у цели, — отвечается «против» само
+    d.decisions.push({ type: 'council', from: 'FR', kind: 'sanctions' });
+    d.answerDecision(true);
+    assert.equal(d.council.votes.FR, false);
+    assert.equal(Council.regionsWord(1) + '|' + Council.regionsWord(21) + '|' + Council.regionsWord(12) + '|' + Council.regionsWord(5), '1 область|21 область|12 областей|5 областей');
 });
