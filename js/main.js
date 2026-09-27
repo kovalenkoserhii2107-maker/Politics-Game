@@ -232,9 +232,35 @@ class GameCore {
             return;
         }
 
+        // Война и мир — только после подтверждения: по кнопке легко промахнуться.
+        if ((btn.dataset.action === 'war' || btn.dataset.action === 'peace') && !btn.dataset.confirmed) {
+            const name = d.countries[cc].name;
+            const again = () => { btn.dataset.confirmed = '1'; try { this.runAction(btn); } finally { delete btn.dataset.confirmed; } };
+            if (btn.dataset.action === 'war') {
+                const check = d.canDeclareWar(player, cc);
+                if (!check.ok) { this.ui.toast(check.reason); return; }
+                const allies = Diplomacy.allies(d, cc).filter(x => x !== player && !d.isAtWar(x, player));
+                const lines = [`Стоит ${RULES.WAR_COST} влияния. Мир потом можно будет только предложить — противник может отказать.`];
+                if (allies.length) lines.push(`Её союзники тоже вступят в войну: ${allies.map(x => d.countries[x].name).join(', ')}.`);
+                if (d.isHuman(cc)) lines.push('Это живой игрок.');
+                this.ui.showDecision({
+                    title: `⚔️ Объявить войну: ${name}?`, text: lines.join('\n'),
+                    accept: 'Объявить войну', decline: 'Отмена', danger: true,
+                    onAccept: again, onDecline: () => {},
+                });
+            } else {
+                const info = d.warInfo(player, cc);
+                const lines = [info ? `Война идёт ${info.turns} ход. Вы заняли областей: ${info.taken}, потеряли: ${info.lost}.` : ''];
+                lines.push(d.isHuman(cc) ? 'Игрок решит после хода.' : `Стоит ${RULES.PEACE_COST} влияния, даже если откажут. Мир сохранит нынешние границы, перемирие — ${RULES.TRUCE_TURNS} ходов.`);
+                this.ui.showDecision({
+                    title: `🕊️ Предложить мир: ${name}?`, text: lines.filter(Boolean).join('\n'),
+                    accept: 'Предложить мир', decline: 'Отмена',
+                    onAccept: again, onDecline: () => {},
+                });
+            }
+            return;
+        }
         if (btn.dataset.action === 'war') {
-            const allies = Diplomacy.allies(d, cc).filter(x => x !== player && !d.isAtWar(x, player));
-            if (allies.length && !confirm(`У страны ${d.countries[cc].name} есть союзники: ${allies.map(x => d.countries[x].name).join(', ')}. Они тоже вступят в войну. Объявить?`)) return;
             const result = d.act('declareWar', player, cc);
             if (!result.ok) { this.ui.toast(result.reason); return; }
             this.ui.haptic(40);

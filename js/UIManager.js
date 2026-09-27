@@ -660,7 +660,7 @@ class UIManager {
     }
 
     // --- решения и конец игры ------------------------------------------------------------------
-    showDecision({ title, text, accept, decline, onAccept, onDecline, alt, onAlt }) {
+    showDecision({ title, text, accept, decline, onAccept, onDecline, alt, onAlt, danger }) {
         document.getElementById('decision-title').textContent = title;
         const body = document.getElementById('decision-text');
         body.textContent = text;
@@ -669,6 +669,7 @@ class UIManager {
         const no = document.getElementById('decision-decline');
         const other = document.getElementById('decision-alt');
         yes.textContent = accept;
+        yes.classList.toggle('danger', !!danger);
         no.textContent = decline;
         other.hidden = !alt;
         other.textContent = alt || '';

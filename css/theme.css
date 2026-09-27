@@ -683,3 +683,5 @@ body.hotseat-handoff #ui-layer > :not(#hotseat-screen) { visibility: hidden; }
 .rg-build:disabled { opacity: 0.45; cursor: default; }
 .rg-project { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 0.85rem; color: var(--warn); }
 .rg-recruit .mini-btn, .rg-bulk .mini-btn { min-height: 36px; }
+
+#decision-accept.danger { background: var(--accent); color: #fff; }
