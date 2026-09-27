@@ -313,6 +313,17 @@ class GameLoop {
         };
         const valid = from?.alive && (next.type === 'peace' ? d.isAtWar(next.from, d.playerCountry) : !d.isAtWar(next.from, d.playerCountry));
         if (!valid) { d.act('answerDecision', false); this.afterSummary(); return; }
+        if (next.type === 'rebels') {
+            const region = d.regions[next.region];
+            if (!region || !d.revolts[next.region]) { d.act('answerDecision', false); this.afterSummary(); return; }
+            this.ui.showDecision({
+                title: `🔥 Мятежная область ${region.name} просится к вам`,
+                text: `В области ${region.name} (${from.name}) восстание. Если через ${d.revolts[next.region].left} ход. мятежники победят, область перейдёт к вам. Отношения со страной ${from.name} ухудшатся на ${-REVOLT.SECEDE_RELATION}.`,
+                accept: 'Принять область', decline: 'Отказаться',
+                onAccept: () => finish(true), onDecline: () => finish(false),
+            });
+            return;
+        }
         if (next.type === 'event') {
             const ev = Events.describe(d, next);
             this.ui.showDecision({ ...ev, onAccept: () => finish(true), onDecline: () => finish(false) });

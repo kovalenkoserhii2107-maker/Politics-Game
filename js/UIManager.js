@@ -323,6 +323,35 @@ class UIManager {
         block.classList.toggle('top', top);
     }
 
+    // Недовольство и восстание в области — видно всем, действовать может хозяин.
+    unrestBlock(data, region) {
+        const revolt = data.revolts[region.id];
+        const mine = region.owner === data.playerCountry;
+        if (revolt) {
+            const ours = Unrest.garrisonStrength(data, region.id), theirs = Unrest.rebelStrength(data, region.id);
+            const cost = Unrest.appeaseCost(data, region.id);
+            const sponsor = revolt.sponsor ? data.countries[revolt.sponsor].name : null;
+            const capital = data.countries[region.owner].capital === region.id;
+            const tried = revolt.triedTurn === data.turn;
+            return `<div class="revolt-box">
+                <b>🔥 Восстание${Unrest.civilWar(data, region.owner) ? ' · гражданская война' : ''}</b>
+                <p>${capital ? `Через ${revolt.left} ход. в столице будет переворот: влияние и четверть казны пропадут.` : `Через ${revolt.left} ход. область отделится${sponsor ? ` и перейдёт под флаг: ${this.escape(sponsor)}` : ''}.`} Налогов область не платит.</p>
+                <div class="revolt-power"><span>Мятежники: <b class="neg">${theirs}</b></span><span>Гарнизон: <b class="${ours >= theirs ? 'pos' : 'neg'}">${ours}</b></span></div>
+                ${mine ? `<div class="help-chips">
+                    <button class="mini-btn war" data-action="suppress" data-region="${region.id}" ${tried ? 'disabled' : ''}>${tried ? 'Уже пытались' : ours >= theirs ? '⚔️ Подавить силой' : '⚔️ Подавить (гарнизон слабее)'}</button>
+                    <button class="mini-btn" data-action="appease" data-region="${region.id}" ${data.countries[region.owner].money >= cost ? '' : 'disabled'}>🤝 Уступки · ${this.money(cost)}</button>
+                </div><small class="muted">Подавление стоит части гарнизона, при неудаче — больше. Можно перебросить войска и попытаться на следующем ходу.</small>` : ''}
+            </div>`;
+        }
+        if (!mine || (region.unrest || 0) <= 0) return '';
+        const pct = Math.round(region.unrest * 100);
+        return `<div class="unrest-box ${pct >= REVOLT.WARN * 100 ? 'hot' : ''}">
+            <div class="unrest-head"><span>Недовольство</span><b>${pct}%</b></div>
+            <div class="mission-bar"><span style="width:${pct}%"></span></div>
+            <small>При 100% вспыхнет восстание. Недовольство растёт, пока лояльность ниже ${Math.round(REVOLT.THRESHOLD * 100)}%: снизьте налоги, накормите людей, стройте инфраструктуру.</small>
+        </div>`;
+    }
+
     // Помощь игроку или союзнику: деньги и запасы со склада.
     helpBlock(data, countryId) {
         if (!data.isHuman(countryId) && !Diplomacy.isAllied(data, data.playerCountry, countryId)) return '';
@@ -368,6 +397,8 @@ class UIManager {
             this.relationTag(data, country.id),
             capital ? this.tag(`🏛️ ${this.escape(capital.name)}`) : '',
             this.tag(`${stats.regions} обл.`),
+            Unrest.civilWar(data, country.id) ? this.tag('🔥 Гражданская война', 'war')
+                : Unrest.revoltsOf(data, country.id).length ? this.tag(`🔥 Восстаний: ${Unrest.revoltsOf(data, country.id).length}`, 'war') : '',
         ].join('');
         this.fillEconomy(data, { countryId: country.id });
 
@@ -402,6 +433,8 @@ class UIManager {
         if (data.isCapital(region.id)) tags.push(this.tag('🏛️ Столица', 'capital'));
         if (region.owner !== region.originalOwner) tags.push(this.tag(`Оккупирована (${data.countries[region.originalOwner].name})`, 'war'));
         tags.push(this.tag(`Лояльность ${Math.round(region.loyalty * 100)}%`, region.loyalty < 0.6 ? 'war' : ''));
+        if (data.revolts[region.id]) tags.push(this.tag('🔥 Восстание', 'war'));
+        else if ((region.unrest || 0) >= REVOLT.WARN) tags.push(this.tag(`⚠️ Недовольство ${Math.round(region.unrest * 100)}%`, 'truce'));
         document.getElementById('panel-tags').innerHTML = tags.join('');
         this.fillEconomy(data, { region });
         this.renderDevelopment(region, data);
@@ -430,6 +463,7 @@ class UIManager {
                     </button>
                 </div>`;
         }
+        html = this.unrestBlock(data, region) + html;
         if (data.multiplayer) html += `<button class="mini-btn ping-btn" data-action="ping" data-region="${region.id}">📍 Показать игрокам</button>`;
         document.getElementById('region-army-container').innerHTML = html;
         this.placeDiplomacy(false);
@@ -844,10 +878,14 @@ class UIManager {
         document.getElementById('gov-policy-note').textContent = `${POLICIES[player.policy].description} Смена: 5 влияния.${cooldown ? ` Доступна через ${cooldown} ход.` : ''}`;
         document.getElementById('gov-tax-val').textContent = Math.round(player.taxRate * 100) + '%';
         document.getElementById('gov-tax-slider').value = player.taxRate;
-        const penalty = Math.max(0, player.taxRate - 0.1) * 2;
-        document.getElementById('gov-tax-note').textContent = penalty > 0
-            ? `Высокий налог: лояльность будет снижаться до ${Math.round(Math.min(1, 1 + POLICIES[player.policy].loyalty - penalty) * 100)}% — а с ней и сбор.`
+        const penalty = GameData.taxPenalty(player.taxRate);
+        const target = Math.min(1, 1 + POLICIES[player.policy].loyalty - penalty);
+        const note = document.getElementById('gov-tax-note');
+        note.textContent = penalty > 0
+            ? `Высокий налог: лояльность будет снижаться до ${Math.round(target * 100)}% — а с ней и сбор.`
+              + (target < REVOLT.THRESHOLD ? ` ⚠️ Ниже ${Math.round(REVOLT.THRESHOLD * 100)}% копится недовольство — начнутся восстания и области могут отделиться.` : '')
             : 'Налог до 10% не снижает лояльность.';
+        note.classList.toggle('neg', target < REVOLT.THRESHOLD);
 
         this.renderEconomy(data);
         this.renderFinance(data);

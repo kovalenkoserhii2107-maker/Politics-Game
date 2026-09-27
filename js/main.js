@@ -100,6 +100,17 @@ class GameCore {
             this.afterMissions();
             return;
         }
+        if (action === 'suppress' || action === 'appease') {
+            const id = btn.dataset.region;
+            const result = d.act(action === 'suppress' ? 'suppressRevolt' : 'appeaseRevolt', id);
+            if (!result.ok) { this.ui.toast(result.reason); return; }
+            this.ui.haptic(30);
+            this.ui.toast(action === 'appease' ? `Уступки приняты: восстание утихло (−${this.ui.money(result.cost)})`
+                : result.won ? `Восстание подавлено: гарнизон ${result.ours} против ${result.theirs}` : `Подавить не вышло: гарнизон ${result.ours} против ${result.theirs}. Нужно больше войск.`);
+            this.map.refreshColors();
+            this.afterStateChange();
+            return;
+        }
         if (action === 'borrow' || action === 'repay') {
             const result = d.act(action, Number(btn.dataset.amount));
             if (!result.ok) { this.ui.toast(result.reason); return; }

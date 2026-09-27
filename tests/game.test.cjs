@@ -3,8 +3,8 @@ const assert=require('node:assert/strict');
 const fs=require('node:fs'),path=require('node:path'),vm=require('node:vm');
 function engine(){
  const values=new Map();let seed=123456;const math=Object.create(Math);math.random=()=>{seed=(Math.imul(seed,1664525)+1013904223)>>>0;return seed/4294967296;};const context=vm.createContext({console,Date,Math:math,structuredClone,localStorage:{setItem:(k,v)=>values.set(k,v),getItem:k=>values.get(k)||null,removeItem:k=>values.delete(k),key:i=>[...values.keys()][i]??null,get length(){return values.size;}}});
- for(const file of ['data/CountriesDB','data/RegionsDB','data/NeighborsDB','data/CitiesDB','UnitsDB','Tech','Economy','Diplomacy','Missions','Score','Events','GameData','AI','GameLoop'])vm.runInContext(fs.readFileSync(path.join(__dirname,'../js',file+'.js'),'utf8'),context);
- return Object.assign(vm.runInContext('({GameData,AI,SaveGame,GameLoop,RegionsDB,UnitsDB,DEVELOPMENT,POLICIES,Economy,RESOURCES,ECONOMY,Tech,TECH_TREE,MODERNIZATION,Diplomacy,DIPLOMACY,Missions,MISSION_KINDS,MISSION_RULES,Score,GOALS,Events,EVENTS,DEBT,CYCLES,INFRA})',context),{localStorage:context.localStorage});
+ for(const file of ['data/CountriesDB','data/RegionsDB','data/NeighborsDB','data/CitiesDB','UnitsDB','Tech','Economy','Diplomacy','Missions','Score','Events','Unrest','GameData','AI','GameLoop'])vm.runInContext(fs.readFileSync(path.join(__dirname,'../js',file+'.js'),'utf8'),context);
+ return Object.assign(vm.runInContext('({GameData,AI,SaveGame,GameLoop,RegionsDB,UnitsDB,DEVELOPMENT,POLICIES,Economy,RESOURCES,ECONOMY,Tech,TECH_TREE,MODERNIZATION,Diplomacy,DIPLOMACY,Missions,MISSION_KINDS,MISSION_RULES,Score,GOALS,Events,EVENTS,DEBT,CYCLES,INFRA,Unrest,REVOLT})',context),{localStorage:context.localStorage});
 }
 test('casualties are invariant under splitting an attack into orders',()=>{
  const {GameData}=engine();const fight=split=>{const d=new GameData('UA',{scenario:'war2024'});for(const id of ['UA-1','RU-19']){d.regions[id].army=d.emptyArmy();d.regions[id].army.infantry=10;}
@@ -510,4 +510,84 @@ test('infrastructure raises regional taxes and loyalty target; old saves get lev
     for (const r of Object.values(old.regions)) delete r[5].infra;
     const back = GameData.restore(JSON.parse(JSON.stringify(old)));
     assert.equal(back.regions[region.id].development.infra, 0);
+});
+
+// --- восстания ---
+test('unrest: low loyalty builds up, a revolt stops taxes and the region secedes to a neighbour', () => {
+    const { GameData, Unrest, REVOLT } = engine(), d = new GameData('DE');
+    const region = d.getCountryRegions('DE').find(r => r.id !== d.countries.DE.capital);
+    const tax = d.countryBalance('DE').tax;
+    region.loyalty = 0.2;
+    const events = [];
+    let turns = 0;
+    while (!d.revolts[region.id] && turns < 20) { region.loyalty = 0.2; Unrest.update(d, events); turns++; }
+    assert.ok(d.revolts[region.id], 'восстание вспыхнуло');
+    assert.ok(events.some(e => e.for === 'DE' && e.message.includes('зреет')), 'было предупреждение');
+    assert.ok(events.some(e => e.for === 'DE' && e.message.includes('Восстание')));
+    assert.ok(d.countryBalance('DE').tax < tax, 'восставшая область не платит');
+    const sponsor = d.revolts[region.id].sponsor;
+    assert.ok(sponsor && sponsor !== 'DE');
+    for (let i = 0; i < REVOLT.TURNS; i++) Unrest.update(d, events);
+    assert.notEqual(region.owner, 'DE', 'область отделилась');
+    assert.ok(!d.revolts[region.id]);
+    assert.ok(events.some(e => e.for === 'DE' && e.message.includes('отделилась')));
+});
+
+test('unrest: suppress with a strong garrison, appease with money', () => {
+    const { GameData, Unrest } = engine(), d = new GameData('DE');
+    const [a, b] = d.getCountryRegions('DE');
+    Unrest.start(d, a.id, []);
+    a.army.tanks += 200;
+    const r = d.act('suppressRevolt', a.id);
+    assert.equal(r.won, true);
+    assert.ok(!d.revolts[a.id]);
+    Unrest.start(d, b.id, []);
+    b.army = d.emptyArmy();
+    const lost = d.act('suppressRevolt', b.id);
+    assert.equal(lost.won, false);
+    assert.equal(d.act('suppressRevolt', b.id).ok, false, 'раз в ход');
+    d.countries.DE.money = 1e9;
+    const paid = d.act('appeaseRevolt', b.id);
+    assert.equal(paid.ok, true);
+    assert.ok(!d.revolts[b.id]);
+    assert.ok(b.loyalty >= 0.6);
+});
+
+test('unrest: a human neighbour decides; civil war cuts taxes; revolts are saved', () => {
+    const { GameData, Unrest, REVOLT } = engine(), d = new GameData('DE', { humans: ['PL'] });
+    const region = d.getCountryRegions('DE').find(r => r.id !== d.countries.DE.capital && d.getNeighbors(r.id).some(id => d.regions[id]?.owner === 'PL'));
+    d.relations[d.pairKey('DE', 'PL')] = -90;   // поляки — главный соперник
+    d.turn = 5;
+    Unrest.start(d, region.id, []);
+    assert.equal(d.revolts[region.id].sponsor, 'PL');
+    assert.ok(d.seats.PL.decisions.some(x => x.type === 'rebels'));
+    d.withPlayer('PL', () => d.act('answerDecision', true));
+    const back = GameData.restore(JSON.parse(JSON.stringify(d.serialize())));
+    assert.equal(back.revolts[region.id].accepted, true);
+    for (let i = 0; i < REVOLT.TURNS; i++) Unrest.update(d, []);
+    assert.equal(region.owner, 'PL');
+    // гражданская война
+    const e = new GameData('DE');
+    const tax = e.countryBalance('DE').tax;
+    const [x, y] = e.getCountryRegions('DE').filter(r => r.id !== e.countries.DE.capital);
+    Unrest.start(e, x.id, []); Unrest.start(e, y.id, []);
+    assert.equal(Unrest.civilWar(e, 'DE'), true);
+    const expected = (tax - (x.population + y.population) * e.countries.DE.taxRate) * REVOLT.CIVIL_TAX;
+    assert.ok(e.countryBalance('DE').tax < tax * REVOLT.CIVIL_TAX);
+    assert.ok(Math.abs(e.countryBalance('DE').tax - expected) / expected < 0.1);
+});
+
+test('unrest: a revolt in the capital ends with a coup, not a lost country', () => {
+    const { GameData, Unrest, REVOLT } = engine(), d = new GameData('DE');
+    const capital = d.regions[d.countries.DE.capital];
+    d.countries.DE.taxRate = 0.3; d.countries.DE.influence = 40;
+    const money = d.countries.DE.money;
+    Unrest.start(d, capital.id, []);
+    const events = [];
+    for (let i = 0; i < REVOLT.TURNS; i++) Unrest.update(d, events);
+    assert.equal(capital.owner, 'DE');
+    assert.equal(d.countries.DE.taxRate, 0.1);
+    assert.equal(d.countries.DE.influence, 0);
+    assert.ok(d.countries.DE.money < money);
+    assert.ok(events.some(e => e.message.includes('Переворот')));
 });

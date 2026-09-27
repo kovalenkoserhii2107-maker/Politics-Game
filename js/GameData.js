@@ -75,6 +75,7 @@ class GameData {
 
         Diplomacy.init(this);
         Missions.init(this);
+        Unrest.init(this);
         this.diploEvents = [];      // что случилось в дипломатии между отчётами хода
         // Страны под управлением людей. В одиночной игре — только игрок; в
         // сетевой — все участники. Задания, решения и журнал каждого, кроме
@@ -241,7 +242,7 @@ class GameData {
                 // визуальный центр — сюда ставятся значок войск и подпись
                 lx: info.lx ?? info.cx,
                 ly: info.ly ?? info.cy,
-                loyalty: 1.0,
+                loyalty: 1.0, unrest: 0,
                 development: { industry: 0, agro: 0, oil: 0, infra: 0 },
                 army: this.emptyArmy(),
                 resources: { oil: info.oil, agro: info.agro, industry: info.industry },
@@ -321,8 +322,14 @@ class GameData {
     }
 
     // Лояльность, к которой со временем придёт своя область при таком налоге.
+    // Сколько лояльности отнимает налог: до 10% — ничего, дальше — всё сильнее;
+    // выше 20% народ терпит плохо, при 30% дело идёт к восстаниям.
+    static taxPenalty(rate) {
+        return Math.max(0, rate - 0.1) * 2 + Math.max(0, rate - 0.2) * 3;
+    }
+
     static loyaltyAtTax(rate, policy = 'balanced') {
-        return Math.min(1, Math.max(0.2, 1 + POLICIES[policy].loyalty - Math.max(0, rate - 0.1) * 2));
+        return Math.min(1, Math.max(0.2, 1 + POLICIES[policy].loyalty - GameData.taxPenalty(rate)));
     }
 
     // Бюджет через несколько ходов, когда лояльность придёт к своей цели:
@@ -546,6 +553,13 @@ class GameData {
         if (!next) return { ok: false };
         this.decisions.shift();
         const p = this.playerCountry, from = next.from;
+        if (next.type === 'rebels') {
+            const revolt = this.revolts[next.region];
+            if (!revolt || revolt.sponsor !== p) return { ok: true, stale: true, ...next };
+            if (accept) revolt.accepted = true;
+            else revolt.sponsor = null;
+            return { ok: true, accepted: !!accept, ...next };
+        }
         if (next.type === 'event') {
             if (!EVENTS[next.event] || !this.countries[from] || !this.countries[from].alive) return { ok: true, stale: true, ...next };
             return { ok: true, accepted: !!accept, summary: Events.apply(this, next, accept), ...next };
@@ -1292,12 +1306,14 @@ class GameData {
         }
         const policy = POLICIES[country.policy] || POLICIES.balanced;
         for (const region of this.getCountryRegions(countryId)) {
-            tax += region.population * country.taxRate * region.loyalty * (1 + INFRA.TAX * (region.development.infra || 0));
+            // восставшая область налогов не платит
+            if (!this.revolts[region.id]) tax += region.population * country.taxRate * region.loyalty * (1 + INFRA.TAX * (region.development.infra || 0));
             social += region.population * policy.socialCost;
             upkeep += this.armyUpkeep(region.army);
         }
         const cycle = Economy.cycle(this);
-        tax *= Economy.taxFactor(country) * Tech.factor(country, 'tax') * cycle.tax;
+        tax *= Economy.taxFactor(country) * Tech.factor(country, 'tax') * cycle.tax
+            * (Unrest.civilWar(this, countryId) ? REVOLT.CIVIL_TAX : 1);
         const trade = Economy.projectTrade(this, countryId);
         // торговые договоры: продаём дороже, покупаем дешевле
         const bonus = Diplomacy.tradeBonus(this, countryId);
@@ -1309,6 +1325,10 @@ class GameData {
             tax, sales, purchases, upkeep, social, interest, trade, tradeBonus: bonus,
         };
     }
+
+    // --- восстания --------------------------------------------------------------
+    suppressRevolt(regionId) { return this.gameOver ? { ok: false } : Unrest.suppress(this, regionId, this.playerCountry); }
+    appeaseRevolt(regionId) { return this.gameOver ? { ok: false } : Unrest.appease(this, regionId, this.playerCountry); }
 
     // --- госдолг ------------------------------------------------------------
     borrow(amount, countryId = this.playerCountry) {
@@ -1384,12 +1404,14 @@ class GameData {
             const country = this.countries[region.owner];
             const occupied = region.owner !== region.originalOwner;
             const target = Math.min(1, Math.max(0.2, (occupied ? 0.8 : 1) + POLICIES[country.policy].loyalty + INFRA.LOYALTY * (region.development.infra || 0)
-                - Math.max(0, country.taxRate - 0.1) * 2 - Economy.loyaltyPenalty(country)));
+                - GameData.taxPenalty(country.taxRate) - Economy.loyaltyPenalty(country)));
             if (region.loyalty < target) region.loyalty = Math.min(target, region.loyalty + 0.05);
             else if (region.loyalty > target) region.loyalty = Math.max(target, region.loyalty - 0.03);
             const change = Economy.populationChange(country);
             if (change && region.population > 0) region.population = Math.max(1000, Math.round(region.population * (1 + change)));
         }
+
+        Unrest.update(this, events);
 
         // Гибель стран
         for (const country of Object.values(this.countries)) {
@@ -1533,6 +1555,7 @@ class GameData {
                 region.reconActiveUntil ? +new Date(region.reconActiveUntil) : 0,
                 { ...region.resources }, { ...region.development },
                 region.population,
+                Math.round((region.unrest || 0) * 100) / 100,
             ];
         }
         const countries = {};
@@ -1558,6 +1581,7 @@ class GameData {
             difficulty: this.difficulty,
             market: { ...this.market },
             cycle: this.cycle ? { ...this.cycle } : undefined,
+            revolts: Unrest.serialize(this),
             diplomacy: Diplomacy.serialize(this),
             missions: this.missions.map(m => ({ ...m, reward: { ...m.reward } })),
             stats: { ...this.stats },
@@ -1598,6 +1622,7 @@ class GameData {
             for (const key of ['industry', 'agro', 'oil']) if (!count(r[4]?.[key]) || !count(r[5]?.[key]) || r[5][key] > 5) fail();
             if (r[5].infra !== undefined && (!count(r[5].infra) || r[5].infra > 5)) fail();
             if (r[6] !== undefined && !count(r[6])) fail();
+            if (r[7] !== undefined && (!finite(r[7]) || r[7] < 0 || r[7] > 1)) fail();
         }
         for (const id of Object.keys(CountriesDB)) {
             const c = save.countries[id];
@@ -1610,9 +1635,10 @@ class GameData {
         const pair = key => typeof key === 'string' && key.split('|').length === 2 && key.split('|').every(cc => CountriesDB[cc]);
         if (!Array.isArray(save.wars) || save.wars.some(x => !Array.isArray(x) || !pair(x[0]) || !count(x[1]?.start) || !CountriesDB[x[1]?.attacker])) fail();
         if (!Array.isArray(save.truces) || save.truces.some(x => !Array.isArray(x) || !pair(x[0]) || !count(x[1]))) fail();
-        const decisionsOk = list => Array.isArray(list) && list.every(x => x && GameData.DECISIONS.includes(x.type) && CountriesDB[x.from] && (x.type !== 'event' || Events.validDecision(x)));
+        const decisionsOk = list => Array.isArray(list) && list.every(x => x && GameData.DECISIONS.includes(x.type) && CountriesDB[x.from] && (x.type !== 'event' || Events.validDecision(x)) && (x.type !== 'rebels' || !!RegionsDB[x.region]));
         if (!decisionsOk(save.decisions)) fail();
         if (save.goal !== undefined && !GOALS[save.goal]) fail();
+        if (save.revolts !== undefined && !Unrest.valid(save.revolts)) fail();
         if (save.cycle !== undefined && (!save.cycle || !CYCLES[save.cycle.phase] || !Number.isInteger(save.cycle.until))) fail();
         if (save.scoreStart !== undefined && !Score.valid(save.scoreStart)) fail();
         if (save.humans !== undefined) {
@@ -1682,6 +1708,7 @@ class GameData {
                 region.development = { ...saved[5], infra: saved[5].infra || 0 };
                 region.reconActiveUntil = saved[3] ? new Date(saved[3]) : undefined;
                 if (saved[6] !== undefined) region.population = saved[6];
+                region.unrest = saved[7] || 0;
             }
             data.regionsByCountry[region.owner].push(region.id);
         }
@@ -1718,6 +1745,7 @@ class GameData {
         data.campaign = { ...save.campaign };
         if (save.market) data.market = { ...save.market };
         if (save.cycle) data.cycle = { ...save.cycle };
+        if (save.revolts) data.revolts = structuredClone(save.revolts);
         if (save.diplomacy) Object.assign(data, structuredClone(save.diplomacy));
         if (save.missions) { data.missions = structuredClone(save.missions); data.stats = { ...save.stats }; }
         else Missions.refill(data);
@@ -1827,7 +1855,7 @@ class GameData {
 }
 
 // Предложения, которые ждут ответа игрока.
-GameData.DECISIONS = ['peace', 'deal', 'pact', 'alliance', 'event'];
+GameData.DECISIONS = ['peace', 'deal', 'pact', 'alliance', 'event', 'rebels'];
 GameData.SEAT_FIELDS = ['missions', 'stats', 'decisions', 'history', 'campaign'];
 // Команды игрока → номер аргумента со страной (−1 — страна не указывается).
 GameData.COMMANDS = {
@@ -1835,5 +1863,5 @@ GameData.COMMANDS = {
     disband: 2, invest: 2, cancelProject: 1, integrateTerritory: -1,
     setTrade: 0, research: 0, startResearch: 0, cancelResearch: 0, setPolicy: 0, setTaxRate: 0,
     declareWar: 0, proposePeace: -1, diplomacyAction: -1, answerDecision: -1,
-    claimMission: -1, skipMission: -1, transfer: -1, cedeRegion: -1, borrow: 1, repay: 1,
+    claimMission: -1, skipMission: -1, transfer: -1, cedeRegion: -1, borrow: 1, repay: 1, suppressRevolt: -1, appeaseRevolt: -1,
 };

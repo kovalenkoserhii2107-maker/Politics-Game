@@ -44,6 +44,7 @@ class AI {
             if (!country.alive || d.isHuman(country.id)) continue;
             if (!d.regionsByCountry[country.id].length) continue;
             this.balanceTaxes(country);
+            this.handleRevolts(country);
             this.manageDebt(country);
             this.planScience(country);
             const enemies = d.enemiesOf(country.id);
@@ -73,6 +74,15 @@ class AI {
             }
         }
         if (best && best.score >= 1 / AI_RULES.INVEST_PAYBACK) d.invest(best.region.id, best.kind, country.id);
+    }
+
+    // Восстание: если есть деньги — уступки, иначе подавляем, когда гарнизон сильнее.
+    handleRevolts(country) {
+        const d = this.data;
+        for (const id of Unrest.revoltsOf(d, country.id)) {
+            if (country.money > Unrest.appeaseCost(d, id) * 2) Unrest.appease(d, id, country.id);
+            else if (Unrest.garrisonStrength(d, id) >= Unrest.rebelStrength(d, id)) Unrest.suppress(d, id, country.id);
+        }
     }
 
     // Долг — инструмент игроков: ИИ, получив кредит, тут же тратил бы его
