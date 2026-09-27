@@ -234,9 +234,15 @@ class NetHost {
             const names = net.names || {};
             this.players[0].cc = resume.playerCountry;
             this.players[0].name = names[resume.playerCountry] || this.name;
-            for (const [id, cc] of Object.entries(net.clients || {})) {
-                this.players.push({ id, name: names[cc] || 'Игрок', cc, host: false, connected: false, ready: false });
+            // места — по списку людей: сервером может стать и бывший гость,
+            // тогда бывший сервер займёт свободное место при подключении
+            const byCountry = {};
+            for (const [id, cc] of Object.entries(net.clients || {})) if (cc !== resume.playerCountry) byCountry[cc] = id;
+            for (const cc of resume.humans) {
+                if (cc === resume.playerCountry) continue;
+                this.players.push({ id: byCountry[cc] || `seat-${cc}`, name: names[cc] || 'Игрок', cc, host: false, connected: false, ready: false });
             }
+            resume.net = { ...net, clients: Object.fromEntries(Object.entries(byCountry).map(([cc, id]) => [id, cc])) };
         }
         let code = resume?.net?.code || Net.randomCode();
         for (let attempt = 0; ; attempt++) {
@@ -285,7 +291,7 @@ class NetHost {
 
     hello() {
         const host = this.players[0];
-        return { t: 'hello', code: this.code, host: host.name, cc: host.cc, players: this.players.length, started: !!this.data };
+        return { t: 'hello', code: this.code, host: host.name, cc: host.cc, players: this.players.length, started: !!this.data, campaign: this.data && this.data.net ? this.data.net.id : null };
     }
 
     accept(conn) {
@@ -312,6 +318,7 @@ class NetHost {
             if (player.link) player.link.close();
             player.name = Net.cleanName(meta.name);
             player.connected = true;
+            if (this.data && player.cc && this.data.net) this.data.net.names = { ...(this.data.net.names || {}), [player.cc]: player.name };
             const link = new NetLink(conn, message => this.onMessage(player, message), () => {
                 if (player.link !== link) return;
                 player.link = null;
@@ -455,6 +462,7 @@ class NetHost {
         const guests = this.players.slice(1);
         const d = new GameData(host.cc, { ...options, humans: guests.map(p => p.cc) });
         d.net = {
+            id: SaveGame.campaignId(),
             code: this.code,
             clients: Object.fromEntries(guests.map(p => [p.id, p.cc])),
             names: Object.fromEntries(this.players.map(p => [p.cc, p.name])),
@@ -564,6 +572,13 @@ class NetGuest {
         })));
         peer.destroy();
         return { lan: true, games };
+    }
+
+    // Кампания могла открыться с другим кодом — ищем её в сети по номеру.
+    static async findCampaign(id) {
+        const found = await NetGuest.scan();
+        const game = found.games.find(g => g.campaign === id);
+        return game ? game.code : null;
     }
 
     async join(code) {

@@ -403,3 +403,18 @@ body.net-searching .start-cta { display: none; }
 .goals { margin-top: 14px; }
 .segmented label:has(input:disabled) span { opacity: 0.4; cursor: not-allowed; }
 .goals .segmented { grid-template-columns: repeat(4, 1fr); }
+/* сохранённые сетевые кампании */
+.net-campaigns { margin-top: 14px; display: flex; flex-direction: column; gap: 6px; }
+.net-campaigns > .label { margin-bottom: 2px; }
+.net-campaign {
+    display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px;
+    padding: 10px 12px; background: var(--s2); border: 1px solid var(--line-2); border-radius: var(--r);
+}
+.nc-text { display: flex; flex-direction: column; gap: 3px; min-width: 0; flex: 1 1 200px; }
+.nc-text span { font-size: 0.92rem; line-height: 1.35; }
+.nc-text small { color: var(--text-2); font-family: var(--mono); font-size: 0.74rem; }
+.nc-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+.nc-del { min-width: 36px; padding: 0 10px; }
+.net-campaign { position: relative; }
+.net-campaign .nc-text { padding-right: 40px; }
+.net-campaign .nc-del { position: absolute; top: 6px; right: 6px; min-height: 36px; border-color: transparent; color: var(--text-3); }

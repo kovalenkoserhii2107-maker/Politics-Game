@@ -9,7 +9,6 @@ const SaveGame = {
     BACKUP_KEY: 'politics-game-save-backup',
     migrated: false,
     suspended: false,
-    disabled: false,
     error: '',
     signature: null,
 
@@ -29,7 +28,8 @@ const SaveGame = {
 
     save(data) {
         if (this.suspended) return false;
-        if (this.disabled) return true;   // гость сетевой игры: мир хранит сервер
+        // сетевая кампания живёт в своей ячейке и не трогает одиночную партию
+        if (data.multiplayer && data.net) return this.saveCampaign(data);
         try {
             const payload = { map: this.mapId(), savedAt: Date.now(), game: data.serialize() };
             localStorage.setItem(this.KEY, JSON.stringify(payload));
@@ -82,6 +82,84 @@ const SaveGame = {
         const payload = { app: 'politics-game', map: this.mapId(), savedAt: Date.now(), game: data.serialize() };
         const name = `politics-${data.playerCountry.toLowerCase()}-turn${data.turn}.json`;
         return { name, text: JSON.stringify(payload) };
+    },
+
+    // --- сетевые кампании ---------------------------------------------------
+    // Каждая кампания — в своей ячейке. Хранят и сервер, и гости: гость
+    // может потом снова подключиться или сам открыть игру как сервер.
+    CAMPAIGN_PREFIX: 'politics-campaign-',
+    CAMPAIGN_MAX: 6,
+    campaignRole: 'host',
+
+    campaignId() {
+        return Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4);
+    },
+
+    saveCampaign(data) {
+        const net = data.net;
+        if (!net.id) net.id = this.campaignId();
+        const game = data.serialize();
+        const meta = {
+            id: net.id, code: net.code || '', role: this.campaignRole, you: data.playerCountry,
+            names: { ...(net.names || {}) }, humans: [...game.humans], turn: data.turn, date: +data.currentDate,
+            goal: data.goal, gameOver: !!data.gameOver,
+        };
+        const text = JSON.stringify({ map: this.mapId(), savedAt: Date.now(), meta, game });
+        const key = this.CAMPAIGN_PREFIX + net.id;
+        for (let attempt = 0; attempt < 2; attempt++) {
+            try {
+                localStorage.setItem(key, text);
+                this.error = '';
+                this.pruneCampaigns(net.id);
+                return true;
+            } catch (e) {
+                // места мало — выбрасываем самые старые кампании и пробуем ещё раз
+                this.pruneCampaigns(net.id, 1);
+            }
+        }
+        this.error = 'Хранилище переполнено. Сетевая кампания не сохранена.';
+        return false;
+    },
+
+    campaignKeys() {
+        const keys = [];
+        try {
+            for (let i = 0; i < localStorage.length; i++) {
+                const key = localStorage.key(i);
+                if (key && key.startsWith(this.CAMPAIGN_PREFIX)) keys.push(key);
+            }
+        } catch (e) { /* хранилище недоступно */ }
+        return keys;
+    },
+
+    // Список кампаний для стартового экрана: самые свежие сверху.
+    campaigns() {
+        const list = [];
+        for (const key of this.campaignKeys()) {
+            try {
+                const payload = JSON.parse(localStorage.getItem(key));
+                if (payload && payload.meta && payload.game) list.push({ key, savedAt: payload.savedAt || 0, meta: payload.meta });
+            } catch (e) { /* битая запись — пропускаем */ }
+        }
+        return list.sort((a, b) => b.savedAt - a.savedAt);
+    },
+
+    loadCampaign(id) {
+        const raw = localStorage.getItem(this.CAMPAIGN_PREFIX + id);
+        if (!raw) throw new Error('Кампания не найдена');
+        const payload = JSON.parse(raw);
+        const parsed = this.parse(payload);
+        return { ...parsed, meta: payload.meta };
+    },
+
+    removeCampaign(id) {
+        try { localStorage.removeItem(this.CAMPAIGN_PREFIX + id); } catch (e) { /* уже нет */ }
+    },
+
+    pruneCampaigns(keepId, extra = 0) {
+        const list = this.campaigns().filter(c => c.meta.id !== keepId);
+        const allowed = Math.max(0, this.CAMPAIGN_MAX - 1 - extra);
+        for (const c of list.slice(allowed)) { try { localStorage.removeItem(c.key); } catch (e) { /* нет */ } }
     },
 
     clear() {
@@ -235,6 +313,17 @@ class GameLoop {
         };
         const valid = from?.alive && (next.type === 'peace' ? d.isAtWar(next.from, d.playerCountry) : !d.isAtWar(next.from, d.playerCountry));
         if (!valid) { d.act('answerDecision', false); this.afterSummary(); return; }
+        if (next.type === 'rebels') {
+            const region = d.regions[next.region];
+            if (!region || !d.revolts[next.region]) { d.act('answerDecision', false); this.afterSummary(); return; }
+            this.ui.showDecision({
+                title: `🔥 Мятежная область ${region.name} просится к вам`,
+                text: `В области ${region.name} (${from.name}) восстание. Если через ${d.revolts[next.region].left} ход. мятежники победят, область перейдёт к вам. Отношения со страной ${from.name} ухудшатся на ${-REVOLT.SECEDE_RELATION}.`,
+                accept: 'Принять область', decline: 'Отказаться',
+                onAccept: () => finish(true), onDecline: () => finish(false),
+            });
+            return;
+        }
         if (next.type === 'event') {
             const ev = Events.describe(d, next);
             this.ui.showDecision({ ...ev, onAccept: () => finish(true), onDecline: () => finish(false) });

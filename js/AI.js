@@ -14,7 +14,7 @@ const AI_RULES = {
     WAR_ON_PLAYER_CHANCE: 0.015,
     AI_WARS_MAX: 1,             // сколько войн между ИИ может идти одновременно
     AI_WAR_CHANCE: 0.05,
-    AI_TREATY_TRIES: 3,     // сколько пар соседей за ход пробуют договориться
+    AI_TREATY_TRIES: 3,         // сколько пар соседей за ход пробуют договориться
     AI_WAR_RATIO: [1.2, 2.5],   // ИИ воюет с ИИ только при сопоставимых силах — без избиения слабых
     AI_WAR_GOAL: 0.2,           // войны между ИИ ограниченные: взял пятую часть земель — мир
     PEACEFUL_START_TURNS: 10,   // первые ходы никто не объявляет новых войн
@@ -44,6 +44,8 @@ class AI {
             if (!country.alive || d.isHuman(country.id)) continue;
             if (!d.regionsByCountry[country.id].length) continue;
             this.balanceTaxes(country);
+            this.handleRevolts(country);
+            this.manageDebt(country);
             this.planScience(country);
             const enemies = d.enemiesOf(country.id);
             this.disbandIfBroke(country, enemies);
@@ -72,6 +74,24 @@ class AI {
             }
         }
         if (best && best.score >= 1 / AI_RULES.INVEST_PAYBACK) d.invest(best.region.id, best.kind, country.id);
+    }
+
+    // Восстание: если есть деньги — уступки, иначе подавляем, когда гарнизон сильнее.
+    handleRevolts(country) {
+        const d = this.data;
+        for (const id of Unrest.revoltsOf(d, country.id)) {
+            if (country.money > Unrest.appeaseCost(d, id) * 2) Unrest.appease(d, id, country.id);
+            else if (Unrest.garrisonStrength(d, id) >= Unrest.rebelStrength(d, id)) Unrest.suppress(d, id, country.id);
+        }
+    }
+
+    // Долг — инструмент игроков: ИИ, получив кредит, тут же тратил бы его
+    // на армию и увязал в процентах. Но если долг есть — отдаёт излишками.
+    manageDebt(country) {
+        if (!country.debt) return;
+        const d = this.data;
+        const reserve = d.countryBalance(country.id).upkeep * AI_RULES.RESERVE_TURNS + 3e6;
+        if (country.money > reserve) d.repay(country.money - reserve, country.id);
     }
 
     // Наука: свободные деньги сверх запаса уходят в исследования, а у

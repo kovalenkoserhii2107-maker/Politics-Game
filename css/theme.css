@@ -517,3 +517,26 @@ body.net-waiting #end-turn-btn { background: var(--s3); }
         margin: -6px -6px -6px 8px;
     }
 }
+/* финансы */
+.cycle-line { display: flex; flex-direction: column; gap: 2px; padding: 8px 10px; margin-bottom: 8px; border-radius: var(--r); background: var(--s3); }
+.cycle-line.boom { background: var(--good-soft); color: var(--good); }
+.cycle-line.recession { background: var(--accent-soft); color: var(--accent-2); }
+.cycle-line small { color: var(--text-2); }
+.rating-A { color: var(--good); } .rating-B { color: var(--text); } .rating-C { color: var(--warn); } .rating-D { color: var(--accent-2); }
+#gov-finance .help-chips { margin: 8px 0; }
+
+/* ---------- недовольство и восстания ---------- */
+.revolt-box { margin: 0 0 12px; padding: 10px 12px; background: var(--accent-soft); border: 1px solid var(--accent-line); border-radius: var(--r); }
+.revolt-box > b { color: var(--accent-2); font-size: 1rem; }
+.revolt-box p { margin: 6px 0; font-size: 0.86rem; line-height: 1.4; }
+.revolt-power { display: flex; gap: 16px; font-family: var(--mono); font-size: 0.85rem; margin-bottom: 8px; }
+.revolt-box .mini-btn { min-height: 44px; flex: 1 1 140px; }
+.revolt-box small { display: block; margin-top: 4px; font-size: 0.76rem; }
+.unrest-box { margin: 0 0 12px; padding: 8px 10px; background: var(--s2); border: 1px solid var(--line); border-radius: var(--r); }
+.unrest-box.hot { border-color: var(--warn); background: var(--warn-soft); }
+.unrest-head { display: flex; justify-content: space-between; font-size: 0.86rem; }
+.unrest-box .mission-bar { margin: 6px 0; }
+.unrest-box .mission-bar span { background: var(--warn); }
+.unrest-box small { color: var(--text-2); font-size: 0.76rem; line-height: 1.35; display: block; }
+#world-map .region.revolt { stroke: var(--accent) !important; stroke-width: calc(var(--sw) * 2.5) !important; stroke-dasharray: calc(var(--sw) * 3) calc(var(--sw) * 2); animation: region-pulse 1.4s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) { #world-map .region.revolt { animation: none; } }

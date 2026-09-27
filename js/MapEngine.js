@@ -178,6 +178,7 @@ class MapEngine {
             // территория противника обведена красным — фронт видно сразу
             path.classList.toggle('enemy', enemies.has(region.owner));
             path.classList.toggle('own', region.owner === player);
+            path.classList.toggle('revolt', !!(this.data.revolts && this.data.revolts[id]));
         }
         this.drawArmyMarkers();
     }

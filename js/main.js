@@ -100,6 +100,26 @@ class GameCore {
             this.afterMissions();
             return;
         }
+        if (action === 'suppress' || action === 'appease') {
+            const id = btn.dataset.region;
+            const result = d.act(action === 'suppress' ? 'suppressRevolt' : 'appeaseRevolt', id);
+            if (!result.ok) { this.ui.toast(result.reason); return; }
+            this.ui.haptic(30);
+            this.ui.toast(action === 'appease' ? `Уступки приняты: восстание утихло (−${this.ui.money(result.cost)})`
+                : result.won ? `Восстание подавлено: гарнизон ${result.ours} против ${result.theirs}` : `Подавить не вышло: гарнизон ${result.ours} против ${result.theirs}. Нужно больше войск.`);
+            this.map.refreshColors();
+            this.afterStateChange();
+            return;
+        }
+        if (action === 'borrow' || action === 'repay') {
+            const result = d.act(action, Number(btn.dataset.amount));
+            if (!result.ok) { this.ui.toast(result.reason); return; }
+            this.ui.toast(action === 'borrow' ? `Взято в долг ${this.ui.money(result.amount)}` : `Возвращено ${this.ui.money(result.amount)}`);
+            this.ui.renderGovernment(d);
+            this.loop.updateTopBarUI();
+            SaveGame.save(d);
+            return;
+        }
         if (action === 'transfer') {
             const result = d.act('transfer', cc, btn.dataset.kind, Number(btn.dataset.amount));
             if (!result.ok) { this.ui.toast(result.reason); return; }
@@ -903,7 +923,8 @@ class GameCore {
             // стартовый экран мог быть прокручен — игра рисуется от верха
             window.scrollTo(0, 0);
             // гость не пишет чужой мир поверх своей одиночной партии
-            if (session && session.role === 'guest') SaveGame.disabled = true;
+            // сетевая кампания сохраняется в свою ячейку — у сервера и у гостя
+            if (session) SaveGame.campaignRole = session.role;
             window.game = new GameCore(data);
             if (session) window.game.attachNet(session);
             if (tutorial && !session) new Tutorial(window.game).start();
@@ -938,7 +959,8 @@ class GameCore {
                         <button id="net-host-btn" class="btn btn-light" type="button">Создать игру</button>
                         <button id="net-find-btn" class="btn btn-ghost" type="button">Найти игру</button>
                     </div>
-                    ${last ? `<button id="net-rejoin-btn" class="btn btn-ghost btn-sm net-rejoin" type="button">↩ Вернуться в игру ${escape(last.code)}</button>` : ''}
+                    ${campaignList()}
+                    ${last && !SaveGame.campaigns().some(c => c.meta.code === last.code) ? `<button id="net-rejoin-btn" class="btn btn-ghost btn-sm net-rejoin" type="button">↩ Вернуться в игру ${escape(last.code)}</button>` : ''}
                     ${note}`;
                 return;
             }
@@ -951,6 +973,28 @@ class GameCore {
             }
             // лобби: хозяин или гость
             renderLobby(body, note);
+        };
+        // Сохранённые сетевые кампании: у сервера — «Продолжить», у гостя —
+        // «Подключиться» к серверу или «Стать сервером» со своей копией.
+        const campaignList = () => {
+            const list = SaveGame.campaigns();
+            if (!list.length) return '';
+            return `<div class="net-campaigns"><span class="label">Сетевые кампании</span>${list.map(({ meta, savedAt }) => {
+                const players = (meta.humans || []).map(cc => {
+                    const name = CountriesDB[cc] ? CountriesDB[cc].name : cc;
+                    return cc === meta.you ? `<b>${escape(name)}</b> (вы)` : `${escape(name)}${meta.names && meta.names[cc] ? ` 🎮 ${escape(meta.names[cc])}` : ''}`;
+                }).join(' · ');
+                const date = new Date(meta.date || savedAt);
+                const goal = GOALS[meta.goal] ? ' · ' + GOALS[meta.goal].short : '';
+                const role = meta.role === 'guest' ? 'вы — гость' : 'вы — сервер';
+                const buttons = meta.gameOver ? '' : meta.role === 'guest'
+                    ? `<button class="btn btn-light btn-sm" type="button" data-campaign-join="${escape(meta.id)}">Подключиться</button><button class="btn btn-ghost btn-sm" type="button" data-campaign-host="${escape(meta.id)}">Стать сервером</button>`
+                    : `<button class="btn btn-light btn-sm" type="button" data-campaign-host="${escape(meta.id)}">Продолжить</button>`;
+                return `<div class="net-campaign">
+                    <div class="nc-text"><span>${players}</span><small>Ход ${meta.turn} · ${date.getDate()}.${String(date.getMonth() + 1).padStart(2, '0')}.${date.getFullYear()}${goal} · код ${escape(meta.code || '—')} · ${role}${meta.gameOver ? ' · окончена' : ''}</small></div>
+                    <div class="nc-actions">${buttons}<button class="btn btn-ghost btn-sm nc-del" type="button" data-campaign-del="${escape(meta.id)}" aria-label="Удалить кампанию">✕</button></div>
+                </div>`;
+            }).join('')}</div>`;
         };
         const foundList = () => {
                 const list = netGames === null ? '<p class="net-wait-line"><span class="spinner"></span>Ищем игры в вашей сети…</p>'
@@ -997,7 +1041,7 @@ class GameCore {
             if (selectedId) net.pick(selectedId);
             refreshLobby();
         };
-        const joinGame = async code => {
+        const joinGame = async (code, campaignId) => {
             code = Net.normalizeCode(code);
             if (code.length !== 4) { netNote = 'Код — четыре знака с экрана хозяина'; renderNet(); return; }
             const name = playerName();
@@ -1029,7 +1073,15 @@ class GameCore {
             net = session;
             try {
                 await session.join(code);
-            } catch (err) { netError(err.message); return; }
+            } catch (err) {
+                // кампания могла открыться с другим кодом — ищем её в сети
+                const other = campaignId ? await NetGuest.findCampaign(campaignId).catch(() => null) : null;
+                if (!other || other === code) {
+                    netError(campaignId ? 'Сервер кампании не найден. Попросите открыть её («Продолжить») или станьте сервером сами.' : err.message);
+                    return;
+                }
+                try { await session.join(other); } catch (err2) { netError(err2.message); return; }
+            }
             if (session.game) return;   // партия уже идёт — мир пришёл сразу
             netView = 'lobby'; netNote = '';
             refreshLobby();
@@ -1049,9 +1101,39 @@ class GameCore {
             if (found) found.innerHTML = foundList(); else renderNet();
             if (result.lan) setTimeout(() => { if (netView === 'search') scan(); }, 2500);
         };
+        // Открыть кампанию у себя как сервер (своя копия — сервера или гостя).
+        const resumeCampaign = async data => {
+            netNote = 'Открываем сетевую кампанию…'; netView = 'busy'; renderNet();
+            $('net-box').scrollIntoView({ block: 'nearest' });
+            const names = (data.net && data.net.names) || {};
+            const session = new NetHost(names[data.playerCountry] || playerName());
+            try { await session.start(data); }
+            catch (err) { netView = 'idle'; netNote = err.message; renderNet(); return; }
+            netView = 'idle'; netNote = '';
+            launch(data, false, session);
+            SaveGame.save(data);
+            window.game.ui.toast(`Кампания открыта, код ${session.code}. Остальные — «Подключиться» или «Найти игру».`);
+        };
         $('net-box').addEventListener('click', e => {
             const btn = e.target.closest('button');
             if (!btn) return;
+            if (btn.dataset.campaignHost || btn.dataset.campaignJoin || btn.dataset.campaignDel) {
+                const id = btn.dataset.campaignHost || btn.dataset.campaignJoin || btn.dataset.campaignDel;
+                if (btn.dataset.campaignDel) {
+                    if (confirm('Удалить сетевую кампанию с этого устройства?')) { SaveGame.removeCampaign(id); renderNet(); }
+                    return;
+                }
+                let payload;
+                try { payload = SaveGame.loadCampaign(id); }
+                catch (err) { netNote = 'Не удалось прочитать кампанию.'; renderNet(); return; }
+                if (btn.dataset.campaignJoin) { playerName(); joinGame(payload.meta.code, id); return; }
+                if (payload.meta.role === 'guest' && !confirm('Открыть кампанию у себя как сервер? Остальные подключатся к вам. Ходы, сделанные на старом сервере после вашей последней копии, потеряются.')) return;
+                let data;
+                try { data = GameData.restore(payload.game); }
+                catch (err) { netNote = 'Кампания повреждена или от другой версии карты.'; renderNet(); return; }
+                resumeCampaign(data);
+                return;
+            }
             if (btn.id === 'net-host-btn') { netNote = ''; startHost(); }
             else if (btn.id === 'net-find-btn') { playerName(); netNote = ''; netView = 'search'; netGames = null; renderNet(); scan(); }
             else if (btn.id === 'net-leave-btn') { netNote = ''; leaveNet(); }
@@ -1065,8 +1147,17 @@ class GameCore {
         $('tutorial-toggle').checked = !Tutorial.isDone();
 
         // Сохранённая партия — первым делом предлагаем продолжить.
-        const saved = SaveGame.load();
+        let saved = SaveGame.load();
         let saveProblem = SaveGame.error;
+        // сетевая партия прошлой версии лежала в общей ячейке — переносим
+        // её в сетевые кампании, чтобы одиночная игра её не затёрла
+        if (saved && saved.game.humans && saved.game.humans.length > 1) {
+            try {
+                const data = GameData.restore(saved.game);
+                SaveGame.campaignRole = 'host';
+                if (SaveGame.saveCampaign(data)) { SaveGame.clear(); saved = null; }
+            } catch (e) { /* оставляем как есть */ }
+        }
         if (saveProblem) {
             $('save-warning').hidden = false;
             $('save-delete-btn').addEventListener('click', () => {
@@ -1085,23 +1176,11 @@ class GameCore {
             $('continue-info').innerHTML =
                 `Ход ${g.turn} · ${date.getDate()}.${String(date.getMonth() + 1).padStart(2, '0')}.${date.getFullYear()}`
                 + (SaveGame.migrated ? ' · <span class="migrated">перенесена из прошлой версии</span>' : '');
-            if (g.humans && g.humans.length > 1) {
-                $('continue-info').innerHTML += ` · <span class="migrated">📶 сетевая, код ${escape((g.net && g.net.code) || '')}</span>`;
-            }
-            $('continue-btn').addEventListener('click', async () => {
+            $('continue-btn').addEventListener('click', () => {
                 let data;
                 try { data = GameData.restore(g); }
                 catch (e) { alert('Не удалось загрузить партию. Сохранение оставлено в хранилище.'); return; }
-                if (!data.multiplayer) { launch(data); return; }
-                // сетевая партия: снова открываем игру с тем же кодом и ждём гостей
-                netNote = 'Открываем сетевую партию…'; netView = 'busy'; renderNet();
-                $('net-box').scrollIntoView({ block: 'nearest' });
-                const names = (data.net && data.net.names) || {};
-                const session = new NetHost(names[data.playerCountry] || playerName());
-                try { await session.start(data); }
-                catch (err) { netView = 'idle'; netNote = err.message; renderNet(); return; }
-                launch(data, false, session);
-                window.game.ui.toast(`Сетевая игра ${session.code}: гости могут вернуться — «Найти игру» у себя`);
+                launch(data);
             });
         }
 
@@ -1243,12 +1322,11 @@ class GameCore {
             if (!selectedId || !CountriesDB[selectedId]) return;
             if (net) {
                 if (net.role !== 'host') return;
-                if ((saved || saveProblem) && !confirm('Начать сетевую игру? Сохранённая партия будет удалена.')) return;
                 const data = net.createGame(hostOptions());
                 if (!data) { updateCta(); return; }
                 const session = net;
                 net = null;
-                SaveGame.clear();
+                SaveGame.campaignRole = 'host';
                 SaveGame.save(data);
                 launch(data, false, session);
                 return;
@@ -1272,6 +1350,8 @@ class GameCore {
                 alert('Этот файл не подходит: в нём нет партии или она от другой карты.');
                 return;
             }
+            // сетевая кампания из файла открывается у нас как сервер
+            if (data.multiplayer) { SaveGame.campaignRole = 'host'; resumeCampaign(data); return; }
             if ((saved || saveProblem) && !confirm('Загрузить партию из файла? Текущее сохранение будет заменено.')) return;
             SaveGame.clear();
             SaveGame.save(data);

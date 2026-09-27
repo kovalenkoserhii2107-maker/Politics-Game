@@ -55,6 +55,27 @@ const ECONOMY = {
     GOODS_TAX: 0.25,            // без товаров люди меньше покупают — и платят меньше налогов
 };
 
+// Госдолг: занять можно до LIMIT_WEEKS недельных налоговых сборов. Процент
+// за ход растёт с долгом — чем больше должны, тем дороже каждый новый заём.
+const DEBT = {
+    LIMIT_WEEKS: 12,
+    RATE_BASE: 0.002,           // 0,2% за ход при малом долге
+    RATE_PER_WEEK: 0.0008,      // +0,08% за каждую неделю налогов в долге
+    RATE_MAX: 0.012,            // при предельном долге проценты — ~14% недельных налогов
+    RATINGS: [[2, 'A', 'надёжный заёмщик'], [6, 'B', 'умеренный долг'], [10, 'C', 'рискованно'], [Infinity, 'D', 'на грани дефолта']],
+};
+
+// Мировой экономический цикл: подъём и спад на несколько ходов у всех.
+const CYCLES = {
+    normal:    { name: 'Стабильность', icon: '📊', tax: 1, trade: 1, text: 'Мировая экономика ровная.' },
+    boom:      { name: 'Мировой подъём', icon: '📈', tax: 1.08, trade: 1.12, text: 'Налоги +8%, экспорт дороже на 12%.' },
+    recession: { name: 'Мировой спад', icon: '📉', tax: 0.9, trade: 0.85, text: 'Налоги −10%, экспорт дешевле на 15%.' },
+    MIN_TURNS: 6, MAX_TURNS: 12,
+};
+
+// Инфраструктура области: дороги, связь, банки — больше налогов и доверия.
+const INFRA = { TAX: 0.06, LOYALTY: 0.02 };
+
 const TRADE_MODES = {
     sell: 'Продавать излишки',
     keep: 'Копить на складе',
@@ -235,10 +256,59 @@ class Economy {
         const policy = POLICIES[country.policy] || POLICIES.balanced;
         const work = 0.5 + 0.5 * region.loyalty;
         const p = data.market;
+        if (kind === 'infra') {
+            const tax = region.population * country.taxRate * region.loyalty * Economy.taxFactor(country) * Tech.factor(country, 'tax');
+            return tax * INFRA.TAX * Economy.cycle(data).tax;
+        }
         if (kind === 'agro') return plan.gain * work * ECONOMY.FOOD_PER_AGRO * p.food;
         if (kind === 'oil') return plan.gain * work * ECONOMY.ENERGY_PER_OIL * p.energy;
         return plan.gain * work * (ECONOMY.GOODS_PER_INDUSTRY * policy.industry * p.goods
             + (ECONOMY.ENERGY_PER_INDUSTRY - ECONOMY.ENERGY_NEED_PER_INDUSTRY) * p.energy);
+    }
+
+    // --- госдолг и мировой цикл ----------------------------------------
+    static debtLimit(data, countryId) {
+        return Math.round(Math.max(0, data.countryBalance(countryId).tax) * DEBT.LIMIT_WEEKS / 1e5) * 1e5;
+    }
+
+    // Процент за ход: зависит от того, сколько недель налогов составляет долг.
+    // Процент за ход при таком долге и таком недельном налоговом сборе.
+    static rateFor(debt, tax) {
+        return Math.min(DEBT.RATE_MAX, DEBT.RATE_BASE + DEBT.RATE_PER_WEEK * debt / Math.max(1, tax));
+    }
+
+    static debtRate(data, countryId, debt) {
+        const c = data.countries[countryId];
+        return Economy.rateFor(debt === undefined ? (c.debt || 0) : debt, data.countryBalance(countryId).tax);
+    }
+
+    static debtRating(data, countryId) {
+        const c = data.countries[countryId];
+        const weeks = (c.debt || 0) / Math.max(1, data.countryBalance(countryId).tax);
+        const [, grade, text] = DEBT.RATINGS.find(([max]) => weeks <= max);
+        return { grade, text, weeks };
+    }
+
+    static cycle(data) {
+        return CYCLES[(data.cycle && data.cycle.phase) || 'normal'];
+    }
+
+    // Смена фазы: после стабильности — чаще подъём, после подъёма и спада —
+    // снова стабильность. Возвращает событие для отчёта или null.
+    static advanceCycle(data) {
+        data.cycle = data.cycle || { phase: 'normal', until: data.turn + CYCLES.MIN_TURNS };
+        if (data.turn < data.cycle.until) return null;
+        const phase = data.cycle.phase;
+        let next = 'normal';
+        if (phase === 'normal') {
+            const r = Math.random();
+            next = r < 0.4 ? 'boom' : r < 0.7 ? 'recession' : 'normal';
+        }
+        const turns = CYCLES.MIN_TURNS + Math.floor(Math.random() * (CYCLES.MAX_TURNS - CYCLES.MIN_TURNS + 1));
+        data.cycle = { phase: next, until: data.turn + turns };
+        if (next === phase) return null;
+        const c = CYCLES[next];
+        return { type: 'cycle', message: `${c.icon} ${c.name} на ${turns} ход. ${c.text}` };
     }
 
     // Доля налогов, которую платят при нехватке товаров.
@@ -263,4 +333,4 @@ class Economy {
     }
 }
 
-if (typeof module !== 'undefined' && module.exports) module.exports = { Economy, RESOURCES, ECONOMY, TRADE_MODES };
+if (typeof module !== 'undefined' && module.exports) module.exports = { Economy, RESOURCES, ECONOMY, TRADE_MODES, DEBT, CYCLES, INFRA };
