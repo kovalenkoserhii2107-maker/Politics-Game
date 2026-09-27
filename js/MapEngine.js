@@ -388,13 +388,25 @@ class MapEngine {
         // постоянными на экране: один экранный пиксель = 1/k единиц.
         // При простом сдвиге масштаб не меняется — и пересчитывать стили
         // тысяч подписей на каждом кадре незачем.
+        // Смена --sw пересчитывает стили всех тысяч элементов карты — на
+        // телефоне это главный тормоз зума. Во время движения меняем её, лишь
+        // когда масштаб ушёл больше чем на 12% (линии и подписи чуть
+        // «дышат»), а точное значение ставим, когда карта остановилась.
         if (k !== this.lastK) {
-            this.lastK = k;
-            this.svg.style.setProperty('--sw', (1 / k).toFixed(5) + 'px');
-            this.svg.style.setProperty('--k', (1 / k).toFixed(5));
+            const ratio = this.lastK ? k / this.lastK : 0;
+            clearTimeout(this.strokeTimer);
+            if (!this.lastK || ratio > MapEngine.STROKE_STEP || ratio < 1 / MapEngine.STROKE_STEP) this.setStrokeScale(k);
+            else this.strokeTimer = setTimeout(() => this.setStrokeScale(this.pxPerUnit), 140);
         }
         this.cull();
         this.scheduleDeclutter();
+    }
+
+    setStrokeScale(k) {
+        if (k === this.lastK) return;
+        this.lastK = k;
+        this.svg.style.setProperty('--sw', (1 / k).toFixed(5) + 'px');
+        this.svg.style.setProperty('--k', (1 / k).toFixed(5));
     }
 
     // Карту нельзя утащить за край: центр экрана остаётся над миром.
@@ -1158,3 +1170,7 @@ class MapEngine {
 // Области дальше этого (px карты, ~200 км у экватора) — отдельный кусок
 // страны для подписи: заморские владения её не сдвигают.
 MapEngine.LABEL_LINK_GAP = 6;
+
+// На сколько может уйти масштаб, прежде чем толщина линий пересчитается
+// посреди движения (см. applyCamera).
+MapEngine.STROKE_STEP = 1.12;
