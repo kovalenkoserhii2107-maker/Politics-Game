@@ -120,6 +120,14 @@ class GameCore {
             SaveGame.save(d);
             return;
         }
+        if (action === 'trade-open') {
+            this.ui.showTradeEditor(d, cc, null, offer => {
+                const result = d.act('proposeTrade', cc, offer);
+                if (result.ok) { this.ui.toast(`${d.countries[cc].name}: сделка отправлена, ответ — после хода`); this.afterStateChange(); }
+                return result;
+            });
+            return;
+        }
         if (action === 'transfer') {
             const result = d.act('transfer', cc, btn.dataset.kind, Number(btn.dataset.amount));
             if (!result.ok) { this.ui.toast(result.reason); return; }

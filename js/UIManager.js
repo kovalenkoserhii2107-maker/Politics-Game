@@ -255,7 +255,9 @@ class UIManager {
                 <div class="war-summary">Война идёт ${info.turns} ход. · заняли ${info.taken} · потеряли ${info.lost}</div>
                 <button class="action-btn peace" data-action="peace" data-country="${countryId}" ${sent ? 'disabled' : ''}>
                     🕊️ ${sent ? 'Мир предложен — ждём ответа' : 'Предложить мир'} <small>решит игрок · бесплатно</small>
-                </button>`;
+                </button>
+                <button class="action-btn trade-btn" data-action="trade-open" data-country="${countryId}" ${data.proposalPending(countryId, 'trade') ? 'disabled' : ''}>
+                    📦 ${data.proposalPending(countryId, 'trade') ? 'Сделка отправлена' : 'Мир на условиях'} <small>области, деньги, запасы в обмен на мир</small></button>`;
             }
             const can = me.influence >= RULES.PEACE_COST;
             return `${meter}
@@ -307,7 +309,9 @@ class UIManager {
         }
 
         const check = data.canDeclareWar(player, countryId);
-        return `${meter}${this.helpBlock(data, countryId)}<div class="diplo-acts">${html}</div>
+        const trade = human ? `<button class="action-btn trade-btn" data-action="trade-open" data-country="${countryId}" ${data.proposalPending(countryId, 'trade') ? 'disabled' : ''}>
+                ${data.proposalPending(countryId, 'trade') ? '⏳ Сделка отправлена — ждём ответа' : '📦 Предложить сделку'} <small>деньги, запасы, области, договоры — пакетом</small></button>` : '';
+        return `${meter}${trade}${this.helpBlock(data, countryId)}<div class="diplo-acts">${html}</div>
             <button class="action-btn war" data-action="war" data-country="${countryId}" ${check.ok ? '' : 'disabled'}>
                 ⚔️ Объявить войну <small>−${RULES.WAR_COST} влияния</small>
             </button>
@@ -641,18 +645,83 @@ class UIManager {
     }
 
     // --- решения и конец игры ------------------------------------------------------------------
-    showDecision({ title, text, accept, decline, onAccept, onDecline }) {
+    showDecision({ title, text, accept, decline, onAccept, onDecline, alt, onAlt }) {
         document.getElementById('decision-title').textContent = title;
-        document.getElementById('decision-text').textContent = text;
+        const body = document.getElementById('decision-text');
+        body.textContent = text;
+        body.classList.toggle('multiline', text.includes('\n'));
         const yes = document.getElementById('decision-accept');
         const no = document.getElementById('decision-decline');
+        const other = document.getElementById('decision-alt');
         yes.textContent = accept;
         no.textContent = decline;
-        const close = then => { this.hideModal('decision-modal'); yes.onclick = no.onclick = null; then(); };
+        other.hidden = !alt;
+        other.textContent = alt || '';
+        const close = then => { this.hideModal('decision-modal'); yes.onclick = no.onclick = other.onclick = null; then(); };
         yes.onclick = () => close(onAccept);
         no.onclick = () => close(onDecline);
+        other.onclick = alt ? () => close(onAlt) : null;
         this.showModal('decision-modal');
         this.haptic(30);
+    }
+
+    // Редактор сделки: слева — что отдаём, справа — что просим, внизу — договоры.
+    // preset — готовая сделка (для встречного предложения). onSend(offer) → true, если ушла.
+    showTradeEditor(data, target, preset, onSend, onCancel) {
+        const me = data.playerCountry, them = target;
+        const offer = Trade.normalize(preset || {});
+        const cMe = data.countries[me], cThem = data.countries[them];
+        Economy.initCountry(cMe); Economy.initCountry(cThem);
+        const atWar = data.isAtWar(me, them);
+        const side = (key, owner, partner, values) => {
+            const c = data.countries[owner];
+            const regions = Trade.tradableRegions(data, owner, partner);
+            return `<div class="trade-side" data-side="${key}">
+                <span class="label">${key === 'give' ? 'Вы отдаёте' : 'Вы получаете взамен'}</span>
+                <label class="trade-field"><span>💰 Деньги, $M <small>есть ${this.money(Math.max(0, c.money))}</small></span>
+                    <input type="number" inputmode="decimal" min="0" step="0.5" data-k="money" value="${values.money ? values.money / 1e6 : ''}" placeholder="0"></label>
+                ${Object.entries(RESOURCES).map(([k, r]) => `<label class="trade-field"><span>${r.icon} ${r.name} <small>на складе ${Math.floor(c.stock[k] || 0)}</small></span>
+                    <input type="number" inputmode="decimal" min="0" step="1" data-k="${k}" value="${values[k] || ''}" placeholder="0"></label>`).join('')}
+                <div class="trade-regions"><span>🗺️ Области ${regions.length ? '' : '<small>— нет приграничных</small>'}</span>
+                    ${regions.map(r => `<label class="chip trade-region"><input type="checkbox" data-region="${r.id}" ${values.regions.includes(r.id) ? 'checked' : ''}> ${this.escape(r.name)}</label>`).join('')}</div>
+            </div>`;
+        };
+        const treaty = (t, label, ok, note) => `<label class="chip trade-treaty ${ok ? '' : 'off'}"><input type="checkbox" data-treaty="${t}" ${offer.treaties.includes(t) ? 'checked' : ''} ${ok ? '' : 'disabled'}> ${label}${note ? ` <small>${note}</small>` : ''}</label>`;
+        document.getElementById('trade-title').textContent = `Сделка: ${cThem.name}`;
+        document.getElementById('trade-body').innerHTML = `
+            <p class="hint">Соберите пакет. ${this.escape(cThem.name)} увидит его после хода и примет, откажет или предложит свой вариант. Ничего не списывается, пока сделку не приняли.</p>
+            <div class="trade-cols">${side('give', me, them, offer.give)}${side('get', them, me, offer.get)}</div>
+            <span class="label">Договоры в придачу</span>
+            <div class="trade-treaties">
+                ${treaty('peace', '🕊️ Мир', atWar, atWar ? '' : 'войны нет')}
+                ${treaty('deal', '🤝 Торговый договор', !Diplomacy.hasDeal(data, me, them), Diplomacy.hasDeal(data, me, them) ? 'уже есть' : '')}
+                ${treaty('pact', '📜 Пакт', !Diplomacy.pactLeft(data, me, them), Diplomacy.pactLeft(data, me, them) ? 'уже есть' : '')}
+                ${treaty('alliance', '🛡️ Союз', !Diplomacy.isAllied(data, me, them), Diplomacy.isAllied(data, me, them) ? 'уже есть' : '')}
+            </div>
+            <p class="trade-error neg" id="trade-error"></p>
+            <div class="decision-buttons"><button id="trade-cancel" type="button">Отмена</button><button id="trade-send" type="button">Отправить сделку</button></div>`;
+        const read = () => {
+            const out = { give: { regions: [] }, get: { regions: [] }, treaties: [] };
+            for (const el of document.querySelectorAll('#trade-body .trade-side')) {
+                const s = out[el.dataset.side];
+                for (const input of el.querySelectorAll('input[data-k]')) {
+                    const n = parseFloat(String(input.value).replace(',', '.'));
+                    if (Number.isFinite(n) && n > 0) s[input.dataset.k] = input.dataset.k === 'money' ? Math.round(n * 1e6) : n;
+                }
+                for (const box of el.querySelectorAll('input[data-region]:checked')) s.regions.push(box.dataset.region);
+            }
+            for (const box of document.querySelectorAll('#trade-body input[data-treaty]:checked')) out.treaties.push(box.dataset.treaty);
+            return out;
+        };
+        const close = () => this.hideModal('trade-modal');
+        document.getElementById('close-trade-btn').onclick = () => { close(); if (onCancel) onCancel(); };
+        document.getElementById('trade-cancel').onclick = () => { close(); if (onCancel) onCancel(); };
+        document.getElementById('trade-send').onclick = () => {
+            const result = onSend(read());
+            if (result && result.ok) close();
+            else document.getElementById('trade-error').textContent = (result && result.reason) || 'Не получилось';
+        };
+        this.showModal('trade-modal');
     }
 
     showGameOver(data) {

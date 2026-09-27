@@ -313,6 +313,32 @@ class GameLoop {
         };
         const valid = from?.alive && (next.type === 'peace' ? d.isAtWar(next.from, d.playerCountry) : !d.isAtWar(next.from, d.playerCountry));
         if (!valid) { d.act('answerDecision', false); this.afterSummary(); return; }
+        if (next.type === 'trade') {
+            const t = Trade.describe(d, next.from, d.playerCountry, Trade.normalize(next.offer));
+            const lines = [`Даёт вам: ${t.give}`, `Просит у вас: ${t.get}`];
+            if (t.treaties) lines.push(`Договоры: ${t.treaties}`);
+            this.ui.showDecision({
+                title: `📦 ${from.name} (игрок) предлагает сделку`,
+                text: lines.join('\n'),
+                accept: 'Принять', decline: 'Отказать', alt: '✏️ Встречное предложение',
+                onAccept: () => {
+                    const r = d.act('answerDecision', true);
+                    this.ui.toast(r.accepted ? 'Сделка заключена' : `Сделка сорвалась: ${r.failed}`);
+                    this.afterDecision();
+                },
+                onDecline: () => finish(false),
+                onAlt: () => this.ui.showTradeEditor(d, next.from, Trade.reverse(Trade.normalize(next.offer)), offer => {
+                    const check = Trade.problem(d, d.playerCountry, next.from, Trade.normalize(offer));
+                    if (check) return { ok: false, reason: check[0].toUpperCase() + check.slice(1) };
+                    d.act('answerDecision', false);
+                    const r = d.act('proposeTrade', next.from, offer);
+                    this.ui.toast(r.ok ? 'Встречная сделка отправлена' : r.reason);
+                    this.afterDecision();
+                    return { ok: true };
+                }, () => this.afterSummary()),
+            });
+            return;
+        }
         if (next.type === 'rebels') {
             const region = d.regions[next.region];
             if (!region || !d.revolts[next.region]) { d.act('answerDecision', false); this.afterSummary(); return; }
@@ -353,6 +379,14 @@ class GameLoop {
             onAccept: () => finish(true),
             onDecline: () => finish(false),
         });
+    }
+
+    afterDecision() {
+        const d = this.data;
+        if (this.map) { this.map.refreshColors(); this.map.createCountryLabels(); this.map.drawArmyMarkers(); }
+        this.updateTopBarUI();
+        SaveGame.save(d);
+        this.afterSummary();
     }
 
     // После отчёта и решений показываем, где на карте что изменилось.

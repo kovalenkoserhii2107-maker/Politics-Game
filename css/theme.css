@@ -540,3 +540,24 @@ body.net-waiting #end-turn-btn { background: var(--s3); }
 .unrest-box small { color: var(--text-2); font-size: 0.76rem; line-height: 1.35; display: block; }
 #world-map .region.revolt { stroke: var(--accent) !important; stroke-width: calc(var(--sw) * 2.5) !important; stroke-dasharray: calc(var(--sw) * 3) calc(var(--sw) * 2); animation: region-pulse 1.4s ease-in-out infinite; }
 @media (prefers-reduced-motion: reduce) { #world-map .region.revolt { animation: none; } }
+
+/* ---------- сделка ---------- */
+.trade-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+@media (max-width: 560px) { .trade-cols { grid-template-columns: 1fr; } }
+.trade-side { display: flex; flex-direction: column; gap: 6px; padding: 10px; background: var(--s2); border: 1px solid var(--line); border-radius: var(--r); }
+.trade-side[data-side="give"] { border-color: rgba(255, 176, 32, 0.4); }
+.trade-side[data-side="get"] { border-color: rgba(61, 220, 151, 0.4); }
+.trade-field { display: grid; grid-template-columns: 1fr 96px; align-items: center; gap: 8px; font-size: 0.88rem; }
+.trade-field small, .trade-regions small, .trade-treaty small { color: var(--text-3); font-size: 0.72rem; display: block; }
+.trade-field input { min-height: 40px; padding: 0 8px; background: var(--bg); border: 1px solid var(--line-2); border-radius: var(--r); color: var(--text); font: inherit; min-width: 0; }
+.trade-regions { display: flex; flex-wrap: wrap; gap: 6px; font-size: 0.88rem; align-items: center; }
+.trade-regions > span { width: 100%; }
+.trade-region, .trade-treaty { display: inline-flex; align-items: center; gap: 6px; min-height: 40px; padding: 0 10px; cursor: pointer; font-size: 0.86rem; }
+.trade-treaty.off { opacity: 0.5; }
+.trade-treaties { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0; }
+.trade-error { min-height: 1.2em; margin: 4px 0; font-size: 0.86rem; }
+#trade-send { background: var(--good); color: var(--ink); }
+#trade-cancel { background: var(--s3); border: 1px solid var(--line-2); color: var(--text); }
+.trade-btn { display: block; background: var(--s3) !important; border: 1px solid var(--line-2) !important; color: var(--text) !important; margin-bottom: 10px; }
+.decision-alt { width: 100%; margin-top: 10px; }
+#decision-text.multiline { white-space: pre-line; }

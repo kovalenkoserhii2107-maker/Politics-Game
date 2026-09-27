@@ -3,8 +3,8 @@ const assert=require('node:assert/strict');
 const fs=require('node:fs'),path=require('node:path'),vm=require('node:vm');
 function engine(){
  const values=new Map();let seed=123456;const math=Object.create(Math);math.random=()=>{seed=(Math.imul(seed,1664525)+1013904223)>>>0;return seed/4294967296;};const context=vm.createContext({console,Date,Math:math,structuredClone,localStorage:{setItem:(k,v)=>values.set(k,v),getItem:k=>values.get(k)||null,removeItem:k=>values.delete(k),key:i=>[...values.keys()][i]??null,get length(){return values.size;}}});
- for(const file of ['data/CountriesDB','data/RegionsDB','data/NeighborsDB','data/CitiesDB','UnitsDB','Tech','Economy','Diplomacy','Missions','Score','Events','Unrest','GameData','AI','GameLoop'])vm.runInContext(fs.readFileSync(path.join(__dirname,'../js',file+'.js'),'utf8'),context);
- return Object.assign(vm.runInContext('({GameData,AI,SaveGame,GameLoop,RegionsDB,UnitsDB,DEVELOPMENT,POLICIES,Economy,RESOURCES,ECONOMY,Tech,TECH_TREE,MODERNIZATION,Diplomacy,DIPLOMACY,Missions,MISSION_KINDS,MISSION_RULES,Score,GOALS,Events,EVENTS,DEBT,CYCLES,INFRA,Unrest,REVOLT})',context),{localStorage:context.localStorage});
+ for(const file of ['data/CountriesDB','data/RegionsDB','data/NeighborsDB','data/CitiesDB','UnitsDB','Tech','Economy','Diplomacy','Missions','Score','Events','Unrest','Trade','GameData','AI','GameLoop'])vm.runInContext(fs.readFileSync(path.join(__dirname,'../js',file+'.js'),'utf8'),context);
+ return Object.assign(vm.runInContext('({GameData,AI,SaveGame,GameLoop,RegionsDB,UnitsDB,DEVELOPMENT,POLICIES,Economy,RESOURCES,ECONOMY,Tech,TECH_TREE,MODERNIZATION,Diplomacy,DIPLOMACY,Missions,MISSION_KINDS,MISSION_RULES,Score,GOALS,Events,EVENTS,DEBT,CYCLES,INFRA,Unrest,REVOLT,Trade})',context),{localStorage:context.localStorage});
 }
 test('casualties are invariant under splitting an attack into orders',()=>{
  const {GameData}=engine();const fight=split=>{const d=new GameData('UA',{scenario:'war2024'});for(const id of ['UA-1','RU-19']){d.regions[id].army=d.emptyArmy();d.regions[id].army.infantry=10;}
@@ -590,4 +590,49 @@ test('unrest: a revolt in the capital ends with a coup, not a lost country', () 
     assert.equal(d.countries.DE.influence, 0);
     assert.ok(d.countries.DE.money < money);
     assert.ok(events.some(e => e.message.includes('Переворот')));
+});
+
+// --- сделки между игроками ---
+test('trade: package deal with money, stock, regions and peace executes at once', () => {
+    const { GameData, Trade, Diplomacy } = engine(), d = new GameData('DE', { humans: ['PL'] });
+    d.turn = 20; d.countries.DE.influence = 100;
+    d.declareWar('DE', 'PL');
+    const plRegion = Trade.tradableRegions(d, 'PL', 'DE')[0];
+    assert.ok(plRegion);
+    d.countries.DE.stock.food = 50;
+    const moneyDE = d.countries.DE.money, moneyPL = d.countries.PL.money;
+    const offer = { give: { money: 5e6, food: 20 }, get: { regions: [plRegion.id] }, treaties: ['peace', 'deal'] };
+    assert.equal(d.act('proposeTrade', 'PL', { ...offer, treaties: ['deal'] }).ok, false, 'договор при войне — только с миром');
+    assert.equal(d.act('proposeTrade', 'PL', { give: { regions: [plRegion.id] } }).ok, false, 'чужую область не отдать');
+    assert.equal(d.act('proposeTrade', 'PL', offer).ok, true);
+    assert.equal(d.act('proposeTrade', 'PL', offer).ok, false, 'вторая сделка — после ответа');
+    assert.equal(d.countries.DE.money, moneyDE, 'до согласия ничего не списано');
+    const back = GameData.restore(JSON.parse(JSON.stringify(d.serialize())));
+    assert.ok(back.seats.PL.decisions.some(x => x.type === 'trade'));
+    const r = d.withPlayer('PL', () => d.act('answerDecision', true));
+    assert.equal(r.accepted, true);
+    assert.equal(d.isAtWar('DE', 'PL'), false);
+    assert.equal(Diplomacy.hasDeal(d, 'DE', 'PL'), true);
+    assert.equal(d.regions[plRegion.id].owner, 'DE');
+    assert.equal(d.countries.DE.money, moneyDE - 5e6);
+    assert.equal(d.countries.PL.money, moneyPL + 5e6);
+    assert.equal(d.countries.DE.stock.food, 30);
+    assert.ok(d.takeDiploEvents().some(e => e.for === 'DE' && e.message.includes('принимает сделку')));
+});
+
+test('trade: declined or impossible deals change nothing', () => {
+    const { GameData } = engine(), d = new GameData('DE', { humans: ['PL'] });
+    d.act('proposeTrade', 'PL', { give: { money: 1e6 }, get: { money: 2e6 } });
+    const money = d.countries.DE.money;
+    d.withPlayer('PL', () => d.act('answerDecision', false));
+    assert.equal(d.countries.DE.money, money);
+    assert.ok(d.takeDiploEvents().some(e => e.message.includes('отклоняет')));
+    d.act('proposeTrade', 'PL', { give: { money: 1e6 } });
+    d.countries.DE.money = 0;                 // деньги кончились до ответа
+    const r = d.withPlayer('PL', () => d.act('answerDecision', true));
+    assert.equal(r.accepted, false);
+    assert.ok(r.failed);
+    assert.equal(d.countries.DE.money, 0);
+    assert.equal(d.act('proposeTrade', 'FR', { give: { money: 1 } }).ok, false, 'с ИИ сделок нет');
+    assert.equal(d.act('proposeTrade', 'PL', {}).ok, false, 'пустая сделка');
 });
