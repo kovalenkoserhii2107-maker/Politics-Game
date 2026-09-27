@@ -400,3 +400,6 @@
 body.net-guest-lobby .modes, body.net-guest-lobby .levels, body.net-lobby .extra { opacity: 0.55; pointer-events: none; }
 /* пока ищем игру — одиночный старт не предлагаем */
 body.net-searching .start-cta { display: none; }
+.goals { margin-top: 14px; }
+.segmented label:has(input:disabled) span { opacity: 0.4; cursor: not-allowed; }
+.goals .segmented { grid-template-columns: repeat(4, 1fr); }

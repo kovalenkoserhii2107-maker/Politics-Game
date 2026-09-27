@@ -165,7 +165,9 @@ class GameLoop {
         const { balances, events } = d.applyEndOfTurn();
         d.turn++;
         d.currentDate.setDate(d.currentDate.getDate() + 7);
+        Score.checkEnd(d, events);
         const diplomacy = d.gameOver ? [] : this.ai.diplomacy();
+        Events.roll(d, diplomacy);
         const shared = [...events, ...diplomacy, ...d.takeDiploEvents()];
 
         const reports = {};
@@ -221,7 +223,8 @@ class GameLoop {
         const from = d.countries[next.from];
         const finish = accept => {
             const result = d.act('answerDecision', accept);
-            if (accept && result.ok && !result.stale) {
+            if (result.summary) this.ui.toast(result.summary);
+            else if (accept && result.ok && !result.stale) {
                 const what = { peace: 'мир', deal: 'торговый договор', pact: 'пакт о ненападении', alliance: 'оборонительный союз' }[next.type];
                 this.ui.toast(`${from.name}: ${next.type === 'peace' ? 'мир заключён' : `подписан ${what}`}`);
             }
@@ -232,6 +235,11 @@ class GameLoop {
         };
         const valid = from?.alive && (next.type === 'peace' ? d.isAtWar(next.from, d.playerCountry) : !d.isAtWar(next.from, d.playerCountry));
         if (!valid) { d.act('answerDecision', false); this.afterSummary(); return; }
+        if (next.type === 'event') {
+            const ev = Events.describe(d, next);
+            this.ui.showDecision({ ...ev, onAccept: () => finish(true), onDecline: () => finish(false) });
+            return;
+        }
         const human = d.isHuman(next.from) ? ' (игрок)' : '';
         if (next.type === 'peace') {
             const info = d.warInfo(d.playerCountry, next.from);

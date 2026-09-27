@@ -520,9 +520,9 @@ body { overscroll-behavior: none; }
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Exo+2:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;700&display=swap">
 <link rel="stylesheet" href="css/campaign.css?v=fe17f3ba7c">
-<link rel="stylesheet" href="css/theme.css?v=14a459e406">
+<link rel="stylesheet" href="css/theme.css?v=e829be64b8">
 <link rel="stylesheet" href="css/map.css?v=067de1c831">
-<link rel="stylesheet" href="css/start.css?v=7423bf8a37">
+<link rel="stylesheet" href="css/start.css?v=a05fed9ccb">
 </head>
 <body>
 
@@ -628,6 +628,16 @@ body { overscroll-behavior: none; }
                         <label><input type="radio" name="difficulty" value="hard"><span>Тяжёлый</span></label>
                     </div>
                     <p id="level-note" class="level-note"></p>
+                </div>
+                <div class="levels goals" role="radiogroup" aria-label="Цель партии">
+                    <span class="label">Цель партии</span>
+                    <div class="segmented">
+                        <label><input type="radio" name="goal" value="domination" checked><span>Весь мир</span></label>
+                        <label><input type="radio" name="goal" value="turns30"><span>30 ходов</span></label>
+                        <label><input type="radio" name="goal" value="turns60"><span>60 ходов</span></label>
+                        <label class="goal-coop"><input type="radio" name="goal" value="coop" disabled><span>Вместе</span></label>
+                    </div>
+                    <p id="goal-note" class="level-note"></p>
                 </div>
                 <details class="extra">
                     <summary>Дополнительно</summary>
@@ -794,6 +804,24 @@ body { overscroll-behavior: none; }
         </div>
     </div>
 
+    <!-- ЧАТ СЕТЕВОЙ ИГРЫ -->
+    <div id="chat-modal" class="modal ui-element" role="dialog" aria-modal="true" aria-labelledby="chat-title">
+        <div class="modal-content">
+            <div class="modal-header"><h2 id="chat-title">Чат</h2><button class="close-btn" id="close-chat-btn" aria-label="Закрыть чат">✕</button></div>
+            <div class="modal-body">
+                <div id="chat-log" aria-live="polite"></div>
+                <div class="chat-quick">
+                    <button class="chip" data-say="👍">👍</button><button class="chip" data-say="😂">😂</button><button class="chip" data-say="😮">😮</button><button class="chip" data-say="😡">😡</button>
+                    <button class="chip" data-say="🤝 Давай союз?">🤝 Союз?</button><button class="chip" data-say="🕊️ Может, мир?">🕊️ Мир?</button>
+                    <button class="chip" data-say="⚔️ Атакую на этом ходу!">⚔️ Атакую</button><button class="chip" data-say="🆘 Помоги!">🆘 Помоги</button>
+                    <button class="chip" data-say="✅ Готов, жму «Конец хода»">✅ Готов</button>
+                </div>
+                <form id="chat-form" class="chat-form"><label class="sr-only" for="chat-input">Сообщение</label><input id="chat-input" maxlength="140" autocomplete="off" placeholder="Сообщение…"><button class="btn btn-light" type="submit">Отправить</button></form>
+                <p class="hint">Чтобы показать область на карте другим игрокам — откройте её и нажмите «📍 Показать игрокам».</p>
+            </div>
+        </div>
+    </div>
+
     <!-- РЕШЕНИЕ (предложение мира и т.п.) -->
     <div id="decision-modal" class="modal ui-element">
         <div class="modal-content">
@@ -873,7 +901,7 @@ body { overscroll-behavior: none; }
         <span id="zoom-mode" style="color:var(--ui-accent-country);font-weight:700;margin-left:4px;">Глобальное (страны)</span>
     </div>
     <div id="toast"></div>
-    <div id="net-status" class="ui-element" hidden></div>
+    <button id="net-status" class="ui-element" type="button" hidden aria-label="Игроки и чат"></button>
     <div id="net-wait" hidden>
         <div class="net-wait-card" role="status">
             <span class="label">Ход отправлен</span>
@@ -896,14 +924,16 @@ body { overscroll-behavior: none; }
 <script src="js/Tech.js?v=0dac26024b"></script>
 <script src="js/Economy.js?v=0c8e41fcbf"></script>
 <script src="js/Diplomacy.js?v=fa95d07eef"></script>
-<script src="js/Net.js?v=74a3f32820"></script>
+<script src="js/Net.js?v=00a9efb6a7"></script>
 <script src="js/Missions.js?v=fe83f7c237"></script>
-<script src="js/GameData.js?v=fa79a90bcb"></script>
+<script src="js/Score.js?v=053c44c25c"></script>
+<script src="js/Events.js?v=b551e27a37"></script>
+<script src="js/GameData.js?v=ff968c6e49"></script>
 <script src="js/AI.js?v=e3c0a3ba86"></script>
-<script src="js/MapEngine.js?v=5e2af0e070"></script>
-<script src="js/UIManager.js?v=f8ad6682bb"></script>
-<script src="js/GameLoop.js?v=83b80c9708"></script>
+<script src="js/MapEngine.js?v=e4283538df"></script>
+<script src="js/UIManager.js?v=3533fe85ee"></script>
+<script src="js/GameLoop.js?v=646a57252a"></script>
 <script src="js/Tutorial.js?v=53ff18fd7f"></script>
-<script src="js/main.js?v=83866c87dc"></script>
+<script src="js/main.js?v=472e768267"></script>
 </body>
 </html>

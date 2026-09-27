@@ -984,6 +984,18 @@ class MapEngine {
 
     // Области, которые сменили хозяина за ход: захваченные и потерянные.
     // Отметка держится до следующего хода.
+    // Метка другого игрока: область пульсирует несколько секунд.
+    pingRegion(id) {
+        const path = this.paths.get(id);
+        if (!path) return;
+        path.classList.remove('pinged');
+        void path.getBBox();   // перезапуск анимации
+        path.classList.add('pinged');
+        clearTimeout(this.pingTimers?.[id]);
+        this.pingTimers = this.pingTimers || {};
+        this.pingTimers[id] = setTimeout(() => path.classList.remove('pinged'), 7000);
+    }
+
     markChanges(gained, lost) {
         for (const id of this.changed) this.paths.get(id)?.classList.remove('gained', 'lost');
         this.changed = [...gained, ...lost];

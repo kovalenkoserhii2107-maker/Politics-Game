@@ -10,3 +10,9 @@ test('index.html references css/js with current content hashes',()=>{
  assert.ok(refs.length>=10);
  for(const ref of refs)assert.match(ref,/\?v=[0-9a-f]{10}"$/);
 });
+// Новый модуль легко забыть подключить: в тестах он грузится, а в браузере — нет.
+test('every engine script in js/ is included by index.html',()=>{
+ const html=fs.readFileSync(path.join(__dirname,'../index.html'),'utf8');
+ for(const file of fs.readdirSync(path.join(__dirname,'../js')).filter(f=>f.endsWith('.js')))
+  assert.ok(html.includes(`src="js/${file}?v=`),`index.html не подключает js/${file}`);
+});

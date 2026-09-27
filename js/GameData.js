@@ -17,6 +17,7 @@ const RULES = {
     SPY_COST: 50000,
     MILITIA_DIVISOR: 250,       // ополчение: sqrt(население) / это число
     DESERTION: 0.1,             // доля войск, уходящих при пустой казне
+    JOINT_ATTACK_BONUS: 0.15,   // союзники, ударившие по одной области в один ход
 };
 
 // Проекты увеличивают ресурс области; что это даёт в еде, энергии и
@@ -78,6 +79,9 @@ class GameData {
         // сетевой — все участники. Задания, решения и журнал каждого, кроме
         // того, чьими глазами сейчас смотрит модель, лежат в seats.
         this.humans = [playerCountryId, ...(options.humans || []).filter(cc => cc !== playerCountryId)];
+        // цель партии: совместная — только когда людей больше одного
+        const goal = GOALS[options.goal] ? options.goal : 'domination';
+        this.goal = GOALS[goal].multiplayer && this.humans.length < 2 ? 'domination' : goal;
         this.seats = {};
         for (const cc of this.humans.slice(1)) this.seats[cc] = GameData.emptySeat();
         this.build();
@@ -88,6 +92,7 @@ class GameData {
                 if (human) human.money = Math.round(human.money * DIFFICULTY[this.difficulty].playerMoney);
                 if (human && human.playable) this.withPlayer(cc, () => Missions.refill(this));
             }
+            Score.init(this);
         }
     }
 
@@ -535,6 +540,10 @@ class GameData {
         if (!next) return { ok: false };
         this.decisions.shift();
         const p = this.playerCountry, from = next.from;
+        if (next.type === 'event') {
+            if (!EVENTS[next.event] || !this.countries[from] || !this.countries[from].alive) return { ok: true, stale: true, ...next };
+            return { ok: true, accepted: !!accept, summary: Events.apply(this, next, accept), ...next };
+        }
         const alive = this.countries[from]?.alive && this.countries[p]?.alive;
         const valid = alive && (next.type === 'peace' ? this.isAtWar(from, p) : !this.isAtWar(from, p))
             && !(next.type === 'deal' && (Diplomacy.hasDeal(this, p, from) || Diplomacy.dealCount(this, p) >= DIPLOMACY.DEAL_MAX || Diplomacy.dealCount(this, from) >= DIPLOMACY.DEAL_MAX));
@@ -551,6 +560,65 @@ class GameData {
             this.diploEvents.push({ type: 'answer', for: from, message: `${accept ? '✅' : '❌'} ${this.countries[p].name} ${accept ? 'принимает' : 'отклоняет'} ваше предложение: ${what}.` });
         }
         return { ok: true, accepted: !!accept, ...next };
+    }
+
+    // --- помощь другим странам ---------------------------------------------
+    // Деньги и запасы — любой стране, с которой нет войны. Игроку-получателю
+    // приходит весть в отчёте, у ИИ теплеют отношения.
+    transfer(target, kind, amount) {
+        const p = this.playerCountry, me = this.countries[p], to = this.countries[target];
+        if (this.gameOver || !to || target === p || !to.alive || !to.playable) return { ok: false, reason: 'Нельзя' };
+        if (this.isAtWar(p, target)) return { ok: false, reason: 'С врагом не делятся' };
+        if (!Number.isFinite(amount) || amount <= 0) return { ok: false, reason: 'Неверное количество' };
+        let value, text;
+        if (kind === 'money') {
+            amount = Math.round(amount);
+            if (me.money < amount) return { ok: false, reason: 'Не хватает денег' };
+            me.money -= amount;
+            to.money += amount;
+            value = amount;
+            text = `$${(amount / 1e6).toFixed(1)}M`;
+        } else if (RESOURCES[kind]) {
+            Economy.initCountry(me);
+            Economy.initCountry(to);
+            amount = Math.round(amount * 10) / 10;
+            if ((me.stock[kind] || 0) < amount) return { ok: false, reason: 'На складе меньше' };
+            me.stock[kind] = Math.round((me.stock[kind] - amount) * 10) / 10;
+            to.stock[kind] = Math.round(((to.stock[kind] || 0) + amount) * 10) / 10;
+            value = amount * (this.market[kind] || RESOURCES[kind].price);
+            text = `${RESOURCES[kind].icon} ${amount} ед. (${RESOURCES[kind].name.toLowerCase()})`;
+        } else {
+            return { ok: false, reason: 'Нельзя' };
+        }
+        const gain = Math.min(DIPLOMACY.GIFT_RELATION, Math.max(1, Math.round(10 * value / Diplomacy.giftCost(this, target))));
+        Diplomacy.changeRelation(this, p, target, gain);
+        if (this.isHuman(target)) this.diploEvents.push({ type: 'gift', for: target, message: `🎁 ${me.name} передаёт вам ${text}.` });
+        return { ok: true, text, gain };
+    }
+
+    // Уступить соседу свою область: для мирного договора, помощи союзнику
+    // или обмена. Войска уходят в соседнюю свою область.
+    cedeRegion(regionId, target) {
+        const p = this.playerCountry, region = this.regions[regionId], to = this.countries[target];
+        if (this.gameOver || !region || region.owner !== p || !to || target === p || !to.alive || !to.playable) return { ok: false, reason: 'Нельзя' };
+        if (this.isAtWar(p, target)) return { ok: false, reason: 'Сначала заключите мир' };
+        if (this.countries[p].capital === regionId) return { ok: false, reason: 'Столицу не отдают' };
+        if (!this.getNeighbors(regionId).some(id => this.regions[id] && this.regions[id].owner === target)) return { ok: false, reason: `Область должна граничить с ${to.name}` };
+        // приказы, связанные с областью, отменяются с возвратом денег
+        for (const type of Object.keys(this.orders)) {
+            for (let i = this.orders[type].length - 1; i >= 0; i--) {
+                const o = this.orders[type][i];
+                if (o.country === p && (o.regionId === regionId || o.from === regionId || o.to === regionId)) this.cancelOrder(type, i);
+            }
+        }
+        const home = this.getNeighbors(regionId).map(id => this.regions[id]).find(r => r && r.owner === p);
+        if (home) for (const unitId of Object.keys(UnitsDB)) home.army[unitId] += region.army[unitId];
+        region.army = this.emptyArmy();
+        this.setOwner(regionId, target);
+        region.loyalty = Math.min(region.loyalty, 0.7);
+        Diplomacy.changeRelation(this, p, target, 15);
+        if (this.isHuman(target)) this.diploEvents.push({ type: 'gift', for: target, message: `🗺️ ${this.countries[p].name} уступает вам область ${region.name}.` });
+        return { ok: true, withdrawn: !!home };
     }
 
     setTaxRate(countryId, rate) {
@@ -920,20 +988,33 @@ class GameData {
             if (mine(order)) logs.push({ for: order.country, success: true, message: order.text + ' — выполнено.' });
         }
 
-        // 4. Сражения: все атаки одной страны на одну область — одна битва
-        const battles = new Map();
+        // 4. Сражения: все атаки одной страны и её союзников на одну область
+        //    в этот ход — одна битва (совместное наступление)
+        const byTarget = new Map();
         for (const order of this.orders.attacks) {
-            const key = `${order.country}>${order.to}`;
-            if (!battles.has(key)) battles.set(key, []);
-            battles.get(key).push(order);
+            if (!byTarget.has(order.to)) byTarget.set(order.to, []);
+            byTarget.get(order.to).push(order);
+        }
+        const battles = [];
+        for (const list of byTarget.values()) {
+            const groups = [];
+            for (const order of list) {
+                const group = groups.find(g => g.countries.has(order.country) || [...g.countries].some(cc => Diplomacy.isAllied(this, cc, order.country)));
+                if (group) { group.orders.push(order); group.countries.add(order.country); }
+                else groups.push({ countries: new Set([order.country]), orders: [order] });
+            }
+            for (const group of groups) battles.push(group.orders);
         }
         const worldEvents = [];
-        for (const orders of battles.values()) {
+        for (const orders of battles) {
             const result = this.resolveBattle(orders);
             if (!result) continue;
-            const viewers = [result.attacker, result.defender].filter(cc => this.isHuman(cc));
+            const viewers = [...result.coalition, result.defender].filter(cc => this.isHuman(cc));
             // каждому участнику — своя запись: победа с его стороны
-            for (const cc of viewers) logs.push({ ...result, for: cc, success: cc === result.attacker ? result.won : !result.won, playerIsAttacker: cc === result.attacker });
+            for (const cc of viewers) {
+                const attacking = result.coalition.includes(cc);
+                logs.push({ ...result, for: cc, success: attacking ? result.won : !result.won, playerIsAttacker: attacking });
+            }
             if (!viewers.length) worldEvents.push(result);
         }
 
@@ -959,32 +1040,46 @@ class GameData {
         return power;
     }
 
-    resolveBattle(orders) {
-        const attacker = orders[0].country;
-        const target = this.getRegion(orders[0].to);
-        if (!target || target.owner === attacker) return null;
+    resolveBattle(allOrders) {
+        const target = this.getRegion(allOrders[0].to);
+        if (!target) return null;
         const defender = target.owner;
-        if (!this.isAtWar(attacker, defender)) return null;
+        // бьются только те, кто воюет с хозяином области
+        const orders = allOrders.filter(o => o.country !== defender && this.isAtWar(o.country, defender));
+        if (!orders.length) return null;
 
         // собираем войска со всех участвующих областей
         const sources = [];
         const forces = this.emptyArmy();
+        const byCountry = {};
         for (const order of orders) {
             const from = this.getRegion(order.from);
-            if (!from || from.owner !== attacker) continue;
+            if (!from || from.owner !== order.country) continue;
+            const own = byCountry[order.country] || (byCountry[order.country] = this.emptyArmy());
             const sent = {};
             for (const unitId of Object.keys(UnitsDB)) {
                 const amount = Math.min(from.army[unitId] || 0, order.forces[unitId] || 0);
                 sent[unitId] = amount;
                 forces[unitId] += amount;
+                own[unitId] += amount;
                 from.army[unitId] -= amount;
             }
-            sources.push({ region: from, sent });
+            sources.push({ region: from, sent, country: order.country });
         }
-        if (!Object.values(forces).some(n => n > 0)) return null;
+        const coalition = Object.keys(byCountry).filter(cc => Object.values(byCountry[cc]).some(n => n > 0));
+        if (!coalition.length) return null;
 
         const defForces = { ...target.army };
-        const powerAtt = this.sidePower(forces, attacker, 'baseAttack', defForces);
+        const powerOf = {};
+        let powerAtt = 0;
+        for (const cc of coalition) {
+            powerOf[cc] = this.sidePower(byCountry[cc], cc, 'baseAttack', defForces);
+            powerAtt += powerOf[cc];
+        }
+        const joint = coalition.length > 1;
+        if (joint) powerAtt *= 1 + RULES.JOINT_ATTACK_BONUS;
+        // область достаётся тому, кто вложил в удар больше сил
+        const attacker = coalition.reduce((a, b) => (powerOf[b] > powerOf[a] ? b : a));
         const isCapital = this.countries[defender].capital === target.id;
         const powerDef = this.defensePower(target, forces);
 
@@ -993,9 +1088,9 @@ class GameData {
         const ratio = powerAtt / powerDef;
         let success = ratio >= RULES.ATTACK_ADVANTAGE;
         let defLossPct = Math.min(0.6, Math.max(0.05, 0.15 * ratio)) * Tech.factor(this.countries[defender], 'losses');
-        let attLossPct = Math.min(0.6, Math.max(0.05, 0.2 / ratio)) * Tech.factor(this.countries[attacker], 'losses');
-        if (this.cheatMode && attacker === this.playerCountry) {
-            success = true; attLossPct = 0; defLossPct = 1;
+        let attLossBase = Math.min(0.6, Math.max(0.05, 0.2 / ratio));
+        if (this.cheatMode && coalition.includes(this.playerCountry)) {
+            success = true; attLossBase = 0; defLossPct = 1;
         }
 
         const attLosses = this.emptyArmy(), defLosses = this.emptyArmy();
@@ -1004,28 +1099,33 @@ class GameData {
             defLosses[unitId] = Math.min(defAmount, Math.ceil(defAmount * defLossPct));
             target.army[unitId] -= defLosses[unitId];
         }
-        // потери атакующего раскладываем по областям-источникам
-        const survivorsBySource = sources.map(src => ({ region: src.region, left: { ...src.sent } }));
-        for (const unitId of Object.keys(UnitsDB)) {
-            const total = forces[unitId];
-            if (!total) continue;
-            // Round once per army, then distribute integer casualties. Splitting
-            // a force into many orders must never change its total losses.
-            const losses = Math.min(total, Math.ceil(total * attLossPct));
-            attLosses[unitId] = losses;
-            const shares = sources.map((src, i) => {
-                const exact = losses * src.sent[unitId] / total;
-                const whole = Math.floor(exact);
-                survivorsBySource[i].left[unitId] -= whole;
-                return { i, fraction: exact - whole, whole };
-            }).sort((a, b) => b.fraction - a.fraction || a.i - b.i);
-            const remainder = losses - shares.reduce((sum, share) => sum + share.whole, 0);
-            for (let i = 0; i < remainder; i++) survivorsBySource[shares[i].i].left[unitId]--;
+        // потери каждой страны раскладываем по её областям-источникам
+        const survivorsBySource = sources.map(src => ({ region: src.region, country: src.country, left: { ...src.sent } }));
+        for (const cc of coalition) {
+            const attLossPct = attLossBase * Tech.factor(this.countries[cc], 'losses');
+            const mine = sources.map((src, i) => ({ src, i })).filter(x => x.src.country === cc);
+            for (const unitId of Object.keys(UnitsDB)) {
+                const total = byCountry[cc][unitId];
+                if (!total) continue;
+                // Round once per army, then distribute integer casualties. Splitting
+                // a force into many orders must never change its total losses.
+                const losses = Math.min(total, Math.ceil(total * attLossPct));
+                attLosses[unitId] += losses;
+                const shares = mine.map(({ src, i }) => {
+                    const exact = losses * src.sent[unitId] / total;
+                    const whole = Math.floor(exact);
+                    survivorsBySource[i].left[unitId] -= whole;
+                    return { i, fraction: exact - whole, whole };
+                }).sort((a, b) => b.fraction - a.fraction || a.i - b.i);
+                const remainder = losses - shares.reduce((sum, share) => sum + share.whole, 0);
+                for (let k = 0; k < remainder; k++) survivorsBySource[shares[k].i].left[unitId]--;
+            }
         }
 
-        const attackerName = this.countries[attacker].name;
+        const names = coalition.map(cc => this.countries[cc].name).join(' и ');
         const defenderName = this.countries[defender].name;
         const extra = [];
+        if (joint) extra.push(`Совместное наступление: +${Math.round(RULES.JOINT_ATTACK_BONUS * 100)}% к удару.`);
         let message;
 
         if (success) {
@@ -1042,29 +1142,32 @@ class GameData {
                 }
             }
             target.army = this.emptyArmy();
+            // в область входят войска нового хозяина, союзники возвращаются домой
             for (const s of survivorsBySource) {
-                for (const unitId of Object.keys(UnitsDB)) target.army[unitId] += s.left[unitId];
+                const into = s.country === attacker ? target : s.region;
+                for (const unitId of Object.keys(UnitsDB)) into.army[unitId] += s.left[unitId];
             }
             this.setOwner(target.id, attacker);
             target.loyalty = 0.5;
             if (isCapital) extra.push(this.onCapitalLost(defender));
-            message = `${attackerName}: ${target.name} захвачена!`;
+            if (joint) extra.push(`Область отошла к ${this.countries[attacker].name} — у неё самый сильный удар.`);
+            message = `${names}: ${target.name} захвачена!`;
         } else {
             for (const s of survivorsBySource) {
                 for (const unitId of Object.keys(UnitsDB)) s.region.army[unitId] += s.left[unitId];
             }
-            message = `${attackerName}: наступление на ${target.name} (${defenderName}) отбито.`;
+            message = `${names}: наступление на ${target.name} (${defenderName}) отбито.`;
         }
 
-        if (success && this.isHuman(attacker)) this.bumpStat(attacker, 'battlesWon');
+        if (success) for (const cc of coalition) if (this.isHuman(cc)) this.bumpStat(cc, 'battlesWon');
         if (!success && this.isHuman(defender)) this.bumpStat(defender, 'battlesWon');
         return {
             won: success,
-            success: attacker === this.playerCountry ? success : !success,
+            success: coalition.includes(this.playerCountry) ? success : !success,
             message,
             detail: extra.filter(Boolean).join(' '),
-            attacker, defender,
-            playerIsAttacker: attacker === this.playerCountry,
+            attacker, defender, coalition, joint,
+            playerIsAttacker: coalition.includes(this.playerCountry),
             power: { attack: Math.round(powerAtt), defense: Math.round(powerDef), capital: isCapital },
             losses: { attacker: attLosses, defender: defLosses, initialAttacker: forces },
         };
@@ -1427,6 +1530,8 @@ class GameData {
             humans: [...this.humans],
             seats: structuredClone(this.seats),
             winner: this.winner || null,
+            goal: this.goal,
+            scoreStart: { ...(this.scoreStart || {}) },
             net: this.net ? structuredClone(this.net) : undefined,
             date: +this.currentDate,
             turn: this.turn,
@@ -1468,8 +1573,10 @@ class GameData {
         const pair = key => typeof key === 'string' && key.split('|').length === 2 && key.split('|').every(cc => CountriesDB[cc]);
         if (!Array.isArray(save.wars) || save.wars.some(x => !Array.isArray(x) || !pair(x[0]) || !count(x[1]?.start) || !CountriesDB[x[1]?.attacker])) fail();
         if (!Array.isArray(save.truces) || save.truces.some(x => !Array.isArray(x) || !pair(x[0]) || !count(x[1]))) fail();
-        const decisionsOk = list => Array.isArray(list) && list.every(x => x && GameData.DECISIONS.includes(x.type) && CountriesDB[x.from]);
+        const decisionsOk = list => Array.isArray(list) && list.every(x => x && GameData.DECISIONS.includes(x.type) && CountriesDB[x.from] && (x.type !== 'event' || Events.validDecision(x)));
         if (!decisionsOk(save.decisions)) fail();
+        if (save.goal !== undefined && !GOALS[save.goal]) fail();
+        if (save.scoreStart !== undefined && !Score.valid(save.scoreStart)) fail();
         if (save.humans !== undefined) {
             if (!Array.isArray(save.humans) || save.humans[0] !== save.player || new Set(save.humans).size !== save.humans.length
                 || save.humans.some(cc => !CountriesDB[cc]?.playable)) fail();
@@ -1522,7 +1629,7 @@ class GameData {
 
     static restore(save) {
         GameData.validateSave(save);
-        const data = new GameData(save.player, { cheat: save.cheat, scenario: save.scenario, difficulty: save.difficulty, humans: save.humans, restoring: true });
+        const data = new GameData(save.player, { cheat: save.cheat, scenario: save.scenario, difficulty: save.difficulty, humans: save.humans, goal: save.goal, restoring: true });
         const units = Object.keys(UnitsDB);
 
         // сначала вернём всех владельцев, потом пересоберём индекс областей
@@ -1576,6 +1683,9 @@ class GameData {
         else Missions.refill(data);
         if (save.seats) data.seats = structuredClone(save.seats);
         data.winner = save.winner || null;
+        // партии до появления счёта: рост считаем с момента загрузки
+        if (save.scoreStart) data.scoreStart = { ...save.scoreStart };
+        else Score.init(data);
         if (save.net) data.net = structuredClone(save.net);
         return data;
     }
@@ -1677,7 +1787,7 @@ class GameData {
 }
 
 // Предложения, которые ждут ответа игрока.
-GameData.DECISIONS = ['peace', 'deal', 'pact', 'alliance'];
+GameData.DECISIONS = ['peace', 'deal', 'pact', 'alliance', 'event'];
 GameData.SEAT_FIELDS = ['missions', 'stats', 'decisions', 'history', 'campaign'];
 // Команды игрока → номер аргумента со страной (−1 — страна не указывается).
 GameData.COMMANDS = {
@@ -1685,5 +1795,5 @@ GameData.COMMANDS = {
     disband: 2, invest: 2, cancelProject: 1, integrateTerritory: -1,
     setTrade: 0, research: 0, startResearch: 0, cancelResearch: 0, setPolicy: 0, setTaxRate: 0,
     declareWar: 0, proposePeace: -1, diplomacyAction: -1, answerDecision: -1,
-    claimMission: -1, skipMission: -1,
+    claimMission: -1, skipMission: -1, transfer: -1, cedeRegion: -1,
 };
