@@ -538,7 +538,7 @@ class UIManager {
             const theirs = log.playerIsAttacker ? 'defender' : 'attacker';
             html += `<div class="log-power">Атака ${log.power.attack} против обороны ${log.power.defense}${log.power.capital ? ' (столица)' : ''}</div>
                 <div class="log-losses">
-                    <div><b>Наши потери:</b><br><span class="neg">${describe(log.losses[ours], '−') || 'без потерь'}</span></div>
+                    <div><b>${log.joint && log.playerIsAttacker ? 'Потери наступавших' : 'Наши потери'}:</b><br><span class="neg">${describe(log.losses[ours], '−') || 'без потерь'}</span></div>
                     <div><b>Потери врага:</b><br><span class="pos">${describe(log.losses[theirs], '−') || 'без потерь'}</span></div>
                 </div>`;
         }
@@ -579,11 +579,9 @@ class UIManager {
     }
 
     showGameOver(data) {
-        const victory = data.outcome === 'victory';
-        document.getElementById('gameover-title').textContent = victory ? 'Мировое господство' : 'Кампания завершена';
-        document.getElementById('gameover-text').textContent = victory
-            ? `${data.countries[data.playerCountry].name}: все ${data.campaignProgress().total} областей суверенных стран под вашим управлением. Победа на ${data.turn}-м ходу${data.cheatMode ? ' в режиме бога' : ''}.`
-            : `${data.countries[data.playerCountry].name} потеряла все области на ${data.turn}-м ходу. Попробуйте другой экономический курс или другую страну.`;
+        const verdict = Score.verdict(data, data.playerCountry);
+        document.getElementById('gameover-title').textContent = verdict.title;
+        document.getElementById('gameover-text').textContent = verdict.text;
         this.showModal('gameover-modal');
     }
 

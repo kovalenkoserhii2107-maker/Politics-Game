@@ -3,8 +3,8 @@ const assert=require('node:assert/strict');
 const fs=require('node:fs'),path=require('node:path'),vm=require('node:vm');
 function engine(){
  const values=new Map();let seed=123456;const math=Object.create(Math);math.random=()=>{seed=(Math.imul(seed,1664525)+1013904223)>>>0;return seed/4294967296;};const context=vm.createContext({console,Date,Math:math,structuredClone,localStorage:{setItem:(k,v)=>values.set(k,v),getItem:k=>values.get(k)||null,removeItem:k=>values.delete(k)}});
- for(const file of ['data/CountriesDB','data/RegionsDB','data/NeighborsDB','data/CitiesDB','UnitsDB','Tech','Economy','Diplomacy','Missions','GameData','AI','GameLoop'])vm.runInContext(fs.readFileSync(path.join(__dirname,'../js',file+'.js'),'utf8'),context);
- return Object.assign(vm.runInContext('({GameData,AI,SaveGame,GameLoop,RegionsDB,UnitsDB,DEVELOPMENT,POLICIES,Economy,RESOURCES,ECONOMY,Tech,TECH_TREE,MODERNIZATION,Diplomacy,DIPLOMACY,Missions,MISSION_KINDS,MISSION_RULES})',context),{localStorage:context.localStorage});
+ for(const file of ['data/CountriesDB','data/RegionsDB','data/NeighborsDB','data/CitiesDB','UnitsDB','Tech','Economy','Diplomacy','Missions','Score','Events','GameData','AI','GameLoop'])vm.runInContext(fs.readFileSync(path.join(__dirname,'../js',file+'.js'),'utf8'),context);
+ return Object.assign(vm.runInContext('({GameData,AI,SaveGame,GameLoop,RegionsDB,UnitsDB,DEVELOPMENT,POLICIES,Economy,RESOURCES,ECONOMY,Tech,TECH_TREE,MODERNIZATION,Diplomacy,DIPLOMACY,Missions,MISSION_KINDS,MISSION_RULES,Score,GOALS,Events,EVENTS})',context),{localStorage:context.localStorage});
 }
 test('casualties are invariant under splitting an attack into orders',()=>{
  const {GameData}=engine();const fight=split=>{const d=new GameData('UA',{scenario:'war2024'});for(const id of ['UA-1','RU-19']){d.regions[id].army=d.emptyArmy();d.regions[id].army.infantry=10;}
@@ -286,4 +286,121 @@ test('network framing: long messages are chunked under the PeerJS byte limit and
     handlers.data({ c: 'x', i: 0, n: 2, d: '{"t":' });              // неполное — ждём
     handlers.data('мусор');
     assert.equal(got.length, 1);
+});
+
+// --- помощь, уступки, совместные атаки, цели ---
+test('transfer: money and stock go to a friend, not to an enemy', () => {
+    const { GameData, Diplomacy } = engine(), d = new GameData('DE', { humans: ['PL'] });
+    const de = d.countries.DE, pl = d.countries.PL;
+    const money = de.money, plMoney = pl.money;
+    assert.equal(d.act('transfer', 'PL', 'money', 5e6).ok, true);
+    assert.equal(de.money, money - 5e6);
+    assert.equal(pl.money, plMoney + 5e6);
+    assert.ok(d.takeDiploEvents().some(e => e.for === 'PL' && e.message.includes('передаёт')));
+    de.stock.food = 10;
+    assert.equal(d.act('transfer', 'PL', 'food', 4).ok, true);
+    assert.equal(de.stock.food, 6);
+    assert.equal(d.act('transfer', 'PL', 'food', 40).ok, false);
+    assert.equal(d.act('transfer', 'PL', 'money', 1e15).ok, false);
+    assert.ok(Diplomacy.relation(d, 'DE', 'PL') > 0);
+    d.turn = 20; de.influence = 100;
+    d.declareWar('DE', 'FR');
+    assert.equal(d.act('transfer', 'FR', 'money', 1e6).ok, false);
+});
+
+test('cede region: only a bordering region, not the capital; troops withdraw', () => {
+    const { GameData } = engine(), d = new GameData('DE', { humans: ['PL'] });
+    const border = d.getCountryRegions('DE').find(r => r.id !== d.countries.DE.capital && d.getNeighbors(r.id).some(id => d.regions[id]?.owner === 'PL'));
+    assert.ok(border);
+    const troops = Object.values(border.army).reduce((a, b) => a + b, 0);
+    const before = d.calculateMilitaryPower('DE');
+    assert.equal(d.act('cedeRegion', d.countries.DE.capital, 'PL').ok, false);
+    assert.equal(d.act('cedeRegion', border.id, 'PL').ok, true);
+    assert.equal(d.regions[border.id].owner, 'PL');
+    assert.equal(Object.values(d.regions[border.id].army).reduce((a, b) => a + b, 0), 0);
+    if (troops) assert.ok(Math.abs(d.calculateMilitaryPower('DE') - before) < before * 0.2, 'войска отошли, а не пропали');
+    const far = d.getCountryRegions('DE').find(r => !d.getNeighbors(r.id).some(id => d.regions[id]?.owner === 'IT') && r.id !== d.countries.DE.capital);
+    assert.ok(far);
+    assert.equal(d.act('cedeRegion', far.id, 'IT').ok, false, 'не граничит — не отдать');
+});
+
+test('joint attack: allies merge into one battle with a bonus, the stronger takes the region', () => {
+    const { GameData, Diplomacy } = engine(), d = new GameData('DE', { humans: ['PL'] });
+    d.turn = 20;
+    Diplomacy.sign(d, 'DE', 'PL', 'alliance');
+    const cz = d.getCountryRegions('CZ').find(r => d.getNeighbors(r.id).some(id => d.regions[id]?.owner === 'DE') && d.getNeighbors(r.id).some(id => d.regions[id]?.owner === 'PL'));
+    assert.ok(cz, 'есть чешская область на стыке Германии и Польши');
+    d.countries.DE.influence = 100; d.countries.PL.influence = 100;
+    d.declareWar('DE', 'CZ');
+    assert.equal(d.isAtWar('PL', 'CZ'), false);
+    d.withPlayer('PL', () => d.act('declareWar', 'PL', 'CZ'));
+    const fromDE = d.getNeighbors(cz.id).find(id => d.regions[id]?.owner === 'DE');
+    const fromPL = d.getNeighbors(cz.id).find(id => d.regions[id]?.owner === 'PL');
+    d.regions[fromDE].army.tanks = 60; d.regions[fromPL].army.infantry = 30;
+    d.regions[cz.id].army = d.emptyArmy(); d.regions[cz.id].army.infantry = 20;
+    assert.equal(d.queueAttack(fromDE, cz.id, { tanks: 60 }, 'DE').ok, true);
+    assert.equal(d.queueAttack(fromPL, cz.id, { infantry: 30 }, 'PL').ok, true);
+    const { logs } = d.processOrders();
+    const de = logs.find(l => l.for === 'DE'), pl = logs.find(l => l.for === 'PL');
+    assert.ok(de && pl, 'оба союзника получили отчёт');
+    assert.equal(de.joint, true);
+    assert.equal(de.success, true);
+    assert.equal(pl.success, true);
+    assert.equal(d.regions[cz.id].owner, 'DE');
+    assert.equal(d.regions[cz.id].army.infantry, 0, 'польская пехота вернулась домой');
+    assert.ok(d.regions[fromPL].army.infantry > 0);
+});
+
+test('goals: timed game ends with the fastest-growing human, coop ends together', () => {
+    const { GameData, GameLoop, AI, Score } = engine();
+    const d = new GameData('DE', { humans: ['PL'], goal: 'turns30' });
+    assert.equal(d.goal, 'turns30');
+    const loop = mpLoop(GameLoop, AI, d);
+    const border = d.getCountryRegions('DE').find(r => r.id !== d.countries.DE.capital && d.getNeighbors(r.id).some(id => d.regions[id]?.owner === 'PL'));
+    d.act('cedeRegion', border.id, 'PL');   // Польша сразу впереди на область
+    d.turn = 29;
+    loop.resolveTurn();
+    assert.equal(d.gameOver, true);
+    assert.ok(d.isHuman(d.winner));
+    const v = Score.verdict(d, d.winner === 'DE' ? 'PL' : 'DE');
+    assert.equal(v.victory, false);
+    assert.equal(Score.verdict(d, d.winner).victory, true);
+    assert.equal(new GameData('DE', { goal: 'coop' }).goal, 'domination', 'вместе — только в сетевой игре');
+    const c = new GameData('DE', { humans: ['PL'], goal: 'coop' });
+    for (const r of Object.values(c.regions).slice(0, 200)) c.setOwner(r.id, 'DE');
+    const events = [];
+    Score.checkEnd(c, events);
+    assert.equal(c.gameOver, true);
+    assert.equal(Score.verdict(c, 'PL').victory, true);
+    const back = GameData.restore(JSON.parse(JSON.stringify(d.serialize())));
+    assert.equal(back.goal, 'turns30');
+    assert.equal(back.scoreStart.DE, d.scoreStart.DE);
+});
+
+test('events: roll a choice for a human, both options work, decision survives save', () => {
+    const { GameData, Events, EVENTS } = engine(), d = new GameData('DE', { humans: ['PL'] });
+    d.turn = 10;
+    for (let i = 0; i < 40 && !(d.decisions.length && d.seats.PL.decisions.length); i++) {
+        d.stats.lastEvent = 0; d.seats.PL.stats.lastEvent = 0;
+        Events.roll(d, []);
+    }
+    const mine = d.decisions.find(x => x.type === 'event');
+    assert.ok(mine && d.seats.PL.decisions.some(x => x.type === 'event'), 'событие выпало обоим');
+    assert.ok(EVENTS[mine.event]);
+    const back = GameData.restore(JSON.parse(JSON.stringify(d.serialize())));
+    assert.ok(back.decisions.some(x => x.type === 'event'));
+    // каждый вариант каждого события применяется без ошибок
+    for (const key of Object.keys(EVENTS)) {
+        for (const choice of [true, false]) {
+            const t = new GameData('UA', { scenario: 'war2024' });
+            t.countries.UA.money = 1e9;
+            t.startResearch('UA', 'drones'); t.startResearch('UA', 'motorized');
+            const r = t.getCountryRegions('UA')[0];
+            const ctx = EVENTS[key].when(t, 'UA') || { region: r.id, cost: 1e5, money: 1e5, food: 5, from: 'PL', tanks: 1, infantry: 1, sale: 1e5 };
+            t.decisions.unshift({ type: 'event', from: 'UA', event: key, ctx });
+            const res = t.act('answerDecision', choice);
+            assert.equal(res.ok, true, key);
+            assert.equal(typeof res.summary, 'string', key);
+        }
+    }
 });
