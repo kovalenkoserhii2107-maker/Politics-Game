@@ -3,8 +3,8 @@ const assert=require('node:assert/strict');
 const fs=require('node:fs'),path=require('node:path'),vm=require('node:vm');
 function engine(){
  const values=new Map();let seed=123456;const math=Object.create(Math);math.random=()=>{seed=(Math.imul(seed,1664525)+1013904223)>>>0;return seed/4294967296;};const context=vm.createContext({console,Date,Math:math,structuredClone,localStorage:{setItem:(k,v)=>values.set(k,v),getItem:k=>values.get(k)||null,removeItem:k=>values.delete(k),key:i=>[...values.keys()][i]??null,get length(){return values.size;}}});
- for(const file of ['data/CountriesDB','data/RegionsDB','data/NeighborsDB','data/CitiesDB','UnitsDB','Tech','Economy','Diplomacy','Missions','Score','Events','Unrest','Trade','GameData','AI','GameLoop'])vm.runInContext(fs.readFileSync(path.join(__dirname,'../js',file+'.js'),'utf8'),context);
- return Object.assign(vm.runInContext('({GameData,AI,SaveGame,GameLoop,RegionsDB,UnitsDB,DEVELOPMENT,POLICIES,Economy,RESOURCES,ECONOMY,Tech,TECH_TREE,MODERNIZATION,Diplomacy,DIPLOMACY,Missions,MISSION_KINDS,MISSION_RULES,Score,GOALS,Events,EVENTS,DEBT,CYCLES,INFRA,Unrest,REVOLT,Trade,RULES})',context),{localStorage:context.localStorage});
+ for(const file of ['data/CountriesDB','data/RegionsDB','data/NeighborsDB','data/CitiesDB','UnitsDB','Tech','Economy','Diplomacy','Missions','Score','Events','Unrest','Trade','Council','GameData','AI','GameLoop'])vm.runInContext(fs.readFileSync(path.join(__dirname,'../js',file+'.js'),'utf8'),context);
+ return Object.assign(vm.runInContext('({GameData,AI,SaveGame,GameLoop,RegionsDB,UnitsDB,DEVELOPMENT,POLICIES,Economy,RESOURCES,ECONOMY,Tech,TECH_TREE,MODERNIZATION,Diplomacy,DIPLOMACY,Missions,MISSION_KINDS,MISSION_RULES,Score,GOALS,Events,EVENTS,DEBT,CYCLES,INFRA,Unrest,REVOLT,Trade,Council,COUNCIL,RULES})',context),{localStorage:context.localStorage});
 }
 test('casualties are invariant under splitting an attack into orders',()=>{
  const {GameData}=engine();const fight=split=>{const d=new GameData('UA',{scenario:'war2024'});for(const id of ['UA-1','RU-19']){d.regions[id].army=d.emptyArmy();d.regions[id].army.infantry=10;}
@@ -701,4 +701,82 @@ test('chronicle: records every turn for humans and top AI, survives save, reject
     assert.throws(() => GameData.restore(bad));
     const old = d.serialize(); delete old.chronicle;
     assert.equal(GameData.restore(old).chronicle.turns.length, 1, 'старое сохранение начинает хронику заново');
+});
+
+test('council: convenes on schedule, humans vote, sanctions cut trade and expire, truce ends wars', () => {
+    const { GameData, GameLoop, AI, Council, COUNCIL, Economy, Diplomacy } = engine();
+    const d = new GameData('DE', { humans: ['PL'] });
+    // Германия захватила три области Франции
+    d.startWar('DE', 'FR');
+    for (const r of d.getCountryRegions('FR').filter(r => r.id !== d.countries.FR.capital).slice(0, 3)) d.setOwner(r.id, 'DE');
+    assert.equal(Council.aggressor(d), 'DE');
+    d.turn = COUNCIL.FIRST;
+    const events = [];
+    Council.convene(d, events);
+    assert.equal(d.council.kind, 'sanctions');
+    assert.equal(d.council.target, 'DE');
+    assert.ok(events[0].message.includes('Мировой совет'));
+    assert.equal(d.decisions[0].type, 'council');
+    assert.equal(d.seatOf('PL').decisions[0].type, 'council');
+    // Польша голосует «за» — командой, как в сетевой игре
+    const guest = GameData.restore(JSON.parse(JSON.stringify(d.serialize())));
+    guest.becomePlayer('PL'); guest.recorder = [];
+    guest.act('answerDecision', true);
+    d.replay('PL', guest.recorder);
+    assert.equal(d.council.votes.PL, true);
+    d.act('answerDecision', false);
+    assert.equal(d.council.votes.DE, false);
+    const back = GameData.restore(JSON.parse(JSON.stringify(d.serialize())));
+    assert.equal(JSON.stringify(back.council), JSON.stringify(d.council));
+    // соседи Германии не любят захватчиков: принимают
+    for (const cc of d.neighbourCountries('DE')) if (!d.isHuman(cc)) Diplomacy.changeRelation(d, cc, 'DE', -50);
+    const tradeBefore = Economy.runMarkets(GameData.restore(JSON.parse(JSON.stringify(d.serialize())))).DE;
+    d.turn++;
+    const out = [];
+    const result = Council.resolve(d, out);
+    assert.equal(result.passed, true, out.map(e => e.message).join());
+    assert.ok(out.some(e => e.message.includes('Польша — за')));
+    assert.ok(Council.sanctioned(d, 'DE'));
+    assert.equal(d.council, null);
+    const sold = r => Object.values(r.res).reduce((a, x) => a + x.sold + x.bought, 0);
+    assert.ok(sold(Economy.runMarkets(d).DE) < sold(tradeBefore) * 0.8);
+    d.turn += COUNCIL.SANCTION_TURNS;
+    Council.resolve(d, out);
+    assert.equal(Council.sanctioned(d, 'DE'), false);
+    // перемирие: захватчик под санкциями не выбирается повторно, войн много
+    const w = new GameData('FR');
+    w.startWar('FR', 'ES'); w.startWar('IT', 'AT');
+    w.turn = COUNCIL.FIRST; Council.convene(w, []);
+    assert.equal(w.council.kind, 'truce');
+    w.act('answerDecision', true);
+    w.turn++; const r2 = Council.resolve(w, []);
+    assert.equal(r2.passed, true);
+    assert.equal(w.wars.size, 0);
+    assert.ok(w.truceLeft('FR', 'ES') > 0);
+    // и всё это — через обычный ход
+    const g = new GameData('UA', { scenario: 'war2024' });
+    const loop = mpLoop(GameLoop, AI, g);
+    g.turn = COUNCIL.FIRST - 1; g.startWar('IT', 'AT');
+    const rep = loop.resolveTurn();
+    assert.ok(g.council, 'созван в ходе');
+    assert.ok(rep.UA.turnData.events.some(m => m.includes('Мировой совет')));
+    const bad = g.serialize(); bad.council.council.kind = 'nope';
+    assert.throws(() => GameData.restore(bad));
+});
+
+test('hot seat: queue survives save in the main slot, looking through another seat keeps it valid', () => {
+    const { GameData, SaveGame } = engine();
+    const d = new GameData('UA', { humans: ['PL'], hotseat: true });
+    assert.equal(d.multiplayer, true);
+    assert.equal(new GameData('UA', { hotseat: true }).hotseat, null, 'одному — не нужно');
+    d.hotseat.done.push('UA');
+    d.becomePlayer('PL');
+    assert.ok(SaveGame.save(d));
+    assert.equal(SaveGame.campaigns().length, 0, 'не сетевая кампания');
+    const back = GameData.restore(SaveGame.load().game);
+    assert.equal(back.playerCountry, 'PL');
+    assert.equal(back.hotseat.done.join(), 'UA');
+    assert.equal(JSON.stringify(back.serialize()), JSON.stringify(d.serialize()));
+    const bad = d.serialize(); bad.hotseat.done = ['FR'];
+    assert.throws(() => GameData.restore(bad));
 });

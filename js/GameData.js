@@ -78,6 +78,7 @@ class GameData {
         Missions.init(this);
         Unrest.init(this);
         this.operations = [];       // совместные операции союзников: { by, target, turn }
+        Council.init(this);
         this.diploEvents = [];      // что случилось в дипломатии между отчётами хода
         // Страны под управлением людей. В одиночной игре — только игрок; в
         // сетевой — все участники. Задания, решения и журнал каждого, кроме
@@ -86,6 +87,9 @@ class GameData {
         // цель партии: совместная — только когда людей больше одного
         const goal = GOALS[options.goal] ? options.goal : 'domination';
         this.goal = GOALS[goal].multiplayer && this.humans.length < 2 ? 'domination' : goal;
+        // «горячий стул»: люди ходят по очереди на одном устройстве; done —
+        // кто уже закончил этот ход
+        this.hotseat = options.hotseat && this.humans.length > 1 ? { done: [] } : null;
         this.seats = {};
         for (const cc of this.humans.slice(1)) this.seats[cc] = GameData.emptySeat();
         this.build();
@@ -578,6 +582,11 @@ class GameData {
                     : problem ? `⚠️ Сделка с ${me} сорвалась: ${problem}.` : `🤝 ${me} принимает сделку: вы отдали ${Trade.describeSide(this, offer.give)}, получили ${Trade.describeSide(this, offer.get)}.` });
             }
             return { ok: true, accepted: !!accept && !problem, failed: problem, ...next };
+        }
+        if (next.type === 'council') {
+            if (!this.council || this.council.kind !== next.kind) return { ok: true, stale: true, ...next };
+            Council.vote(this, p, accept);
+            return { ok: true, accepted: !!accept, ...next };
         }
         if (next.type === 'rebels') {
             const revolt = this.revolts[next.region];
@@ -1660,6 +1669,7 @@ class GameData {
             cycle: this.cycle ? { ...this.cycle } : undefined,
             revolts: Unrest.serialize(this),
             operations: (this.operations || []).map(o => ({ ...o })),
+            council: Council.serialize(this),
             chronicle: this.chronicle ? structuredClone(this.chronicle) : undefined,
             diplomacy: Diplomacy.serialize(this),
             missions: this.missions.map(m => ({ ...m, reward: { ...m.reward } })),
@@ -1669,6 +1679,7 @@ class GameData {
             seats: structuredClone(this.seats),
             winner: this.winner || null,
             goal: this.goal,
+            hotseat: this.hotseat ? { done: [...this.hotseat.done] } : undefined,
             scoreStart: { ...(this.scoreStart || {}) },
             net: this.net ? structuredClone(this.net) : undefined,
             date: +this.currentDate,
@@ -1714,11 +1725,14 @@ class GameData {
         const pair = key => typeof key === 'string' && key.split('|').length === 2 && key.split('|').every(cc => CountriesDB[cc]);
         if (!Array.isArray(save.wars) || save.wars.some(x => !Array.isArray(x) || !pair(x[0]) || !count(x[1]?.start) || !CountriesDB[x[1]?.attacker])) fail();
         if (!Array.isArray(save.truces) || save.truces.some(x => !Array.isArray(x) || !pair(x[0]) || !count(x[1]))) fail();
-        const decisionsOk = list => Array.isArray(list) && list.every(x => x && GameData.DECISIONS.includes(x.type) && CountriesDB[x.from] && (x.type !== 'event' || Events.validDecision(x)) && (x.type !== 'rebels' || !!RegionsDB[x.region]) && (x.type !== 'trade' || Trade.validDecision(x)));
+        const decisionsOk = list => Array.isArray(list) && list.every(x => x && GameData.DECISIONS.includes(x.type) && CountriesDB[x.from] && (x.type !== 'event' || Events.validDecision(x)) && (x.type !== 'rebels' || !!RegionsDB[x.region]) && (x.type !== 'trade' || Trade.validDecision(x)) && (x.type !== 'council' || !!COUNCIL_KINDS[x.kind]));
         if (!decisionsOk(save.decisions)) fail();
         if (save.goal !== undefined && !GOALS[save.goal]) fail();
+        if (save.hotseat !== undefined && (!save.hotseat || !Array.isArray(save.hotseat.done) || !Array.isArray(save.humans) || save.humans.length < 2
+            || !save.hotseat.done.every(cc => save.humans.includes(cc)))) fail();
         if (save.revolts !== undefined && !Unrest.valid(save.revolts)) fail();
         if (save.chronicle !== undefined && !Score.validChronicle(save.chronicle)) fail();
+        if (save.council !== undefined && !Council.valid(save.council)) fail();
         if (save.operations !== undefined && (!Array.isArray(save.operations) || save.operations.some(o => !o || !CountriesDB[o.by] || !RegionsDB[o.target] || !Number.isInteger(o.turn)))) fail();
         if (save.cycle !== undefined && (!save.cycle || !CYCLES[save.cycle.phase] || !Number.isInteger(save.cycle.until))) fail();
         if (save.scoreStart !== undefined && !Score.valid(save.scoreStart)) fail();
@@ -1828,6 +1842,7 @@ class GameData {
         if (save.cycle) data.cycle = { ...save.cycle };
         if (save.revolts) data.revolts = structuredClone(save.revolts);
         if (save.operations) data.operations = save.operations.map(o => ({ ...o }));
+        Council.restore(data, save.council);
         // хроника: у старых партий графики начинаются с момента загрузки
         if (save.chronicle) data.chronicle = structuredClone(save.chronicle);
         else Score.initChronicle(data);
@@ -1840,6 +1855,7 @@ class GameData {
         if (save.scoreStart) data.scoreStart = { ...save.scoreStart };
         else Score.init(data);
         if (save.net) data.net = structuredClone(save.net);
+        data.hotseat = save.hotseat ? { done: [...save.hotseat.done] } : null;
         return data;
     }
 
@@ -1940,7 +1956,8 @@ class GameData {
 }
 
 // Предложения, которые ждут ответа игрока.
-GameData.DECISIONS = ['peace', 'deal', 'pact', 'alliance', 'event', 'rebels', 'trade'];
+GameData.DIPLO_OFFERS = ['peace', 'deal', 'pact', 'alliance'];
+GameData.DECISIONS = ['peace', 'deal', 'pact', 'alliance', 'event', 'rebels', 'trade', 'council'];
 GameData.SEAT_FIELDS = ['missions', 'stats', 'decisions', 'history', 'campaign'];
 // Команды игрока → номер аргумента со страной (−1 — страна не указывается).
 GameData.COMMANDS = {

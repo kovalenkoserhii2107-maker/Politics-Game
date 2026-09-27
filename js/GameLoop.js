@@ -205,19 +205,21 @@ class GameLoop {
         if (this.failed || this.busy || d.gameOver || this.awaitingSummary || d.decisions.length) return;
         // в сетевой игре ход считается, когда готовы все — это решает Net
         if (this.net) { this.net.toggleReady(); return; }
+        // на одном устройстве — передать ход следующему; считает последний
+        if (d.hotseat && this.onHotseat) { this.onHotseat(); return; }
         this.runTurn();
     }
 
     // Посчитать ход и показать свой отчёт. before — что сделать до расчёта
     // (в сетевой игре — повторить команды гостей). Возвращает отчёты всех людей.
-    runTurn(before) {
+    runTurn(before, show = true) {
         const d = this.data;
         this.busy = true;
         this.endTurnBtn.disabled = true;
         try {
             if (before) before();
             const reports = this.resolveTurn();
-            this.showReport(reports[d.playerCountry]);
+            if (show) this.showReport(reports[d.playerCountry]);
             return reports;
         } catch (error) {
             console.error(error);
@@ -245,6 +247,8 @@ class GameLoop {
         d.currentDate.setDate(d.currentDate.getDate() + 7);
         Score.checkEnd(d, events);
         Score.record(d);
+        Council.resolve(d, events);
+        Council.convene(d, events);
         const diplomacy = d.gameOver ? [] : this.ai.diplomacy();
         Events.roll(d, diplomacy);
         const shared = [...events, ...diplomacy, ...d.takeDiploEvents()];
@@ -313,7 +317,17 @@ class GameLoop {
             this.afterSummary();
         };
         const valid = from?.alive && (next.type === 'peace' ? d.isAtWar(next.from, d.playerCountry) : !d.isAtWar(next.from, d.playerCountry));
-        if (!valid) { d.act('answerDecision', false); this.afterSummary(); return; }
+        if (!valid && GameData.DIPLO_OFFERS.includes(next.type)) { d.act('answerDecision', false); this.afterSummary(); return; }
+        if (next.type === 'council') {
+            const c = Council.describe(d, next);
+            if (!c.open) { d.act('answerDecision', false); this.afterSummary(); return; }
+            this.ui.showDecision({
+                title: c.title, text: c.text, accept: c.accept, decline: c.decline,
+                onAccept: () => { d.act('answerDecision', true); this.ui.toast('🏛️ Ваш голос: за'); this.afterDecision(); },
+                onDecline: () => { d.act('answerDecision', false); this.ui.toast('🏛️ Ваш голос: против'); this.afterDecision(); },
+            });
+            return;
+        }
         if (next.type === 'trade') {
             const t = Trade.describe(d, next.from, d.playerCountry, Trade.normalize(next.offer));
             const lines = [`Даёт вам: ${t.give}`, `Просит у вас: ${t.get}`];

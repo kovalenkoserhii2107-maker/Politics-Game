@@ -49,6 +49,73 @@ class GameCore {
         this.ui.updateOrdersPanel(this.data);
         SaveGame.save(this.data);
         this.loop.afterSummary();
+        if (this.data.hotseat) {
+            this.loop.onHotseat = () => this.hotseatEnd();
+            document.getElementById('hotseat-go').addEventListener('click', () => this.startSeat(this.handoffTo));
+            // сохранились между игроками — очередь того, кто ещё не ходил
+            const d = this.data;
+            if (!d.gameOver) this.showHandoff(d.hotseat.done.includes(d.playerCountry) ? this.hotseatNext() || d.playerCountry : d.playerCountry);
+        }
+    }
+
+    // --- горячий стул: двое и больше на одном устройстве -------------------
+    // Кто ещё не сходил в этот ход (живые, по порядку).
+    hotseatNext() {
+        const d = this.data;
+        return d.humans.find(cc => !d.hotseat.done.includes(cc) && d.countries[cc].alive && d.regionsByCountry[cc].length) || null;
+    }
+
+    // «Конец хода»: передать устройство следующему, а если все сходили —
+    // посчитать ход и раздать отчёты по очереди.
+    hotseatEnd() {
+        const d = this.data;
+        if (!d.hotseat.done.includes(d.playerCountry)) d.hotseat.done.push(d.playerCountry);
+        const next = this.hotseatNext();
+        if (next) { SaveGame.save(d); this.showHandoff(next); return; }
+        d.hotseat.done = [];
+        const reports = this.loop.runTurn(null, false);
+        if (!reports) return;
+        this.hotseatReports = reports;
+        SaveGame.save(d);
+        this.showHandoff(this.hotseatNext() || d.playerCountry);
+    }
+
+    // Экран передачи: карта закрыта, чтобы следующий не видел чужих планов.
+    showHandoff(cc) {
+        const d = this.data;
+        this.handoffTo = cc;
+        this.cancelTargeting();
+        this.ui.closePanel();
+        for (const modal of document.querySelectorAll('.modal.active')) modal.classList.remove('active');
+        this.ui.syncModalAccess();
+        const report = this.hotseatReports && this.hotseatReports[cc];
+        document.getElementById('hotseat-flag').style.background = d.countries[cc].color;
+        document.getElementById('hotseat-who').textContent = d.countries[cc].name;
+        document.getElementById('hotseat-text').textContent = report
+            ? 'Ход посчитан. Передайте устройство — сначала итоги, потом новые приказы.'
+            : 'Передайте устройство. Остальным — не подглядывать 🙈';
+        document.getElementById('hotseat-go').textContent = `Я — ${d.countries[cc].name}, начать ход`;
+        document.getElementById('hotseat-turn').textContent = `Ход ${d.turn + 1} · ${this.loop.formatDate(d.currentDate)}`;
+        document.getElementById('hotseat-screen').hidden = false;
+        document.body.classList.add('hotseat-handoff');
+        document.getElementById('hotseat-go').focus({ preventScroll: true });
+    }
+
+    startSeat(cc) {
+        const d = this.data;
+        document.getElementById('hotseat-screen').hidden = true;
+        document.body.classList.remove('hotseat-handoff');
+        d.becomePlayer(cc);
+        this.loop.lastChanges = null;
+        this.map.refreshColors();
+        this.map.createCountryLabels();
+        this.map.drawArmyMarkers();
+        this.map.drawOrders();
+        this.loop.updateTopBarUI();
+        this.ui.updateOrdersPanel(d);
+        const report = this.hotseatReports && this.hotseatReports[cc];
+        if (report) { delete this.hotseatReports[cc]; this.loop.showReport(report); }
+        else { SaveGame.save(d); this.loop.afterSummary(); }
     }
 
     // --- действия из карточек и окон ---------------------------------------
@@ -956,9 +1023,9 @@ class GameCore {
         const showGoal = () => {
             // «Вместе» — только в сетевой игре у хозяина (гость лишь видит выбор)
             const coop = document.querySelector('input[name="goal"][value="coop"]');
-            coop.disabled = !(net && net.role === 'host');
+            coop.disabled = !(net && net.role === 'host') && !hotseatOn();
             if (coop.disabled && coop.checked && !(net && net.role === 'guest')) document.querySelector('input[name="goal"][value="domination"]').checked = true;
-            $('goal-note').textContent = GOALS[goal()].text + (coop.disabled && !net ? ' «Вместе» — для игры по Wi-Fi.' : '');
+            $('goal-note').textContent = GOALS[goal()].text + (coop.disabled && !net ? ' «Вместе» — для игры по Wi-Fi или вдвоём на одном устройстве.' : '');
         };
         for (const radio of document.querySelectorAll('input[name="goal"]')) radio.addEventListener('change', () => { showGoal(); updateCta(); if (net && net.role === 'host') net.setOptions(hostOptions()); });
         const showLevel = () => { $('level-note').textContent = DIFFICULTY[difficulty()].note; };
@@ -1029,7 +1096,7 @@ class GameCore {
             window.game = new GameCore(data);
             if (session) window.game.attachNet(session);
             if (tutorial && !session) new Tutorial(window.game).start();
-            else if (!data.gameOver && !data.decisions.length && data.turn === 0 && !data.campaign.budget) window.game.ui.showCampaign(data);
+            else if (!data.hotseat && !data.gameOver && !data.decisions.length && data.turn === 0 && !data.campaign.budget) window.game.ui.showCampaign(data);
         };
 
         // --- игра по Wi-Fi: лобби ------------------------------------------
@@ -1122,7 +1189,7 @@ class GameCore {
                 ${note}
                 <div class="net-actions"><button id="net-leave-btn" class="btn btn-ghost btn-sm" type="button">${net.role === 'host' ? 'Отменить игру' : 'Выйти'}</button></div>`;
         };
-        const refreshLobby = () => { renderNet(); renderFeatured(); renderList(); updateCta(); };
+        const refreshLobby = () => { renderNet(); renderFeatured(); renderList(); renderSeats(); updateCta(); };
         const leaveNet = () => {
             if (net) { if (net.role === 'host') net.stop(); else net.leave(); }
             net = null; netView = 'idle'; netGames = null;
@@ -1131,6 +1198,26 @@ class GameCore {
             refreshLobby();
         };
         const netError = text => { if (net) { if (net.role === 'host') net.stop(); else net.leave(); } net = null; netView = 'idle'; netNote = text; refreshLobby(); };
+        // --- вдвоём на одном устройстве: список стран игроков ---
+        let seats = [];
+        const hotseatOn = () => $('hotseat-toggle').checked && !net;
+        const renderSeats = () => {
+            const box = $('hotseat-seats');
+            box.hidden = !hotseatOn();
+            if (box.hidden) return;
+            box.innerHTML = seats.map((id, i) => `<span class="seat-chip">${i + 1}. ${escape(CountriesDB[id].name)}<button type="button" data-seat-del="${id}" aria-label="Убрать ${escape(CountriesDB[id].name)}">✕</button></span>`).join('')
+                + (seats.length < 4 ? `<span class="seat-hint">${seats.length < 2 ? 'Нажмите страну второго игрока в списке' : 'Можно добавить ещё игрока'}</span>` : '');
+        };
+        $('hotseat-toggle').addEventListener('change', () => {
+            seats = hotseatOn() && selectedId ? [selectedId] : [];
+            renderSeats(); showGoal(); updateCta();
+        });
+        $('hotseat-seats').addEventListener('click', e => {
+            const del = e.target.closest('[data-seat-del]');
+            if (!del) return;
+            seats = seats.filter(id => id !== del.dataset.seatDel);
+            renderSeats(); updateCta();
+        });
         let netTimer = 0;
         const hostOptions = () => ({ scenario: scenario(), difficulty: difficulty(), goal: goal(), timer: netTimer });
         const timerName = t => t ? `${t / 60} мин` : 'нет';
@@ -1358,8 +1445,8 @@ class GameCore {
             advice.className = `advice lvl-${a.level}`;
             advice.textContent = a.advice;
             drawMinimap(regions, country.color);
-            updateCta();
             startBtn.disabled = false;
+            updateCta();
         };
 
         // Кнопка говорит, что именно начнётся: страна и режим.
@@ -1381,6 +1468,13 @@ class GameCore {
                 return;
             }
             const mode = scenario() === 'war2024' ? 'Сценарий 2024' : 'Мирный старт';
+            if (hotseatOn()) {
+                startBtn.disabled = seats.length < 2;
+                startBtn.innerHTML = seats.length < 2
+                    ? '<span>Выберите страну второго игрока</span><small>Вдвоём на одном устройстве</small>'
+                    : `<span>Начать вдвоём ▶</span><small>${seats.map(id => escape(CountriesDB[id].name)).join(' · ')} · ${mode}</small>`;
+                return;
+            }
             const level = difficulty() === 'normal' ? '' : ' · ' + DIFFICULTY[difficulty()].name;
             const aim = goal() === 'domination' ? '' : ' · ' + GOALS[goal()].short;
             startBtn.innerHTML = `<span>Начать игру ▶</span><small>${escape(CountriesDB[selectedId].name)} · ${mode}${level}${aim}</small>`;
@@ -1401,6 +1495,7 @@ class GameCore {
             if (net && taken(id)) { netNote = `${CountriesDB[id].name} уже выбрал(а) ${taken(id)}`; renderNet(); return; }
             selectedId = id;
             if (net) { netNote = ''; net.pick(id); renderNet(); }
+            if (hotseatOn() && !seats.includes(id) && seats.length < 4) { seats.push(id); renderSeats(); }
             for (const el of document.querySelectorAll('#start-screen [data-id]')) {
                 const on = el.dataset.id === id;
                 el.setAttribute('aria-pressed', String(on));
@@ -1445,6 +1540,11 @@ class GameCore {
             }
             if ((saved || saveProblem) && !confirm('Начать новую игру? Сохранённая партия будет удалена.')) return;
             SaveGame.clear();
+            if (hotseatOn()) {
+                if (seats.length < 2) return;
+                launch(new GameData(seats[0], { humans: seats.slice(1), hotseat: true, scenario: scenario(), difficulty: difficulty(), goal: goal() }));
+                return;
+            }
             launch(new GameData(selectedId, { cheat: $('cheat-toggle').checked, scenario: scenario(), difficulty: difficulty(), goal: goal() }),
                 $('tutorial-toggle').checked);
         });
@@ -1463,7 +1563,7 @@ class GameCore {
                 return;
             }
             // сетевая кампания из файла открывается у нас как сервер
-            if (data.multiplayer) { SaveGame.campaignRole = 'host'; resumeCampaign(data); return; }
+            if (data.multiplayer && !data.hotseat) { SaveGame.campaignRole = 'host'; resumeCampaign(data); return; }
             if ((saved || saveProblem) && !confirm('Загрузить партию из файла? Текущее сохранение будет заменено.')) return;
             SaveGame.clear();
             SaveGame.save(data);

@@ -854,6 +854,24 @@ class UIManager {
             <p class="hint">Очки: 10 за область, население, налоги и казна, технологии, сила армии. Большие величины считаются «под корнем» — маленькая страна может обогнать большую.</p>`;
     }
 
+    // Мировой совет: что на голосовании и кто под санкциями.
+    councilBlock(data) {
+        const lines = [];
+        const c = data.council;
+        if (c) {
+            const title = COUNCIL_KINDS[c.kind].title(data, c);
+            const mine = data.playerCountry in c.votes ? (c.votes[data.playerCountry] ? 'вы — за' : 'вы — против') : 'ваш голос ещё не отдан';
+            lines.push(`🏛️ На голосовании совета: <b>${this.escape(title)}</b> · ${mine}`);
+        }
+        const until = data.sanctions || {};
+        for (const cc of Object.keys(until).filter(x => Council.sanctioned(data, x))) {
+            const who = cc === data.playerCountry ? ' против вас' : `: ${this.escape(data.countries[cc].name)}`;
+            lines.push(`🚫 Санкции${who} — торговля −${Math.round((1 - COUNCIL.SANCTION_TRADE) * 100)}%, ещё ${until[cc] - data.turn} ход.`);
+        }
+        if (!c && !lines.length) lines.push(`🏛️ Мировой совет собирается раз в ${COUNCIL.EVERY} ходов с ${COUNCIL.FIRST}-го: санкции против захватчика чужих земель или всеобщее перемирие.`);
+        return `<div class="council-box">${lines.map(l => `<div>${l}</div>`).join('')}</div>`;
+    }
+
     // --- дипломатия ----------------------------------------------------------------------------
     // Сводка: войны, союзники и договоры, соседи и крупные державы. Строка
     // страны открывает её карточку — там все действия.
@@ -872,6 +890,7 @@ class UIManager {
             Diplomacy.hasDeal(data, player, cc) ? '🤝 торговля' : '',
             Diplomacy.pactLeft(data, player, cc) ? `📜 пакт ${Diplomacy.pactLeft(data, player, cc)} ход.` : '',
             data.truceLeft(player, cc) ? `🕊️ перемирие ${data.truceLeft(player, cc)} ход.` : '',
+            Council.sanctioned(data, cc) ? '🚫 санкции' : '',
         ].filter(Boolean).join(' · ');
         const strength = cc => {
             const ratio = data.calculateMilitaryPower(cc) / myPower;
@@ -884,6 +903,7 @@ class UIManager {
 
         let html = `<div class="diplo-influence">Влияние: <b>${me.influence}</b> / ${RULES.INFLUENCE_MAX}
             <span class="muted">· +${RULES.INFLUENCE_PER_TURN} за ход и награды за задания</span></div>
+            ${this.councilBlock(data)}
             <p class="hint">Отношения улучшают подарки и договоры. Торговый договор: +${Math.round(DIPLOMACY.DEAL_BONUS * 100)}% к выручке и −${Math.round(DIPLOMACY.DEAL_BONUS * 100)}% к закупкам на рынке (до ${DIPLOMACY.DEAL_MAX}). Союзник вступит в войну, если на вас нападут. Нажмите страну, чтобы договориться.</p>`;
 
         const enemies = data.enemiesOf(player);

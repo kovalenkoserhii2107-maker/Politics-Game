@@ -629,3 +629,25 @@ body.net-waiting #end-turn-btn { background: var(--s3); }
 .ch-table th:first-child, .ch-table td:first-child { text-align: left; font-family: inherit; }
 .ch-table th { color: var(--text-3); font-weight: 500; }
 #stats-modal .modal-content.wide { width: min(860px, 100%); }
+.council-box { display: flex; flex-direction: column; gap: 4px; margin: 8px 0; padding: 8px 10px; border: 1px solid var(--line); border-radius: var(--r); background: var(--s2); font-size: 0.85rem; color: var(--text-2); }
+.council-box b { color: var(--text); font-weight: 600; }
+
+/* --- горячий стул --- */
+#hotseat-screen {
+    position: fixed; inset: 0; z-index: 400; display: flex; align-items: center; justify-content: center;
+    background: var(--bg, #0a0b0d); padding: 16px; box-sizing: border-box; pointer-events: auto;
+}
+#hotseat-screen[hidden] { display: none; }
+.hotseat-card { width: min(380px, 100%); display: flex; flex-direction: column; align-items: center; gap: 12px; text-align: center; }
+.hotseat-card .label { color: var(--text-3); }
+.hotseat-flag { width: 72px; height: 72px; border-radius: 50%; border: 2px solid var(--line-2); }
+#hotseat-who { font-size: 1.6rem; line-height: 1.2; }
+#hotseat-text { color: var(--text-2); margin: 0; line-height: 1.45; }
+#hotseat-go { width: 100%; }
+body.hotseat-handoff #ui-layer > :not(#hotseat-screen) { visibility: hidden; }
+.hotseat-block { margin-top: 12px; }
+#hotseat-seats { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; align-items: center; }
+#hotseat-seats[hidden] { display: none; }
+.seat-chip { display: inline-flex; align-items: center; gap: 6px; min-height: 36px; padding: 0 4px 0 10px; border: 1px solid var(--line-2); border-radius: var(--r); background: var(--s3); color: var(--text); font-size: 0.85rem; }
+.seat-chip button { min-width: 32px; min-height: 32px; border: 0; background: transparent; color: var(--text-2); font: inherit; cursor: pointer; }
+.seat-hint { color: var(--text-2); font-size: 0.82rem; }

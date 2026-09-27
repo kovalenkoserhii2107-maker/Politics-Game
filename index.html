@@ -520,7 +520,7 @@ body { overscroll-behavior: none; }
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Exo+2:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;700&display=swap">
 <link rel="stylesheet" href="css/campaign.css?v=fe17f3ba7c">
-<link rel="stylesheet" href="css/theme.css?v=ae04105864">
+<link rel="stylesheet" href="css/theme.css?v=da2137462f">
 <link rel="stylesheet" href="css/map.css?v=067de1c831">
 <link rel="stylesheet" href="css/start.css?v=5288a0c5d1">
 </head>
@@ -638,6 +638,14 @@ body { overscroll-behavior: none; }
                         <label class="goal-coop"><input type="radio" name="goal" value="coop" disabled><span>Вместе</span></label>
                     </div>
                     <p id="goal-note" class="level-note"></p>
+                </div>
+                <div class="hotseat-block">
+                    <label class="switch">
+                        <input type="checkbox" id="hotseat-toggle">
+                        <span class="switch-track" aria-hidden="true"></span>
+                        <span class="switch-text"><b>👥 Вдвоём на одном устройстве</b><small>Ходите по очереди, передавая телефон</small></span>
+                    </label>
+                    <div id="hotseat-seats" hidden></div>
                 </div>
                 <details class="extra">
                     <summary>Дополнительно</summary>
@@ -925,6 +933,15 @@ body { overscroll-behavior: none; }
     </div>
     <div id="toast"></div>
     <button id="net-status" class="ui-element" type="button" hidden aria-label="Игроки и чат"></button>
+    <div id="hotseat-screen" hidden role="dialog" aria-modal="true" aria-labelledby="hotseat-who">
+        <div class="hotseat-card">
+            <span class="label" id="hotseat-turn">Ход</span>
+            <span class="hotseat-flag" id="hotseat-flag" aria-hidden="true"></span>
+            <b id="hotseat-who">Страна</b>
+            <p id="hotseat-text"></p>
+            <button id="hotseat-go" class="btn-cta" type="button">Начать ход</button>
+        </div>
+    </div>
     <div id="net-wait" hidden>
         <div class="net-wait-card" role="status">
             <span class="label">Ход отправлен</span>
@@ -946,7 +963,7 @@ body { overscroll-behavior: none; }
 <!-- Движок -->
 <script src="js/UnitsDB.js?v=8ed53808f1"></script>
 <script src="js/Tech.js?v=0dac26024b"></script>
-<script src="js/Economy.js?v=8bee12a652"></script>
+<script src="js/Economy.js?v=db3240ac5d"></script>
 <script src="js/Diplomacy.js?v=fa95d07eef"></script>
 <script src="js/Net.js?v=cedf3a012c"></script>
 <script src="js/Missions.js?v=fe83f7c237"></script>
@@ -954,13 +971,14 @@ body { overscroll-behavior: none; }
 <script src="js/Events.js?v=b551e27a37"></script>
 <script src="js/Unrest.js?v=5bc401cc94"></script>
 <script src="js/Trade.js?v=8f3185be41"></script>
+<script src="js/Council.js?v=c9882d1710"></script>
 <script src="js/Charts.js?v=01f1ed532c"></script>
-<script src="js/GameData.js?v=bc497a8103"></script>
+<script src="js/GameData.js?v=8e92c40dcd"></script>
 <script src="js/AI.js?v=f95e3d88a4"></script>
 <script src="js/MapEngine.js?v=46671ebb7b"></script>
-<script src="js/UIManager.js?v=156d3a8a02"></script>
-<script src="js/GameLoop.js?v=d35f58e30c"></script>
+<script src="js/UIManager.js?v=8c0c9bbadc"></script>
+<script src="js/GameLoop.js?v=22ac504645"></script>
 <script src="js/Tutorial.js?v=53ff18fd7f"></script>
-<script src="js/main.js?v=cef71defac"></script>
+<script src="js/main.js?v=e3430026f2"></script>
 </body>
 </html>
