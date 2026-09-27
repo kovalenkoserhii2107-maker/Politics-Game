@@ -13,6 +13,7 @@ const TECH_BRANCHES = {
     air:     { name: 'Авиация и ПВО', icon: '✈️' },
     support: { name: 'Оборона и снабжение', icon: '🧱' },
     economy: { name: 'Экономика', icon: '🏭' },
+    nuclear: { name: 'Ядерное оружие', icon: '☢️' },
 };
 
 const TECH_TREE = {
@@ -75,6 +76,14 @@ const TECH_TREE = {
     fusion: {
         branch: 'economy', name: 'Термоядерная энергетика', icon: '☢️', cost: 80e6, turns: 6, requires: ['digital'],
         effect: { energy: 1.35 }, text: 'Энергии производится ещё на 35% больше.',
+    },
+    nuclear: {
+        branch: 'nuclear', name: 'Ядерная бомба', icon: '☢️', cost: 60e6, turns: 5, requires: ['missiles'],
+        text: 'Открывает сборку атомных боеголовок (Наука → Ядерный арсенал). После первого испытания мир насторожится: отношения хуже, совет обсудит санкции. Зато напасть на ядерную державу решится не всякий.',
+    },
+    hydrogen: {
+        branch: 'nuclear', name: 'Термоядерная бомба', icon: '💥', cost: 120e6, turns: 6, requires: ['nuclear'],
+        text: 'Водородная бомба: стирает армию области почти целиком и задевает соседние области.',
     },
 };
 

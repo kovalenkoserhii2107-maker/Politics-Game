@@ -198,6 +198,7 @@ class MapEngine {
             path.classList.toggle('own', region.owner === player);
             path.classList.toggle('revolt', !!(this.data.revolts && this.data.revolts[id]));
             path.classList.toggle('operation', targets.has(id));
+            path.classList.toggle('fallout', Nuclear.fallout(this.data, id));
         }
         for (const line of this.borders || []) {
             const on = this.data.getRegion(line.a).owner !== this.data.getRegion(line.b).owner;

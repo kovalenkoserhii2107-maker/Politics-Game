@@ -261,6 +261,7 @@ class GameData {
         }
 
         this.assignCapitals();
+        Nuclear.init(this);         // арсеналы — до расчёта стартовых бюджетов
         this.distributeArmiesToBorders();
         this.fillStartingStocks();
         this.setStartingBudgets();
@@ -1022,6 +1023,11 @@ class GameData {
     }
 
     // В тот же ход — полный возврат (передумали), позже — половина.
+    // --- ядерное оружие (js/Nuclear.js) ------------------------------------
+    nuclearBuild(kind, countryId = this.playerCountry) { return Nuclear.build(this, countryId, kind); }
+    nuclearCancel(countryId = this.playerCountry) { return Nuclear.cancel(this, countryId); }
+    nuclearStrike(regionId, kind, countryId = this.playerCountry) { return Nuclear.strike(this, countryId, regionId, kind); }
+
     cancelResearch(countryId) {
         const country = this.countries[countryId];
         if (!country || !country.research) return 0;
@@ -1519,12 +1525,14 @@ class GameData {
         }
         const policy = POLICIES[country.policy] || POLICIES.balanced;
         for (const region of this.getCountryRegions(countryId)) {
-            // восставшая область налогов не платит
-            if (!this.revolts[region.id]) tax += region.population * country.taxRate * region.loyalty * (1 + INFRA.TAX * (region.development.infra || 0));
+            // восставшая область налогов не платит;
+            // заражённая после ядерного удара — тоже
+            if (!this.revolts[region.id] && !Nuclear.fallout(this, region.id)) tax += region.population * country.taxRate * region.loyalty * (1 + INFRA.TAX * (region.development.infra || 0));
             social += region.population * policy.socialCost;
             upkeep += this.armyUpkeep(region.army);
         }
         for (const g of this.garrisonsOf(countryId)) upkeep += this.armyUpkeep(g.army);
+        upkeep += Nuclear.upkeep(this, countryId);
         const cycle = Economy.cycle(this);
         tax *= Economy.taxFactor(country) * Tech.factor(country, 'tax') * cycle.tax
             * (Unrest.civilWar(this, countryId) ? REVOLT.CIVIL_TAX : 1);
@@ -1582,6 +1590,7 @@ class GameData {
         const cycleEvent = Economy.advanceCycle(this);
         if (cycleEvent) events.push(cycleEvent);
         this.processResearch(events);
+        Nuclear.endTurn(this, events);
         Diplomacy.endTurn(this, events);
         this.checkGarrisons(events);
         const balances = {};
@@ -1804,6 +1813,7 @@ class GameData {
             garrisons: Object.fromEntries(Object.entries(this.garrisons || {}).map(([id, byCountry]) =>
                 [id, Object.fromEntries(Object.entries(byCountry).map(([cc, army]) => [cc, units.map(u => army[u] || 0)]))])),
             council: Council.serialize(this),
+            nuclear: Nuclear.serialize(this),
             chronicle: this.chronicle ? structuredClone(this.chronicle) : undefined,
             diplomacy: Diplomacy.serialize(this),
             missions: this.missions.map(m => ({ ...m, reward: { ...m.reward } })),
@@ -1882,6 +1892,7 @@ class GameData {
         if (save.revolts !== undefined && !Unrest.valid(save.revolts)) fail();
         if (save.chronicle !== undefined && !Score.validChronicle(save.chronicle)) fail('хроника');
         if (save.council !== undefined && !Council.valid(save.council)) fail('совет');
+        if (save.nuclear !== undefined && !Nuclear.valid(save.nuclear)) fail('ядерное оружие');
         if (save.garrisons !== undefined && (!save.garrisons || typeof save.garrisons !== 'object' || !Object.entries(save.garrisons).every(([id, byCountry]) =>
             RegionsDB[id] && byCountry && typeof byCountry === 'object' && Object.entries(byCountry).every(([cc, army]) =>
                 CountriesDB[cc] && Array.isArray(army) && army.length === save.units.length && army.every(count))))) fail('войска союзников');
@@ -2004,6 +2015,8 @@ class GameData {
             }
         }
         Council.restore(data, save.council);
+        // партии до ядерного оружия: стартовые арсеналы, как в новой игре
+        if (save.nuclear) Nuclear.restore(data, save.nuclear); else Nuclear.init(data);
         // хроника: у старых партий графики начинаются с момента загрузки
         if (save.chronicle) data.chronicle = structuredClone(save.chronicle);
         else Score.initChronicle(data);
@@ -2221,5 +2234,6 @@ GameData.COMMANDS = {
     disband: 2, invest: 2, cancelProject: 1, integrateTerritory: -1, sendGarrison: 3, recallGarrison: 1,
     setTrade: 0, research: 0, startResearch: 0, cancelResearch: 0, setPolicy: 0, setTaxRate: 0,
     declareWar: 0, proposePeace: -1, diplomacyAction: -1, answerDecision: -1,
+    nuclearBuild: 1, nuclearCancel: 0, nuclearStrike: 2,
     claimMission: -1, skipMission: -1, transfer: -1, cedeRegion: -1, borrow: 1, repay: 1, suppressRevolt: -1, appeaseRevolt: -1, proposeTrade: -1, giveTroops: 3, planOperation: -1,
 };

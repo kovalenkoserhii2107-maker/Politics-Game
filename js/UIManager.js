@@ -410,6 +410,19 @@ class UIManager {
             <div class="help-chips">${around.map(cc => `<button class="chip help-chip" data-action="cede" data-region="${region.id}" data-country="${cc}">${this.escape(data.countries[cc].name)}${data.isHuman(cc) ? ' 🎮' : ''}</button>`).join('')}</div></details>`;
     }
 
+    // Ядерный удар по области противника — если есть готовые боеголовки.
+    nuclearBlock(data, region) {
+        const player = data.playerCountry;
+        if (region.owner === player || !data.isAtWar(player, region.owner) || !Nuclear.isPower(data, player)) return '';
+        const stock = Nuclear.stock(data, player);
+        const influence = data.countries[player].influence;
+        const buttons = Object.entries(NUCLEAR.KINDS).filter(([kind]) => stock[kind] > 0).map(([kind, k]) =>
+            `<button class="mini-btn danger nuke-btn" data-action="nuke" data-kind="${kind}" data-region="${region.id}" ${influence < k.influence ? 'disabled' : ''}>${k.icon} ${k.name} · ${stock[kind]} шт. · ${k.influence} влияния</button>`).join('');
+        return `<details class="nuke-panel"><summary>☢️ Ядерный удар</summary>
+            <p class="hint">Армия области будет почти уничтожена, погибнет часть жителей, постройки разрушены, несколько ходов — заражение без налогов. Мир ответит: санкции на ${Nuclear.turns(NUCLEAR.SANCTION_TURNS)} без голосования и резкое ухудшение отношений со всеми.${Nuclear.isPower(data, region.owner) ? ' <b>У противника есть свой арсенал — ИИ ответит ударом.</b>' : ''}</p>
+            <div class="nuke-actions">${buttons}</div></details>`;
+    }
+
     resetPanelSections() {
         document.getElementById('recruit-panel').style.display = 'none';
         document.getElementById('army-action-panel').style.display = 'none';
@@ -429,6 +442,8 @@ class UIManager {
             this.relationTag(data, country.id),
             capital ? this.tag(`🏛️ ${this.escape(capital.name)}`) : '',
             this.tag(`${stats.regions} обл.`),
+            Nuclear.isPower(data, country.id) ? this.tag(`☢️ Ядерная держава${isPlayer || data.nuclear.founders.includes(country.id) ? ` · ${Nuclear.describe(data, country.id)}` : ''}`, 'war') : '',
+            Council.sanctioned(data, country.id) ? this.tag(`🚫 Санкции (ещё ${data.sanctions[country.id] - data.turn} ход.)`, 'truce') : '',
             Unrest.civilWar(data, country.id) ? this.tag('🔥 Гражданская война', 'war')
                 : Unrest.revoltsOf(data, country.id).length ? this.tag(`🔥 Восстаний: ${Unrest.revoltsOf(data, country.id).length}`, 'war') : '',
         ].join('');
@@ -466,6 +481,7 @@ class UIManager {
         if (data.isCapital(region.id)) tags.push(this.tag('🏛️ Столица', 'capital'));
         if (region.owner !== region.originalOwner) tags.push(this.tag(`Оккупирована (${data.countries[region.originalOwner].name})`, 'war'));
         tags.push(this.tag(`Лояльность ${Math.round(region.loyalty * 100)}%`, region.loyalty < 0.6 ? 'war' : ''));
+        if (Nuclear.fallout(data, region.id)) tags.push(this.tag(`☢️ Заражение: ещё ${data.nuclear.fallout[region.id] - data.turn} ход., налогов нет`, 'war'));
         if (data.revolts[region.id]) tags.push(this.tag('🔥 Восстание', 'war'));
         else if ((region.unrest || 0) >= REVOLT.WARN) tags.push(this.tag(`⚠️ Недовольство ${Math.round(region.unrest * 100)}%`, 'truce'));
         document.getElementById('panel-tags').innerHTML = tags.join('');
@@ -497,7 +513,7 @@ class UIManager {
                     </button>
                 </div>`;
         }
-        html = this.unrestBlock(data, region) + this.operationBlock(data, region) + this.garrisonBlock(data, region) + html;
+        html = this.unrestBlock(data, region) + this.nuclearBlock(data, region) + this.operationBlock(data, region) + this.garrisonBlock(data, region) + html;
         if (data.multiplayer) html += `<button class="mini-btn ping-btn" data-action="ping" data-region="${region.id}">📍 Показать игрокам</button>`;
         document.getElementById('region-army-container').innerHTML = html;
         this.placeDiplomacy(false);
@@ -1305,6 +1321,7 @@ class UIManager {
             html += '</div>';
         }
 
+        html += this.arsenalBlock(data, player);
         html += `<h3 class="section-title">⚙️ Модернизация войск</h3>
             <p class="hint">Каждая ступень — +${Math.round(MODERNIZATION.STEP * 100)}% к силе рода войск, до ${MODERNIZATION.MAX}-й. Сразу, но каждая следующая дороже.</p>`;
         html += Object.keys(UnitsDB).filter(id => Tech.unitUnlocked(player, id)).map(unitId => {
@@ -1315,6 +1332,30 @@ class UIManager {
         }).join('');
         document.getElementById('science-content').innerHTML = html;
         this.showModal('science-modal');
+    }
+
+    // Ядерный арсенал: запас, сборка, чем грозит. Виден, когда изучена бомба.
+    arsenalBlock(data, player) {
+        if (!Tech.has(player, 'nuclear')) return '';
+        const building = data.nuclear.building[player.id];
+        let html = `<h3 class="section-title">☢️ Ядерный арсенал</h3><div class="sci-card arsenal">
+            <div class="sci-head"><b>В арсенале: ${Nuclear.describe(data, player.id)}</b></div>
+            <p>Содержание: ${this.money(Nuclear.upkeep(data, player.id))} за ход. Удар — в карточке области противника, стоит влияния. На ответный удар влияние не нужно.</p>`;
+        if (building) {
+            const k = NUCLEAR.KINDS[building.kind];
+            const refund = building.started === data.turn ? k.cost : Math.round(k.cost / 2);
+            html += `<div class="sci-active"><div><span class="label">Идёт сборка</span><b>${k.icon} ${k.name}</b>
+                <small>Осталось ходов: ${building.left}</small><div class="res-bar"><i style="width:${Math.round((1 - building.left / k.turns) * 100)}%"></i></div></div>
+                <button class="mini-btn" data-action="nuke-cancel">Отменить · вернуть ${this.money(refund)}</button></div>`;
+        } else {
+            for (const [kind, k] of Object.entries(NUCLEAR.KINDS)) {
+                if (!Tech.has(player, k.tech)) continue;
+                html += this.researchRow(kind, `${k.icon} Собрать: ${k.name.toLowerCase()}`,
+                    `${k.turns} ход. · содержание ${this.money(k.upkeep)}/ход`, k.cost, player.money).replace('data-action="research"', 'data-action="nuke-build"');
+            }
+            if (!data.nuclear.powers.includes(player.id)) html += '<p class="hint">Первая боеголовка — это испытание: отношения со всеми ухудшатся, совет обсудит санкции.</p>';
+        }
+        return html + '</div>';
     }
 
     // Точка на кнопке «Наука»: лаборатории простаивают, а деньги есть.

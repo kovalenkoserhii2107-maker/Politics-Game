@@ -1212,9 +1212,10 @@ function writeBorders(borders) {
             steps.push(`${((x - px) / 100)},${((y - py) / 100)}`.replace(/(^|,)(-?)0\./g, '$1$2.'));
             px = x; py = y;
         }
-        return d + steps.join(' ').replace(/ -/g, '-');
+        return steps.length ? d + steps.join(' ').replace(/ -/g, '-') : null;
     };
-    const rows = borders.map(([a, b, pts]) => `['${a}','${b}','${rel(pts)}']`);
+    // участок короче сотой доли пикселя (все точки совпали) рисовать нечем
+    const rows = borders.map(([a, b, pts]) => [a, b, rel(pts)]).filter(r => r[2]).map(([a, b, d]) => `['${a}','${b}','${d}']`);
     fs.writeFileSync(path.join(OUT_DIR, 'BordersDB.js'),
         HEADER + 'const BordersDB = [\n' + rows.join(',\n') + '\n];\n\n'
         + 'if (typeof module !== \'undefined\' && module.exports) module.exports = { BordersDB };\n');
