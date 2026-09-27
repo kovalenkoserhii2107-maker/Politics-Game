@@ -117,16 +117,22 @@ class Score {
         const name = d.countries[cc].name;
         if (d.winner === 'team') return { victory: true, title: 'Общая победа', text: `Вместе вы удержали ${Math.round(goal.share * 100)}% областей мира на ${d.turn}-м ходу.` };
         if (goal.turns && d.winner) {
-            const rows = Score.ranking(d, 3);
-            const mine = rows.find(r => r.cc === cc);
+            const signed = n => `${n >= 0 ? '+' : '−'}${Math.abs(n)}`;
+            // в сетевой игре место — среди игроков, в одиночной — в мире
+            const rows = (d.multiplayer ? d.humans : Score.ranking(d, 3).map(r => r.cc))
+                .map(x => ({ cc: x, gain: Score.gain(d, x) })).sort((a, b) => b.gain - a.gain);
+            const index = rows.findIndex(r => r.cc === cc);
+            const place = d.multiplayer ? index + 1 : (Score.ranking(d, 3).find(r => r.cc === cc) || {}).place;
+            const gain = Score.gain(d, cc);
             const victory = d.winner === cc;
             const winner = d.countries[d.winner].name;
+            const where = d.multiplayer ? `${place}-е место из ${rows.length}` : `${place}-е место в мире`;
             return {
                 victory,
                 title: victory ? 'Победа!' : 'Партия окончена',
                 text: victory
-                    ? `${name} выросла сильнее всех за ${goal.turns} ходов: +${mine ? mine.gain : 0} очков.`
-                    : `Победила ${winner}. ${name}: ${mine ? `${mine.place}-е место, +${mine.gain} очков` : 'выбыла'}.`,
+                    ? `${name} выросла сильнее всех за ${goal.turns} ходов: ${signed(gain)} очков.`
+                    : `Победила ${winner}. ${name}: ${d.countries[cc].alive ? `${where}, ${signed(gain)} очков` : 'выбыла'}.`,
             };
         }
         if (d.winner && d.winner !== cc) return { victory: false, title: 'Мировое господство', text: `${d.countries[d.winner].name} объединила мир под своим флагом на ${d.turn}-м ходу.` };

@@ -64,6 +64,13 @@ class GameCore {
             return;
         }
         if (action === 'mission-go') { this.goToMission(d.missions[+btn.dataset.index]); return; }
+        if (action === 'ping') {
+            if (!this.net) return;
+            this.net.ping(btn.dataset.region);
+            this.map.pingRegion(btn.dataset.region);
+            this.ui.toast(`📍 Показали игрокам: ${d.regions[btn.dataset.region].name}`);
+            return;
+        }
         if (d.gameOver) return;
         if (['invest', 'cancel-project', 'integrate'].includes(action)) {
             const id = btn.dataset.region;
@@ -91,6 +98,26 @@ class GameCore {
         if (action === 'mission-skip') {
             if (!d.act('skipMission', d.missions[+btn.dataset.index]?.kind)) { this.ui.toast(`Нужно ${MISSION_RULES.SKIP_COST} влияния`); return; }
             this.afterMissions();
+            return;
+        }
+        if (action === 'transfer') {
+            const result = d.act('transfer', cc, btn.dataset.kind, Number(btn.dataset.amount));
+            if (!result.ok) { this.ui.toast(result.reason); return; }
+            this.ui.haptic(20);
+            this.ui.toast(`${d.countries[cc].name}: передано ${result.text}`);
+            this.afterStateChange();
+            return;
+        }
+        if (action === 'cede') {
+            const region = d.regions[btn.dataset.region];
+            if (!confirm(`Отдать область ${region.name} — ${d.countries[cc].name}? Вернуть её можно только договорившись или силой.`)) return;
+            const result = d.act('cedeRegion', region.id, cc);
+            if (!result.ok) { this.ui.toast(result.reason); return; }
+            this.ui.toast(`${region.name} теперь у ${d.countries[cc].name}`);
+            this.ui.closePanel();
+            this.map.createCountryLabels();
+            this.map.drawArmyMarkers();
+            this.afterStateChange();
             return;
         }
         if (['gift', 'deal', 'pact', 'alliance', 'tribute', 'cancel-deal', 'cancel-pact', 'cancel-alliance'].includes(action)) {
@@ -210,9 +237,70 @@ class GameCore {
         callbacks.onToast = text => this.ui.toast(text);
         callbacks.onLost = () => { this.renderNetStatus(); };
         callbacks.onError = text => { this.ui.toast(text); this.renderNetStatus(); };
+        callbacks.onChat = entry => this.onChat(entry);
+        callbacks.onPing = entry => this.onPing(entry);
+        this.unread = 0;
         document.getElementById('net-wait-back').addEventListener('click', () => { if (this.net.ready) this.net.toggleReady(); });
+        document.getElementById('net-status').addEventListener('click', () => this.openChat());
+        document.getElementById('close-chat-btn').addEventListener('click', () => this.ui.hideModal('chat-modal'));
+        document.getElementById('chat-form').addEventListener('submit', e => {
+            e.preventDefault();
+            const input = document.getElementById('chat-input');
+            if (input.value.trim()) this.net.say(input.value.trim());
+            input.value = '';
+        });
+        document.getElementById('chat-modal').addEventListener('click', e => {
+            const quick = e.target.closest('[data-say]');
+            if (quick) { this.net.say(quick.dataset.say); return; }
+            const ping = e.target.closest('.chat-msg.ping');
+            if (ping) { this.ui.hideModal('chat-modal'); this.map.showRegion(ping.dataset.region); this.map.pingRegion(ping.dataset.region); }
+        });
         session.attach(this);
         this.renderNetStatus();
+    }
+
+    // --- чат и метки ---
+    chatOpen() { return document.getElementById('chat-modal').classList.contains('active'); }
+
+    openChat() {
+        this.unread = 0;
+        this.renderChat();
+        this.ui.showModal('chat-modal');
+        this.renderNetStatus();
+    }
+
+    renderChat() {
+        const d = this.data, log = document.getElementById('chat-log');
+        const list = this.net.chatLog || [];
+        log.innerHTML = list.length ? list.map(m => {
+            const mine = m.cc === d.playerCountry;
+            const who = mine ? 'Вы' : this.ui.escape(m.from);
+            if (m.t === 'ping') {
+                const r = d.regions[m.region];
+                return `<div class="chat-msg ping ${mine ? 'mine' : ''}" data-region="${m.region}">📍 ${who}: ${this.ui.escape(r ? r.name : m.region)} — показать</div>`;
+            }
+            return `<div class="chat-msg ${mine ? 'mine' : ''}"><b>${who}</b>${this.ui.escape(m.text)}</div>`;
+        }).join('') : '<div class="muted">Сообщений пока нет. Напишите что-нибудь или нажмите быструю фразу.</div>';
+        log.scrollTop = log.scrollHeight;
+    }
+
+    onChat(entry) {
+        if (this.chatOpen()) { this.renderChat(); return; }
+        if (entry.cc !== this.data.playerCountry) {
+            this.unread++;
+            this.ui.toast(`💬 ${entry.from}: ${entry.text}`);
+            this.ui.haptic(20);
+        }
+        this.renderNetStatus();
+    }
+
+    onPing(entry) {
+        const r = this.data.regions[entry.region];
+        if (!r) return;
+        this.map.pingRegion(entry.region);
+        if (this.chatOpen()) this.renderChat();
+        this.ui.toast(`📍 ${entry.from} показывает: ${r.name}`);
+        this.ui.haptic(20);
     }
 
     // Кто уже закончил ход, кого ждём. Пока ждём — поверх карты табличка,
@@ -232,7 +320,7 @@ class GameCore {
             return `<span class="np ${p.ready ? 'ready' : ''}">${state} ${this.ui.escape(p.name)} · ${this.ui.escape(name)}</span>`;
         };
         pill.hidden = false;
-        pill.innerHTML = `<b>📶 ${net.code || ''}</b>${offline ? '<span class="np off">нет связи — переподключаемся…</span>' : players.map(row).join('')}`;
+        pill.innerHTML = `<b>📶 ${net.code || ''}</b>${offline ? '<span class="np off">нет связи — переподключаемся…</span>' : players.map(row).join('')}<span class="np">💬${this.unread ? ` <span class="chat-badge">${this.unread}</span>` : ''}</span>`;
         const waiting = !!net.ready && !d.gameOver;
         wait.hidden = !waiting;
         document.body.classList.toggle('net-waiting', waiting);
@@ -742,6 +830,15 @@ class GameCore {
 
         const scenario = () => ($('scenario-toggle').checked ? 'war2024' : 'peace');
         const difficulty = () => (document.querySelector('input[name="difficulty"]:checked') || {}).value || 'normal';
+        const goal = () => (document.querySelector('input[name="goal"]:checked') || {}).value || 'domination';
+        const showGoal = () => {
+            // «Вместе» — только в сетевой игре у хозяина (гость лишь видит выбор)
+            const coop = document.querySelector('input[name="goal"][value="coop"]');
+            coop.disabled = !(net && net.role === 'host');
+            if (coop.disabled && coop.checked && !(net && net.role === 'guest')) document.querySelector('input[name="goal"][value="domination"]').checked = true;
+            $('goal-note').textContent = GOALS[goal()].text + (coop.disabled && !net ? ' «Вместе» — для игры по Wi-Fi.' : '');
+        };
+        for (const radio of document.querySelectorAll('input[name="goal"]')) radio.addEventListener('change', () => { showGoal(); updateCta(); if (net && net.role === 'host') net.setOptions(hostOptions()); });
         const showLevel = () => { $('level-note').textContent = DIFFICULTY[difficulty()].note; };
         for (const radio of document.querySelectorAll('input[name="difficulty"]')) radio.addEventListener('change', () => { showLevel(); updateCta(); });
         const preview = () => {
@@ -880,11 +977,12 @@ class GameCore {
         const leaveNet = () => {
             if (net) { if (net.role === 'host') net.stop(); else net.leave(); }
             net = null; netView = 'idle'; netGames = null;
-            for (const input of document.querySelectorAll('input[name="scenario"], input[name="difficulty"]')) input.disabled = false;
+            for (const input of document.querySelectorAll('input[name="scenario"], input[name="difficulty"], input[name="goal"]')) input.disabled = false;
+            showGoal();
             refreshLobby();
         };
         const netError = text => { if (net) { if (net.role === 'host') net.stop(); else net.leave(); } net = null; netView = 'idle'; netNote = text; refreshLobby(); };
-        const hostOptions = () => ({ scenario: scenario(), difficulty: difficulty() });
+        const hostOptions = () => ({ scenario: scenario(), difficulty: difficulty(), goal: goal() });
         const startHost = async () => {
             const name = playerName();
             netNote = 'Создаём игру…'; netView = 'busy'; renderNet();
@@ -893,6 +991,7 @@ class GameCore {
                 await session.start();
             } catch (err) { netError(err.message); return; }
             net = session; netView = 'lobby'; netNote = '';
+            showGoal();
             net.setOptions(hostOptions());
             if (selectedId) net.pick(selectedId);
             refreshLobby();
@@ -905,11 +1004,12 @@ class GameCore {
             const session = new NetGuest(name, {
                 onLobby: lobby => {
                     // режим и уровень выбирает хозяин
-                    for (const input of document.querySelectorAll('input[name="scenario"], input[name="difficulty"]')) {
-                        input.checked = input.value === lobby.scenario || input.value === lobby.difficulty;
+                    for (const input of document.querySelectorAll('input[name="scenario"], input[name="difficulty"], input[name="goal"]')) {
+                        input.checked = input.value === lobby.scenario || input.value === lobby.difficulty || input.value === lobby.goal;
                         input.disabled = true;
                     }
                     showLevel();
+                    $('goal-note').textContent = GOALS[goal()] ? GOALS[goal()].text : '';
                     const mine = lobby.players.find(p => p.id === session.clientId);
                     if (mine && !mine.cc && selectedId && !taken(selectedId)) session.pick(selectedId);
                     refreshLobby();
@@ -919,7 +1019,7 @@ class GameCore {
                 onLost: () => { netNote = 'Связь пропала — переподключаемся…'; renderNet(); },
                 onStart: (data, report) => {
                     net = null;
-                    for (const input of document.querySelectorAll('input[name="scenario"], input[name="difficulty"]')) input.disabled = false;
+                    for (const input of document.querySelectorAll('input[name="scenario"], input[name="difficulty"], input[name="goal"]')) input.disabled = false;
                     document.body.classList.remove('net-lobby', 'net-guest-lobby');
                     launch(data, false, session);
                     if (report) window.game.loop.showReport(report);
@@ -1090,7 +1190,8 @@ class GameCore {
             }
             const mode = scenario() === 'war2024' ? 'Сценарий 2024' : 'Мирный старт';
             const level = difficulty() === 'normal' ? '' : ' · ' + DIFFICULTY[difficulty()].name;
-            startBtn.innerHTML = `<span>Начать игру ▶</span><small>${escape(CountriesDB[selectedId].name)} · ${mode}${level}</small>`;
+            const aim = goal() === 'domination' ? '' : ' · ' + GOALS[goal()].short;
+            startBtn.innerHTML = `<span>Начать игру ▶</span><small>${escape(CountriesDB[selectedId].name)} · ${mode}${level}${aim}</small>`;
         };
 
         // Нет сети — вместо флага плашка цвета страны на карте.
@@ -1153,7 +1254,7 @@ class GameCore {
             }
             if ((saved || saveProblem) && !confirm('Начать новую игру? Сохранённая партия будет удалена.')) return;
             SaveGame.clear();
-            launch(new GameData(selectedId, { cheat: $('cheat-toggle').checked, scenario: scenario(), difficulty: difficulty() }),
+            launch(new GameData(selectedId, { cheat: $('cheat-toggle').checked, scenario: scenario(), difficulty: difficulty(), goal: goal() }),
                 $('tutorial-toggle').checked);
         });
 
@@ -1182,6 +1283,7 @@ class GameCore {
             : (playable.includes('UA') ? 'UA' : playable[0]);
         selectedId = initial;
         renderNet();
+        showGoal();
         renderFeatured();
         renderList();
         select(initial, false);

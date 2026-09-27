@@ -435,8 +435,9 @@ progress::-moz-progress-bar { background: var(--accent); }
     position: absolute; left: 12px; top: calc(64px + var(--safe-t, 0px)); z-index: 40;
     display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; max-width: calc(100vw - 24px); box-sizing: border-box;
     padding: 6px 10px; background: rgba(17, 19, 23, 0.94); border: 1px solid var(--line-2); border-radius: var(--r);
-    font-family: var(--mono); font-size: 0.72rem; color: var(--text-2); pointer-events: none;
+    font-family: var(--mono); font-size: 0.72rem; color: var(--text-2); cursor: pointer; text-align: left; min-height: 32px;
 }
+#net-status .chat-badge { background: var(--accent); color: #fff; border-radius: 8px; padding: 0 6px; font-weight: 700; }
 #net-status[hidden] { display: none; }
 #net-status b { color: var(--text); letter-spacing: 0.1em; }
 #net-status .np.ready { color: var(--good); }
@@ -461,6 +462,46 @@ progress::-moz-progress-bar { background: var(--accent); }
     color: var(--text); font: inherit; font-weight: 700; cursor: pointer;
 }
 body.net-waiting #end-turn-btn { background: var(--s3); }
+/* на компьютере слева карточка — индикатор справа */
+@media (min-width: 769px) {
+    #net-status { left: auto; right: 12px; max-width: min(560px, calc(100vw - 380px)); }
+}
 @media (max-width: 768px) {
     #net-status { top: calc(62px + var(--safe-t, 0px)); left: 8px; font-size: 0.68rem; }
 }
+
+/* ---------- рейтинг ---------- */
+.ranking { display: flex; flex-direction: column; gap: 4px; }
+.rank-row {
+    display: grid; grid-template-columns: 22px 12px 1fr auto auto; align-items: center; gap: 8px;
+    min-height: 40px; padding: 4px 10px; background: var(--s2); border: 1px solid var(--line); border-radius: var(--r);
+}
+.rank-row.human { border-color: var(--line-2); }
+.rank-row.me { border-color: var(--light); }
+.rank-row .swatch { width: 12px; height: 12px; border-radius: 2px; box-shadow: 0 0 0 1px rgba(255,255,255,0.2); }
+.rank-place { font-family: var(--mono); color: var(--text-3); font-size: 0.8rem; }
+.rank-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rank-name small { color: var(--text-2); }
+.rank-score { font-family: var(--mono); color: var(--text-2); font-size: 0.82rem; }
+.rank-gain { font-family: var(--mono); font-weight: 700; min-width: 44px; text-align: right; }
+.score-parts { display: flex; flex-wrap: wrap; gap: 6px 12px; margin-top: 8px; font-family: var(--mono); font-size: 0.8rem; color: var(--text-2); }
+.help-block { margin: 0 0 10px; padding: 10px; background: var(--good-soft); border: 1px solid rgba(61, 220, 151, 0.35); border-radius: var(--r); }
+.help-block .label { color: var(--good); display: block; margin-bottom: 6px; }
+.help-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 4px; }
+.help-chip { min-height: 40px; padding: 0 12px; font: inherit; font-size: 0.86rem; cursor: pointer; }
+.cede-panel { margin-top: 10px; }
+.cede-panel summary { color: var(--text-2); }
+
+/* ---------- чат и метки ---------- */
+#chat-log { display: flex; flex-direction: column; gap: 6px; max-height: 40vh; overflow-y: auto; min-height: 60px; }
+.chat-msg { padding: 6px 10px; background: var(--s2); border: 1px solid var(--line); border-radius: var(--r); font-size: 0.92rem; line-height: 1.35; max-width: 85%; align-self: flex-start; overflow-wrap: anywhere; }
+.chat-msg.mine { align-self: flex-end; background: var(--s3); border-color: var(--line-2); }
+.chat-msg b { color: var(--text-2); font-size: 0.78rem; display: block; }
+.chat-msg.ping { cursor: pointer; border-color: var(--warn); color: var(--warn); }
+.chat-quick { display: flex; flex-wrap: wrap; gap: 6px; }
+.chat-quick .chip { min-height: 40px; padding: 0 10px; font: inherit; cursor: pointer; }
+.chat-form { display: flex; gap: 8px; }
+#chat-input { flex: 1; min-width: 0; min-height: 44px; padding: 0 12px; background: var(--bg); border: 1px solid var(--line-2); border-radius: var(--r); color: var(--text); font: inherit; }
+#world-map .region.pinged { stroke: var(--warn) !important; stroke-width: calc(var(--sw) * 4) !important; animation: region-pulse 0.9s ease-in-out 7; }
+@media (prefers-reduced-motion: reduce) { #world-map .region.pinged { animation: none; } }
+.ping-btn { margin-top: 8px; }

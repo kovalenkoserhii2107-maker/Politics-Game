@@ -26,6 +26,8 @@ const NET = {
     JOIN_MS: 10000,
     MAX_PLAYERS: 4,
     CODE_CHARS: 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789',
+    CHAT_MAX: 140,          // длина сообщения в чате
+    CHAT_KEEP: 40,          // сколько сообщений помнит сервер
     CLIENT_KEY: 'politics-net-client',
     LAST_KEY: 'politics-net-last',
 };
@@ -327,6 +329,7 @@ class NetHost {
         if (message.t === 'join') {
             // гость только что подключился: в лобби — состав, в игре — мир,
             // если у гостя его нет или он отстал на ход
+            if (this.chatLog && this.chatLog.length) this.sendTo(player, { t: 'chatlog', list: this.chatLog });
             if (!d) this.broadcastLobby();
             else if (message.turn !== d.turn) this.sendState(player, message.turn === d.turn - 1 ? this.lastReports[player.cc] : null);
             this.changed();
@@ -347,8 +350,33 @@ class NetHost {
             player.ready = false;
             player.commands = null;
             this.changed();
+        } else if (message.t === 'chat') {
+            this.relayChat(player, message.text);
+        } else if (message.t === 'ping') {
+            this.relayPing(player, message.region);
         }
     }
+
+    // --- чат и метки: сервер пересылает всем ---------------------------
+    relayChat(player, text) {
+        text = String(text || '').replace(/\s+/g, ' ').trim().slice(0, NET.CHAT_MAX);
+        if (!text) return;
+        const entry = { t: 'chat', from: player.name, cc: player.cc, text, at: Date.now() };
+        this.chatLog = [...(this.chatLog || []), entry].slice(-NET.CHAT_KEEP);
+        for (const p of this.players) if (!p.host) this.sendTo(p, entry);
+        if (this.callbacks.onChat) this.callbacks.onChat(entry);
+    }
+
+    relayPing(player, region) {
+        if (!RegionsDB[region]) return;
+        const entry = { t: 'ping', from: player.name, cc: player.cc, region, at: Date.now() };
+        this.chatLog = [...(this.chatLog || []), entry].slice(-NET.CHAT_KEEP);
+        for (const p of this.players) if (!p.host && p !== player) this.sendTo(p, entry);
+        if (player !== this.players[0] && this.callbacks.onPing) this.callbacks.onPing(entry);
+    }
+
+    say(text) { this.relayChat(this.players[0], text); }
+    ping(region) { this.relayPing(this.players[0], region); }
 
     sendTo(player, message) { return player.link ? player.link.send(message) : false; }
 
@@ -356,7 +384,7 @@ class NetHost {
         return {
             t: 'lobby', code: this.code,
             players: this.players.map(p => ({ id: p.id, name: p.name, cc: p.cc, host: p.host, connected: p.connected })),
-            scenario: this.options?.scenario || 'peace', difficulty: this.options?.difficulty || 'normal',
+            scenario: this.options?.scenario || 'peace', difficulty: this.options?.difficulty || 'normal', goal: this.options?.goal || 'domination',
         };
     }
 
@@ -589,6 +617,12 @@ class NetGuest {
             if (this.callbacks.onLobby) this.callbacks.onLobby(message);
         } else if (message.t === 'toast') {
             if (this.callbacks.onToast) this.callbacks.onToast(String(message.text || ''));
+        } else if (message.t === 'chat' || message.t === 'ping') {
+            this.chatLog = [...(this.chatLog || []), message].slice(-NET.CHAT_KEEP);
+            const cb = message.t === 'chat' ? this.callbacks.onChat : this.callbacks.onPing;
+            if (cb) cb(message);
+        } else if (message.t === 'chatlog' && Array.isArray(message.list)) {
+            this.chatLog = message.list.slice(-NET.CHAT_KEEP);
         } else if (message.t === 'status') {
             this.statusInfo = message;
             const me = message.players.find(p => p.cc === this.cc);
@@ -636,6 +670,13 @@ class NetGuest {
     pick(cc) {
         if (this.link) this.link.send({ t: 'pick', cc });
         return { ok: true };
+    }
+
+    say(text) { if (this.link) this.link.send({ t: 'chat', text }); }
+    ping(region) {
+        if (!this.link) return;
+        this.link.send({ t: 'ping', region });
+        this.chatLog = [...(this.chatLog || []), { t: 'ping', from: 'Вы', cc: this.cc, region, at: Date.now() }].slice(-NET.CHAT_KEEP);
     }
 
     takenBy(cc) {
