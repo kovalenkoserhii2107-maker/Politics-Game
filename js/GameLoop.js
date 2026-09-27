@@ -244,6 +244,7 @@ class GameLoop {
         d.turn++;
         d.currentDate.setDate(d.currentDate.getDate() + 7);
         Score.checkEnd(d, events);
+        Score.record(d);
         const diplomacy = d.gameOver ? [] : this.ai.diplomacy();
         Events.roll(d, diplomacy);
         const shared = [...events, ...diplomacy, ...d.takeDiploEvents()];

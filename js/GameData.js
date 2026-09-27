@@ -97,6 +97,7 @@ class GameData {
                 if (human && human.playable) this.withPlayer(cc, () => Missions.refill(this));
             }
             Score.init(this);
+            Score.initChronicle(this);
         }
     }
 
@@ -1659,6 +1660,7 @@ class GameData {
             cycle: this.cycle ? { ...this.cycle } : undefined,
             revolts: Unrest.serialize(this),
             operations: (this.operations || []).map(o => ({ ...o })),
+            chronicle: this.chronicle ? structuredClone(this.chronicle) : undefined,
             diplomacy: Diplomacy.serialize(this),
             missions: this.missions.map(m => ({ ...m, reward: { ...m.reward } })),
             stats: { ...this.stats },
@@ -1716,6 +1718,7 @@ class GameData {
         if (!decisionsOk(save.decisions)) fail();
         if (save.goal !== undefined && !GOALS[save.goal]) fail();
         if (save.revolts !== undefined && !Unrest.valid(save.revolts)) fail();
+        if (save.chronicle !== undefined && !Score.validChronicle(save.chronicle)) fail();
         if (save.operations !== undefined && (!Array.isArray(save.operations) || save.operations.some(o => !o || !CountriesDB[o.by] || !RegionsDB[o.target] || !Number.isInteger(o.turn)))) fail();
         if (save.cycle !== undefined && (!save.cycle || !CYCLES[save.cycle.phase] || !Number.isInteger(save.cycle.until))) fail();
         if (save.scoreStart !== undefined && !Score.valid(save.scoreStart)) fail();
@@ -1825,6 +1828,9 @@ class GameData {
         if (save.cycle) data.cycle = { ...save.cycle };
         if (save.revolts) data.revolts = structuredClone(save.revolts);
         if (save.operations) data.operations = save.operations.map(o => ({ ...o }));
+        // хроника: у старых партий графики начинаются с момента загрузки
+        if (save.chronicle) data.chronicle = structuredClone(save.chronicle);
+        else Score.initChronicle(data);
         if (save.diplomacy) Object.assign(data, structuredClone(save.diplomacy));
         if (save.missions) { data.missions = structuredClone(save.missions); data.stats = { ...save.stats }; }
         else Missions.refill(data);

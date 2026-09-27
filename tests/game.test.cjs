@@ -682,3 +682,23 @@ test('allies: a joint operation is visible to allies, boosts the planned strike,
     d.turn = 21; d.applyEndOfTurn();
     assert.equal(d.operations.length, 0, 'операция отработала и снята');
 });
+
+test('chronicle: records every turn for humans and top AI, survives save, rejects junk', () => {
+    const { GameData, GameLoop, AI, Score } = engine(), d = new GameData('DE', { humans: ['PL'] });
+    assert.equal(d.chronicle.countries.slice(0, 2).join(), 'DE,PL');
+    assert.equal(d.chronicle.countries.length, 5);
+    assert.equal(d.chronicle.turns.length, 1);
+    const loop = mpLoop(GameLoop, AI, d);
+    for (let t = 0; t < 3; t++) loop.resolveTurn();
+    assert.equal(d.chronicle.turns.length, 4);
+    assert.equal(d.chronicle.turns.map(t => t[0]).join(), '0,1,2,3');
+    const row = d.chronicle.turns[3][1][0];
+    assert.equal(row[0], d.regionsByCountry.DE.length);
+    assert.equal(row[3], Score.total(d, 'DE'));
+    const back = GameData.restore(JSON.parse(JSON.stringify(d.serialize())));
+    assert.equal(JSON.stringify(back.chronicle), JSON.stringify(d.chronicle));
+    const bad = d.serialize(); bad.chronicle.turns[0][1][0] = [1, 2, 'x', 4];
+    assert.throws(() => GameData.restore(bad));
+    const old = d.serialize(); delete old.chronicle;
+    assert.equal(GameData.restore(old).chronicle.turns.length, 1, 'старое сохранение начинает хронику заново');
+});

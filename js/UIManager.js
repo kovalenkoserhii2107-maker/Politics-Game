@@ -17,13 +17,14 @@ class UIManager {
         };
         bind('close-panel-btn', () => this.closePanel());
         bind('close-campaign-btn', () => this.hideModal('campaign-modal'));
+        bind('close-stats-btn', () => this.hideModal('stats-modal'));
         bind('close-gov-btn', () => this.hideModal('gov-modal'));
         bind('close-history-btn', () => this.hideModal('history-modal'));
         bind('close-diplo-btn', () => this.hideModal('diplo-modal'));
         bind('close-science-btn', () => this.hideModal('science-modal'));
         bind('close-summary-btn', () => this.closeSummary());
 
-        for (const id of ['history-modal', 'gov-modal', 'diplo-modal', 'campaign-modal', 'science-modal', 'chat-modal']) {
+        for (const id of ['history-modal', 'gov-modal', 'diplo-modal', 'campaign-modal', 'science-modal', 'chat-modal', 'stats-modal']) {
             const modal = document.getElementById(id);
             if (modal) modal.addEventListener('click', e => { if (e.target === modal) this.hideModal(id); });
         }
@@ -737,6 +738,12 @@ class UIManager {
         this.showModal('trade-modal');
     }
 
+    // Графики строим по ширине открытого окна — поэтому сначала показать.
+    showStats(data) {
+        this.showModal('stats-modal');
+        Charts.render(document.getElementById('stats-body'), data);
+    }
+
     showGameOver(data) {
         const verdict = Score.verdict(data, data.playerCountry);
         document.getElementById('gameover-title').textContent = verdict.title;
@@ -843,6 +850,7 @@ class UIManager {
                 </div>`;
             }).join('')}</div>
             <div class="score-parts">Ваш счёт: ${parts}</div>
+            <button class="btn-back stats-open" type="button" data-action="stats">📊 Графики партии</button>
             <p class="hint">Очки: 10 за область, население, налоги и казна, технологии, сила армии. Большие величины считаются «под корнем» — маленькая страна может обогнать большую.</p>`;
     }
 

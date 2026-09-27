@@ -57,6 +57,7 @@ class GameCore {
         const player = d.playerCountry;
         const cc = btn.dataset.country;
         const action = btn.dataset.action;
+        if (action === 'stats') { this.ui.showStats(d); return; }
         if (action === 'open-country') {
             this.ui.hideModal('diplo-modal');
             this.map.focusCountry(cc);
@@ -277,8 +278,15 @@ class GameCore {
         callbacks.onError = text => { this.ui.toast(text); this.renderNetStatus(); };
         callbacks.onChat = entry => this.onChat(entry);
         callbacks.onPing = entry => this.onPing(entry);
+        callbacks.onNudge = entry => this.onNudge(entry);
         this.unread = 0;
         document.getElementById('net-wait-back').addEventListener('click', () => { if (this.net.ready) this.net.toggleReady(); });
+        document.getElementById('net-wait-nudge').addEventListener('click', () => {
+            if (this.net.nudge()) { this.ui.toast('🔔 Напомнили остальным'); this.ui.haptic(20); }
+            this.renderNudge();
+        });
+        clearInterval(this.clockId);
+        this.clockId = setInterval(() => this.tickClock(), 1000);
         document.getElementById('net-status').addEventListener('click', () => this.openChat());
         document.getElementById('close-chat-btn').addEventListener('click', () => this.ui.hideModal('chat-modal'));
         document.getElementById('chat-form').addEventListener('submit', e => {
@@ -332,6 +340,56 @@ class GameCore {
         this.renderNetStatus();
     }
 
+    // Кто-то уже закончил ход и торопит нас.
+    onNudge(entry) {
+        if (this.net.ready || this.data.gameOver) return;
+        this.ui.toast(`🔔 ${entry.from} ждёт вас — пора заканчивать ход!`);
+        try { if (navigator.vibrate) navigator.vibrate([200, 100, 200]); } catch (e) { /* нет вибрации */ }
+        const btn = this.loop.endTurnBtn;
+        btn.classList.remove('nudged');
+        void btn.offsetWidth;   // перезапуск анимации
+        btn.classList.add('nudged');
+        setTimeout(() => btn.classList.remove('nudged'), 3000);
+    }
+
+    // «Поторопить» — не чаще раза в NUDGE_MS.
+    renderNudge() {
+        const btn = document.getElementById('net-wait-nudge');
+        const wait = Math.ceil((NET.NUDGE_MS - (Date.now() - ((this.net.role === 'host' ? this.net.players[0].nudgedAt : this.net.nudgedAt) || 0))) / 1000);
+        btn.disabled = wait > 0;
+        btn.textContent = wait > 0 ? `🔔 Поторопить · ${wait} с` : '🔔 Поторопить';
+    }
+
+    // Раз в секунду: таймер хода. Время вышло — ход уходит сам: итоги
+    // закрываются, нерешённые предложения отклоняются.
+    tickClock() {
+        const net = this.net, d = this.data;
+        if (!net) return;
+        const left = net.timeLeft();
+        const el = document.getElementById('net-timer');
+        if (el) {
+            el.hidden = left === null;
+            if (left !== null) {
+                el.textContent = `⏱ ${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')}`;
+                el.classList.toggle('low', left <= 20);
+            }
+        }
+        if (!document.getElementById('net-wait').hidden) this.renderNudge();
+        if (left !== 0 || net.ready || d.gameOver || this.loop.busy || this.autoTurn === d.turn) return;
+        if (net.role === 'guest' && !net.connected) return;
+        this.autoTurn = d.turn;   // сам — один раз за ход; вернуться к ходу игрок может
+        this.cancelTargeting();
+        for (let i = 0; i < 20; i++) {
+            if (document.getElementById('summary-modal').classList.contains('active')) this.ui.closeSummary();
+            else if (document.getElementById('decision-modal').classList.contains('active')) document.getElementById('decision-decline').click();
+            else if (document.getElementById('trade-modal').classList.contains('active')) document.getElementById('close-trade-btn').click();
+            else break;
+        }
+        this.ui.toast('⏱ Время хода вышло — ход отправлен');
+        if (this.loop.awaitingSummary || d.decisions.length) net.toggleReady();
+        else this.loop.processTurn();
+    }
+
     onPing(entry) {
         const r = this.data.regions[entry.region];
         if (!r) return;
@@ -359,7 +417,8 @@ class GameCore {
             return `<span class="np ${p.ready ? 'ready' : ''}">${state} ${this.ui.escape(p.name)} · ${this.ui.escape(name)}${loading ? ' (загружает карту)' : ''}</span>`;
         };
         pill.hidden = false;
-        pill.innerHTML = `<b>📶 ${net.code || ''}</b>${offline ? '<span class="np off">нет связи — переподключаемся…</span>' : players.map(row).join('')}<span class="np">💬${this.unread ? ` <span class="chat-badge">${this.unread}</span>` : ''}</span>`;
+        const left = net.timeLeft();
+        pill.innerHTML = `<b>📶 ${net.code || ''}</b><span class="np timer" id="net-timer" ${left === null ? 'hidden' : ''}></span>${offline ? '<span class="np off">нет связи — переподключаемся…</span>' : players.map(row).join('')}<span class="np">💬${this.unread ? ` <span class="chat-badge">${this.unread}</span>` : ''}</span>`;
         const waiting = !!net.ready && !d.gameOver;
         wait.hidden = !waiting;
         document.body.classList.toggle('net-waiting', waiting);
@@ -368,7 +427,12 @@ class GameCore {
             document.getElementById('net-wait-text').textContent = offline ? 'Связь с сервером пропала. Переподключаемся…'
                 : others.length ? `Ждём: ${others.map(p => p.name + (p.connected && p.loaded === false ? ' (загружает карту)' : !p.connected ? ' (нет связи)' : '')).join(', ')}` : 'Все готовы — считаем ход…';
             document.getElementById('net-wait-list').innerHTML = players.map(row).join('');
+            document.getElementById('net-wait-nudge').hidden = offline || !others.length;
+            document.getElementById('net-wait-hint').textContent = left !== null
+                ? 'Ход посчитается, когда все нажмут «Конец хода» или выйдет время.' : 'Ход посчитается, когда все нажмут «Конец хода».';
+            this.renderNudge();
         }
+        this.tickClock();
         const btn = this.loop.endTurnBtn.querySelector('.lbl');
         if (btn) btn.textContent = waiting ? 'Ждём…' : 'Конец хода';
     }
@@ -1052,6 +1116,9 @@ class GameCore {
                 <div class="net-lobby-head"><span class="label">Код игры</span><b class="net-big-code">${escape(net.code || '····')}</b></div>
                 <p class="net-note">${lan}</p>
                 <ul class="net-players">${rows}</ul>
+                ${net.role === 'host'
+                    ? `<div class="net-timer-row"><span class="label">Таймер хода</span>${NET.TIMERS.map(t => `<button class="chip ${t === netTimer ? 'on' : ''}" type="button" data-net-timer="${t}" aria-pressed="${t === netTimer}">${timerName(t)}</button>`).join('')}</div>`
+                    : `<p class="net-note">Таймер хода: ${timerName((net.lobby && net.lobby.timer) || 0)}</p>`}
                 ${note}
                 <div class="net-actions"><button id="net-leave-btn" class="btn btn-ghost btn-sm" type="button">${net.role === 'host' ? 'Отменить игру' : 'Выйти'}</button></div>`;
         };
@@ -1064,7 +1131,9 @@ class GameCore {
             refreshLobby();
         };
         const netError = text => { if (net) { if (net.role === 'host') net.stop(); else net.leave(); } net = null; netView = 'idle'; netNote = text; refreshLobby(); };
-        const hostOptions = () => ({ scenario: scenario(), difficulty: difficulty(), goal: goal() });
+        let netTimer = 0;
+        const hostOptions = () => ({ scenario: scenario(), difficulty: difficulty(), goal: goal(), timer: netTimer });
+        const timerName = t => t ? `${t / 60} мин` : 'нет';
         const startHost = async () => {
             const name = playerName();
             netNote = 'Создаём игру…'; netView = 'busy'; renderNet();
@@ -1169,6 +1238,12 @@ class GameCore {
                 try { data = GameData.restore(payload.game); }
                 catch (err) { netNote = 'Кампания повреждена или от другой версии карты.'; renderNet(); return; }
                 resumeCampaign(data);
+                return;
+            }
+            if (btn.dataset.netTimer !== undefined && net && net.role === 'host') {
+                netTimer = Number(btn.dataset.netTimer) || 0;
+                net.setOptions(hostOptions());
+                renderNet();
                 return;
             }
             if (btn.id === 'net-host-btn') { netNote = ''; startHost(); }

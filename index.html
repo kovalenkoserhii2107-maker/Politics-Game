@@ -520,7 +520,7 @@ body { overscroll-behavior: none; }
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Exo+2:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;700&display=swap">
 <link rel="stylesheet" href="css/campaign.css?v=fe17f3ba7c">
-<link rel="stylesheet" href="css/theme.css?v=f1f00ad147">
+<link rel="stylesheet" href="css/theme.css?v=ae04105864">
 <link rel="stylesheet" href="css/map.css?v=067de1c831">
 <link rel="stylesheet" href="css/start.css?v=5288a0c5d1">
 </head>
@@ -852,7 +852,16 @@ body { overscroll-behavior: none; }
         <div class="modal-content">
             <div class="modal-header"><h2 id="gameover-title">Кампания завершена</h2></div>
             <p id="gameover-text"></p>
+            <button class="btn-back" type="button" data-action="stats">📊 Графики партии</button>
             <div class="decision-buttons"><button id="gameover-new-btn">Новая игра</button></div>
+        </div>
+    </div>
+
+    <!-- ГРАФИКИ ПАРТИИ -->
+    <div id="stats-modal" class="modal ui-element" role="dialog" aria-modal="true" aria-labelledby="stats-title">
+        <div class="modal-content wide">
+            <div class="modal-header"><h2 id="stats-title">Графики партии</h2><button class="close-btn" id="close-stats-btn" aria-label="Закрыть графики">✕</button></div>
+            <div class="modal-body" id="stats-body"></div>
         </div>
     </div>
 
@@ -921,7 +930,8 @@ body { overscroll-behavior: none; }
             <span class="label">Ход отправлен</span>
             <b id="net-wait-text">Ждём других игроков…</b>
             <div id="net-wait-list"></div>
-            <p class="hint">Ход посчитается, когда все нажмут «Конец хода».</p>
+            <p class="hint" id="net-wait-hint">Ход посчитается, когда все нажмут «Конец хода».</p>
+            <button id="net-wait-nudge" class="btn-back nudge" type="button">🔔 Поторопить</button>
             <button id="net-wait-back" class="btn-back" type="button">↩ Вернуться к ходу</button>
         </div>
     </div>
@@ -938,18 +948,19 @@ body { overscroll-behavior: none; }
 <script src="js/Tech.js?v=0dac26024b"></script>
 <script src="js/Economy.js?v=8bee12a652"></script>
 <script src="js/Diplomacy.js?v=fa95d07eef"></script>
-<script src="js/Net.js?v=d143cfb662"></script>
+<script src="js/Net.js?v=cedf3a012c"></script>
 <script src="js/Missions.js?v=fe83f7c237"></script>
-<script src="js/Score.js?v=053c44c25c"></script>
+<script src="js/Score.js?v=f8577abd96"></script>
 <script src="js/Events.js?v=b551e27a37"></script>
 <script src="js/Unrest.js?v=5bc401cc94"></script>
 <script src="js/Trade.js?v=8f3185be41"></script>
-<script src="js/GameData.js?v=8c4dd6663d"></script>
+<script src="js/Charts.js?v=01f1ed532c"></script>
+<script src="js/GameData.js?v=bc497a8103"></script>
 <script src="js/AI.js?v=f95e3d88a4"></script>
 <script src="js/MapEngine.js?v=46671ebb7b"></script>
-<script src="js/UIManager.js?v=c971ab5a68"></script>
-<script src="js/GameLoop.js?v=044f655a8a"></script>
+<script src="js/UIManager.js?v=156d3a8a02"></script>
+<script src="js/GameLoop.js?v=d35f58e30c"></script>
 <script src="js/Tutorial.js?v=53ff18fd7f"></script>
-<script src="js/main.js?v=70d4a35b5c"></script>
+<script src="js/main.js?v=cef71defac"></script>
 </body>
 </html>
