@@ -404,3 +404,23 @@ test('events: roll a choice for a human, both options work, decision survives sa
         }
     }
 });
+
+test('multiplayer: any treaty can be proposed to a human for free, the human decides', () => {
+    const { GameData, Diplomacy } = engine(), d = new GameData('DE', { humans: ['PL'] });
+    d.countries.DE.influence = 0;
+    Diplomacy.changeRelation(d, 'DE', 'PL', -50);   // даже при плохих отношениях
+    const r = d.act('diplomacyAction', 'PL', 'alliance');
+    assert.equal(r.ok, true);
+    assert.equal(r.pending, true);
+    assert.equal(d.countries.DE.influence, 0, 'влияние не тратится');
+    assert.equal(d.proposalPending('PL', 'alliance'), true);
+    assert.equal(d.act('diplomacyAction', 'PL', 'alliance').ok, false, 'повторно — нет');
+    d.withPlayer('PL', () => d.act('answerDecision', true));
+    assert.equal(Diplomacy.isAllied(d, 'DE', 'PL'), true);
+    assert.equal(d.proposalPending('PL', 'alliance'), false);
+    // отказ — союза нет
+    const e = new GameData('DE', { humans: ['PL'] });
+    e.act('diplomacyAction', 'PL', 'pact');
+    e.withPlayer('PL', () => e.act('answerDecision', false));
+    assert.equal(Diplomacy.pactLeft(e, 'DE', 'PL'), 0);
+});

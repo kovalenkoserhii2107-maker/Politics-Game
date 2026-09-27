@@ -316,8 +316,9 @@ class GameCore {
         const offline = net.role === 'guest' && !net.connected;
         const row = p => {
             const name = CountriesDB[p.cc] ? CountriesDB[p.cc].name : p.cc;
-            const state = !p.alive ? '🏳️' : !p.connected ? '📵' : p.ready ? '✅' : '⏳';
-            return `<span class="np ${p.ready ? 'ready' : ''}">${state} ${this.ui.escape(p.name)} · ${this.ui.escape(name)}</span>`;
+            const loading = p.connected && p.loaded === false;
+            const state = !p.alive ? '🏳️' : !p.connected ? '📵' : loading ? '⌛' : p.ready ? '✅' : '⏳';
+            return `<span class="np ${p.ready ? 'ready' : ''}">${state} ${this.ui.escape(p.name)} · ${this.ui.escape(name)}${loading ? ' (загружает карту)' : ''}</span>`;
         };
         pill.hidden = false;
         pill.innerHTML = `<b>📶 ${net.code || ''}</b>${offline ? '<span class="np off">нет связи — переподключаемся…</span>' : players.map(row).join('')}<span class="np">💬${this.unread ? ` <span class="chat-badge">${this.unread}</span>` : ''}</span>`;
@@ -327,7 +328,7 @@ class GameCore {
         if (waiting) {
             const others = players.filter(p => p.cc !== d.playerCountry && p.alive && !p.ready);
             document.getElementById('net-wait-text').textContent = offline ? 'Связь с сервером пропала. Переподключаемся…'
-                : others.length ? `Ждём: ${others.map(p => p.name).join(', ')}` : 'Все готовы — считаем ход…';
+                : others.length ? `Ждём: ${others.map(p => p.name + (p.connected && p.loaded === false ? ' (загружает карту)' : !p.connected ? ' (нет связи)' : '')).join(', ')}` : 'Все готовы — считаем ход…';
             document.getElementById('net-wait-list').innerHTML = players.map(row).join('');
         }
         const btn = this.loop.endTurnBtn.querySelector('.lbl');

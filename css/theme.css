@@ -505,3 +505,15 @@ body.net-waiting #end-turn-btn { background: var(--s3); }
 #world-map .region.pinged { stroke: var(--warn) !important; stroke-width: calc(var(--sw) * 4) !important; animation: region-pulse 0.9s ease-in-out 7; }
 @media (prefers-reduced-motion: reduce) { #world-map .region.pinged { animation: none; } }
 .ping-btn { margin-top: 8px; }
+
+/* ---------- окна на телефоне ----------
+   Шторка не заходит под часы и вырез iPhone (в приложении с главного
+   экрана страница рисуется и под строкой состояния), крестик — под палец. */
+@media (max-width: 768px) {
+    .modal-content { max-height: min(84dvh, calc(100dvh - var(--safe-t, 0px) - 56px)); }
+    .modal-header { flex: 0 0 auto; }
+    .modal-header .close-btn {
+        width: 48px; height: 48px; min-width: 48px; font-size: 1.15rem;
+        margin: -6px -6px -6px 8px;
+    }
+}

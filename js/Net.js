@@ -340,7 +340,11 @@ class NetHost {
             if (owner) { this.sendTo(player, { t: 'toast', text: `${CountriesDB[cc].name} уже выбрал(а) ${owner.name}` }); this.broadcastLobby(); return; }
             player.cc = cc;
             this.changed();
+        } else if (message.t === 'loaded' && d) {
+            player.loaded = true;
+            this.changed();
         } else if (message.t === 'turn' && d) {
+            player.loaded = true;
             if (!player.cc || message.turn !== d.turn) return;
             player.commands = Array.isArray(message.commands) ? message.commands.slice(0, 5000) : [];
             player.ready = true;
@@ -398,7 +402,7 @@ class NetHost {
         return {
             t: 'status', turn: d ? d.turn : 0, code: this.code,
             players: this.players.map(p => ({
-                name: p.name, cc: p.cc, host: p.host, connected: p.connected, ready: p.ready,
+                name: p.name, cc: p.cc, host: p.host, connected: p.connected, ready: p.ready, loaded: p.host || p.loaded !== false,
                 alive: !d || !p.cc || d.countries[p.cc].alive,
             })),
         };
@@ -469,6 +473,7 @@ class NetHost {
 
     sendState(player, report) {
         if (!player.cc) return;
+        if (!this.game || !report) player.loaded = false;   // пока гость строит карту
         this.sendTo(player, { t: 'state', state: this.data.serialize(), you: player.cc, report: report || null, code: this.code });
     }
 
@@ -658,12 +663,15 @@ class NetGuest {
         for (const key of Object.keys(d)) delete d[key];
         Object.assign(d, fresh);
         this.game.onNewWorld(message.report);
+        if (this.link) this.link.send({ t: 'loaded', turn: d.turn });
         if (this.callbacks.onChange) this.callbacks.onChange(this);
     }
 
     attach(game) {
         this.game = game;
         game.loop.net = this;
+        // карта построена — сервер перестаёт показывать «загружает»
+        if (this.link) this.link.send({ t: 'loaded', turn: game.data.turn });
         if (this.callbacks.onChange) this.callbacks.onChange(this);
     }
 
