@@ -456,7 +456,10 @@ class NetHost {
             this.changed();
         } else if (message.t === 'turn' && d) {
             player.loaded = true;
-            if (!player.cc || message.turn !== d.turn) return;
+            if (!player.cc) return;
+            // ход за уже посчитанный ход: мир до гостя не дошёл — шлём снова
+            if (message.turn < d.turn) { this.sendState(player, message.turn === d.turn - 1 ? this.lastReports[player.cc] : null); return; }
+            if (message.turn !== d.turn) return;
             player.commands = Array.isArray(message.commands) ? message.commands.slice(0, 5000) : [];
             player.ready = true;
             this.changed();
@@ -473,6 +476,12 @@ class NetHost {
             this.relayNudge(player);
         } else if (message.t === 'bye') {
             if (player.link) player.link.fail();
+        } else if (message.t === 'resync' && d && player.cc) {
+            // у гостя старый мир — присылаем актуальный
+            const behind = Number.isInteger(message.turn) ? message.turn : -1;
+            this.sendState(player, behind === d.turn - 1 ? this.lastReports[player.cc] : null);
+        } else if (message.t === 'bad-state') {
+            if (this.callbacks.onToast) this.callbacks.onToast(`⚠️ У ${player.name} не открылся мир: ${String(message.reason || '').slice(0, 120)}`);
         } else if (message.t === 'world' && d && this.adopting === player) {
             this.adopting = null;
             this.adoptWorld(message.state);
@@ -899,6 +908,8 @@ class NetGuest {
             const me = message.players.find(p => p.cc === this.cc);
             // готовность держит сервер: после его перезапуска можно ходить снова
             if (me && this.game && message.turn === this.game.data.turn) this.ready = !!me.ready;
+            // сервер уже на следующем ходу, а мир к нам не дошёл — просим снова
+            if (this.game && message.turn > this.game.data.turn) this.resync();
             if (this.callbacks.onChange) this.callbacks.onChange(this);
         } else if (message.t === 'state') {
             this.receiveState(message);
@@ -913,6 +924,7 @@ class NetGuest {
             fresh.becomePlayer(message.you);
         } catch (e) {
             console.error(e);
+            if (this.link) this.link.send({ t: 'bad-state', reason: e.message });
             if (this.callbacks.onError) this.callbacks.onError(`Не удалось принять мир от сервера: ${e.message}`);
             return;
         }
@@ -954,6 +966,25 @@ class NetGuest {
     }
 
     say(text) { if (this.link) this.link.send({ t: 'chat', text }); }
+
+    // Попросить у сервера актуальный мир (не чаще раза в 5 секунд). Рано —
+    // не отбрасываем, а повторяем, когда пауза кончится: новых сообщений от
+    // сервера может и не быть.
+    resync(force) {
+        const now = Date.now();
+        if (!this.link || this.link.closed) return false;
+        const wait = 5000 - (now - (this.resyncAt || 0));
+        if (!force && wait > 0) {
+            clearTimeout(this.resyncTimer);
+            this.resyncTimer = setTimeout(() => {
+                if (this.game && this.statusInfo && this.statusInfo.turn > this.game.data.turn) this.resync();
+            }, wait);
+            return false;
+        }
+        this.resyncAt = now;
+        this.link.send({ t: 'resync', turn: this.game ? this.game.data.turn : -1 });
+        return true;
+    }
 
     nudge() {
         const now = Date.now();

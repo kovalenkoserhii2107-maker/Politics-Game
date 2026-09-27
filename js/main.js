@@ -400,6 +400,9 @@ class GameCore {
         this.netUiReady = true;
         this.unread = 0;
         document.getElementById('net-wait-back').addEventListener('click', () => { if (this.net.ready) this.net.toggleReady(); });
+        document.getElementById('net-wait-sync').addEventListener('click', () => {
+            if (this.net.role === 'guest' && this.net.resync(true)) this.ui.toast('🔄 Попросили сервер прислать мир');
+        });
         document.getElementById('net-wait-nudge').addEventListener('click', () => {
             if (this.net.nudge()) { this.ui.toast('🔔 Напомнили остальным'); this.ui.haptic(20); }
             this.renderNudge();
@@ -591,6 +594,7 @@ class GameCore {
                 : others.length ? `Ждём: ${others.map(p => p.name + (p.connected && p.loaded === false ? ' (загружает карту)' : !p.connected ? ' (нет связи)' : '')).join(', ')}` : 'Все готовы — считаем ход…';
             document.getElementById('net-wait-list').innerHTML = players.map(row).join('');
             document.getElementById('net-wait-nudge').hidden = offline || !others.length;
+            document.getElementById('net-wait-sync').hidden = net.role !== 'guest' || offline;
             const away = others.filter(p => !p.connected);
             document.getElementById('net-wait-hint').textContent = away.length
                 ? `Нет связи: ${away.map(p => p.name).join(', ')}. Ход посчитается, когда вернётся и нажмёт «Конец хода».`
