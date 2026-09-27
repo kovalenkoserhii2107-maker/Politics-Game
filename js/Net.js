@@ -913,7 +913,7 @@ class NetGuest {
             fresh.becomePlayer(message.you);
         } catch (e) {
             console.error(e);
-            if (this.callbacks.onError) this.callbacks.onError('Не удалось принять мир от сервера');
+            if (this.callbacks.onError) this.callbacks.onError(`Не удалось принять мир от сервера: ${e.message}`);
             return;
         }
         this.cc = message.you;
