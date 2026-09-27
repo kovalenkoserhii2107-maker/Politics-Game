@@ -838,3 +838,32 @@ test('council: the sanctioned human does not vote against themselves', () => {
     assert.equal(d.council.votes.FR, false);
     assert.equal(Council.regionsWord(1) + '|' + Council.regionsWord(21) + '|' + Council.regionsWord(12) + '|' + Council.regionsWord(5), '1 область|21 область|12 областей|5 областей');
 });
+
+test('battle: a strike from several regions gets a flank bonus; odds include strikes already queued', () => {
+    const { GameData, RULES } = engine();
+    const setup = () => {
+        const d = new GameData('UA');
+        d.startWar('UA', 'MD');
+        const target = d.getCountryRegions('MD').find(r => d.getNeighbors(r.id).filter(id => d.regions[id]?.owner === 'UA').length >= 1);
+        // две свои области рядом с целью
+        let sources = d.getNeighbors(target.id).filter(id => d.regions[id]?.owner === 'UA');
+        if (sources.length < 2) { const other = d.getNeighbors(target.id).find(id => d.regions[id] && d.regions[id].owner !== 'UA' && id !== target.id); d.setOwner(other, 'UA'); sources = d.getNeighbors(target.id).filter(id => d.regions[id]?.owner === 'UA'); }
+        for (const id of sources) d.regions[id].army = { ...d.emptyArmy(), infantry: 20 };
+        return { d, target, sources };
+    };
+    // один удар 20 пехоты из одной области
+    const a = setup();
+    a.d.queueAttack(a.sources[0], a.target.id, { infantry: 20 });
+    const one = a.d.processOrders().logs.find(l => l.for === 'UA');
+    // те же 20, но по 10 из двух областей
+    const b = setup();
+    b.d.queueAttack(b.sources[0], b.target.id, { infantry: 10 });
+    const est = b.d.strikeEstimate(b.target.id, { infantry: 10 }, b.sources[1]);
+    assert.equal(est.directions, 2);
+    assert.ok(Math.abs(est.flank - RULES.FLANK_BONUS) < 1e-9);
+    b.d.queueAttack(b.sources[1], b.target.id, { infantry: 10 });
+    const two = b.d.processOrders().logs.find(l => l.for === 'UA');
+    assert.ok(Math.abs(two.power.attack / one.power.attack - (1 + RULES.FLANK_BONUS)) < 0.02, `${two.power.attack} vs ${one.power.attack}`);
+    assert.ok(two.detail.includes('направлений'));
+    assert.equal(GameData.flankBonus(5), RULES.FLANK_MAX);
+});

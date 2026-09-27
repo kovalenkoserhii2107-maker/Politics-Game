@@ -19,6 +19,8 @@ const RULES = {
     DESERTION: 0.1,             // доля войск, уходящих при пустой казне
     JOINT_ATTACK_BONUS: 0.15,   // союзники, ударившие по одной области в один ход
     OPERATION_BONUS: 0.1,       // удар по цели заранее объявленной совместной операции
+    FLANK_BONUS: 0.1,           // за каждое направление удара сверх первого
+    FLANK_MAX: 0.2,             // потолок: с трёх направлений и больше
 };
 
 // Проекты увеличивают ресурс области; что это даёт в еде, энергии и
@@ -1143,6 +1145,31 @@ class GameData {
         return power;
     }
 
+    // Удар с нескольких областей сразу: защитникам приходится растягивать
+    // оборону. directions — сколько разных областей бьют по цели.
+    static flankBonus(directions) {
+        return Math.min(RULES.FLANK_MAX, RULES.FLANK_BONUS * Math.max(0, directions - 1));
+    }
+
+    // Оценка удара по области: уже назначенные атаки страны cc на эту цель
+    // плюс новая (extra из области fromId) — так, как посчитает бой.
+    strikeEstimate(targetId, extra, fromId, cc = this.playerCountry) {
+        const target = this.getRegion(targetId);
+        const forces = this.emptyArmy();
+        const directions = new Set();
+        const add = (from, f) => {
+            let any = false;
+            for (const unitId of Object.keys(UnitsDB)) { const n = f[unitId] || 0; forces[unitId] += n; if (n) any = true; }
+            if (any) directions.add(from);
+        };
+        for (const o of this.orders.attacks) if (o.country === cc && o.to === targetId) add(o.from, o.forces);
+        if (extra) add(fromId, extra);
+        const flank = GameData.flankBonus(directions.size);
+        const attack = this.sidePower(forces, cc, 'baseAttack', target.army) * (1 + flank);
+        const needed = this.defensePower(target, forces) * RULES.ATTACK_ADVANTAGE;
+        return { attack, needed, ratio: attack / Math.max(1, needed), directions: directions.size, flank };
+    }
+
     resolveBattle(allOrders) {
         const target = this.getRegion(allOrders[0].to);
         if (!target) return null;
@@ -1181,6 +1208,9 @@ class GameData {
         }
         const joint = coalition.length > 1;
         if (joint) powerAtt *= 1 + RULES.JOINT_ATTACK_BONUS;
+        const directions = new Set(sources.filter(s => Object.values(s.sent).some(n => n > 0)).map(s => s.region.id)).size;
+        const flank = GameData.flankBonus(directions);
+        powerAtt *= 1 + flank;
         const operation = (this.operations || []).find(o => o.target === target.id && o.turn === this.turn
             && coalition.some(cc => cc === o.by || Diplomacy.isAllied(this, cc, o.by)));
         if (operation) powerAtt *= 1 + RULES.OPERATION_BONUS;
@@ -1232,6 +1262,7 @@ class GameData {
         const defenderName = this.countries[defender].name;
         const extra = [];
         if (joint) extra.push(`Совместное наступление: +${Math.round(RULES.JOINT_ATTACK_BONUS * 100)}% к удару.`);
+        if (flank) extra.push(`Удар с ${directions} направлений: +${Math.round(flank * 100)}%.`);
         if (operation) extra.push(`По плану операции: +${Math.round(RULES.OPERATION_BONUS * 100)}%.`);
         let message;
 

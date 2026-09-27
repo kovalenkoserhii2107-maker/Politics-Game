@@ -838,7 +838,7 @@ class GameCore {
         const rows = ids.map(id => {
             const region = d.getRegion(id);
             const transport = give ? { cost: 0 } : d.expeditionQuote(isMove ? 'movements' : 'attacks', state.fromId, id, state.forces);
-            const odds = isMove ? null : this.attackOdds(id, state.forces);
+            const odds = isMove ? null : this.attackOdds(id, state.forces, state.fromId);
             return { id, region, transport, odds };
         }).sort((a, b) => (a.transport.cost ? 1 : 0) - (b.transport.cost ? 1 : 0)
             || (b.odds ? b.odds.ratio : 0) - (a.odds ? a.odds.ratio : 0)
@@ -1037,14 +1037,12 @@ class GameCore {
 
     // Оценка без тумана войны о составе: сила обороны игроку и так видна
     // на карточке области, когда идёт война.
-    attackOdds(targetId, forces) {
-        const d = this.data;
-        const target = d.getRegion(targetId);
-        const attack = d.sidePower(forces, d.playerCountry, 'baseAttack', target.army);
-        const needed = d.defensePower(target, forces) * RULES.ATTACK_ADVANTAGE;
-        const ratio = attack / needed;
+    // Вместе с уже назначенными ударами по этой цели из других областей.
+    attackOdds(targetId, forces, fromId = this.armyAction && this.armyAction.fromId) {
+        const est = this.data.strikeEstimate(targetId, forces, fromId);
+        const ratio = est.ratio;
         const label = ratio >= 1.5 ? 'высокие' : ratio >= 1 ? 'хорошие' : ratio >= 0.9 ? 'равные' : 'низкие';
-        return { ratio, label, attack: Math.round(attack), needed: Math.round(needed) };
+        return { ratio, label, attack: Math.round(est.attack), needed: Math.round(est.needed), directions: est.directions, flank: est.flank };
     }
 
     // --- клик по карте -----------------------------------------------------------------
@@ -1067,7 +1065,7 @@ class GameCore {
             }
             const transport = this.data.expeditionQuote(isMove ? 'movements' : 'attacks', state.fromId, regionId, state.forces);
             if (transport.cost) {
-                const odds = isMove ? null : this.attackOdds(regionId, state.forces);
+                const odds = isMove ? null : this.attackOdds(regionId, state.forces, state.fromId);
                 this.ui.showDecision({
                     title: isMove ? 'Межконтинентальная переброска' : 'Экспедиция',
                     text: `Перевозка за один ход: ${this.ui.money(transport.cost)} и ${transport.influence} влияния.${odds ? ` Шансы атаки: ${odds.label}. Сила ${odds.attack}, нужно ${odds.needed}.` : ''} При отмене приказа затраты возвращаются.`,
@@ -1089,11 +1087,11 @@ class GameCore {
             }
             // Перед атакой оцениваем шансы по той же формуле, что и бой:
             // заведомо проигрышную атаку лучше переспросить, чем молча отправить.
-            const odds = this.attackOdds(regionId, state.forces);
+            const odds = this.attackOdds(regionId, state.forces, state.fromId);
             const queue = () => {
                 const result = this.data.act('queueAttack', state.fromId, regionId, state.forces);
                 if (!result.ok) { this.ui.toast(result.reason); return; }
-                this.afterOrder(`Наступление запланировано · шансы ${odds.label}`);
+                this.afterOrder(`Наступление запланировано · шансы ${odds.label}${odds.flank ? ` · удар с ${odds.directions} направлений +${Math.round(odds.flank * 100)}%` : ''}`);
             };
             if (odds.ratio >= 0.9) { queue(); return; }
             const target = this.data.getRegion(regionId);
