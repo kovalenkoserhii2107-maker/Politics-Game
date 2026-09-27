@@ -287,6 +287,9 @@ class GameLoop {
         this.updateTopBarUI();
         if (!SaveGame.save(d)) this.ui.toast(SaveGame.error);
         this.ui.updateOrdersPanel(d);
+        // окно решения от прежнего мира закрываем: после итогов решения
+        // покажутся заново — уже из нового
+        for (const id of ['decision-modal', 'trade-modal']) this.ui.hideModal(id);
         this.awaitingSummary = true;
         this.ui.showTurnSummary(turnData, () => { this.awaitingSummary = false; this.afterSummary(); });
     }

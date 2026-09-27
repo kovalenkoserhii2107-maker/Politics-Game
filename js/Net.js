@@ -31,6 +31,10 @@ const NET = {
     NUDGE_MS: 15000,        // «Поторопить» — не чаще раза в 15 секунд
     TIMERS: [0, 120, 300],  // таймер хода: нет, 2 и 5 минут
     GRACE_MS: 8000,         // после таймера сервер ждёт опоздавших столько
+    BEAT_MS: 3000,          // «я на связи» — так часто
+    DEAD_MS: 10000,         // тишина дольше — связь считаем оборванной
+    RETRY_MS: 2000,         // гость переподключается так часто
+    ORPHAN_TRIES: 2,        // столько раз подряд сервера нет — становимся сервером сами
     CLIENT_KEY: 'politics-net-client',
     LAST_KEY: 'politics-net-last',
 };
@@ -104,6 +108,9 @@ class Net {
     }
 
     static roomId(code) { return `${NET.PREFIX}-room-${code}`; }
+    // Постоянная комната кампании: по её номеру, а не по коду — код может
+    // смениться, номер кампании — нет. Её держит тот, кто сейчас сервер.
+    static campaignRoom(id) { return `${NET.PREFIX}-camp-${String(id).replace(/[^a-z0-9]/gi, '')}`; }
     static beaconId(key, slot) { return `${NET.PREFIX}-lan-${key}-${slot}`; }
 
     static randomCode() {
@@ -116,21 +123,48 @@ class Net {
         return String(text || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 4);
     }
 
-    // Подключение к брокеру под своим именем (или случайным).
-    static openPeer(id) {
+    // Подключение к брокеру под своим именем (или случайным). onTaken —
+    // имя за время обрыва занял кто-то другой.
+    static openPeer(id, onTaken) {
         return new Promise((resolve, reject) => {
             const peer = id ? new window.Peer(id, Net.peerOptions()) : new window.Peer(Net.peerOptions());
             const onError = err => { peer.off('open', onOpen); peer.destroy(); reject(err); };
             const onOpen = () => {
                 peer.off('error', onError);
-                // брокер иногда отваливается — связь между игроками при этом жива
-                peer.on('disconnected', () => { if (!peer.destroyed) setTimeout(() => { if (!peer.destroyed && peer.disconnected) peer.reconnect(); }, 1000); });
+                Net.keepAlive(peer, onTaken);
                 resolve(peer);
             };
             peer.once('open', onOpen);
             peer.once('error', onError);
         });
     }
+
+    // Брокер отваливается, когда телефон засыпает или мигает Wi-Fi. Без него
+    // к нам не подключиться, поэтому стучимся снова — с паузами, а при
+    // возвращении в приложение — сразу.
+    static keepAlive(peer, onTaken) {
+        let delay = 1000, timer = null;
+        const attempt = () => {
+            timer = null;
+            if (peer.destroyed || !peer.disconnected) return;
+            try { peer.reconnect(); } catch (e) { /* попробуем позже */ }
+            delay = Math.min(delay * 2, 15000);
+            schedule();
+        };
+        const schedule = () => { if (!timer && !peer.destroyed) timer = setTimeout(attempt, delay); };
+        const wake = () => {
+            if (document.visibilityState !== 'visible' || peer.destroyed || !peer.disconnected) return;
+            clearTimeout(timer); timer = null; delay = 1000;
+            attempt();
+        };
+        peer.on('disconnected', schedule);
+        peer.on('open', () => { delay = 1000; });
+        peer.on('error', err => { if (err && err.type === 'unavailable-id' && onTaken) onTaken(); });
+        peer.on('close', () => { clearTimeout(timer); document.removeEventListener('visibilitychange', wake); });
+        document.addEventListener('visibilitychange', wake);
+    }
+
+    static sleep(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
 
     static clientId() {
         try {
@@ -164,16 +198,29 @@ class NetLink {
     constructor(conn, onMessage, onClose) {
         this.conn = conn;
         this.onMessage = onMessage;
+        this.onClose = onClose;
         this.parts = new Map();
         this.closed = false;
+        this.lastSeen = Date.now();
         conn.on('data', raw => this.receive(raw));
-        const close = () => {
+        conn.on('close', () => this.fail());
+        conn.on('error', () => this.fail());
+        // WebRTC замечает пропажу собеседника через полминуты, а то и никогда
+        // (телефон заснул). Шлём «я на связи»; тишина — связь оборвалась.
+        this.beat = setInterval(() => {
             if (this.closed) return;
-            this.closed = true;
-            if (onClose) onClose();
-        };
-        conn.on('close', close);
-        conn.on('error', close);
+            if (Date.now() - this.lastSeen > NET.DEAD_MS) { this.fail(); return; }
+            try { if (this.conn.open) this.conn.send({ h: 1 }); } catch (e) { /* закроется само */ }
+        }, NET.BEAT_MS);
+    }
+
+    // Связь пропала сама — сообщаем владельцу.
+    fail() {
+        if (this.closed) return;
+        this.closed = true;
+        clearInterval(this.beat);
+        try { this.conn.close(); } catch (e) { /* уже закрыт */ }
+        if (this.onClose) this.onClose();
     }
 
     send(message) {
@@ -191,6 +238,8 @@ class NetLink {
 
     receive(raw) {
         if (!raw || typeof raw !== 'object') return;
+        this.lastSeen = Date.now();
+        if (raw.h) return;
         let text = null;
         if (typeof raw.m === 'string') text = raw.m;
         else if (typeof raw.c === 'string' && Number.isInteger(raw.i) && Number.isInteger(raw.n) && raw.n > 0 && raw.n < 10000) {
@@ -207,8 +256,10 @@ class NetLink {
         if (message && typeof message === 'object') this.onMessage(message);
     }
 
+    // Закрываем сами — владельцу не сообщаем.
     close() {
         this.closed = true;
+        clearInterval(this.beat);
         try { this.conn.close(); } catch (e) { /* уже закрыт */ }
     }
 }
@@ -247,23 +298,63 @@ class NetHost {
             }
             resume.net = { ...net, clients: Object.fromEntries(Object.entries(byCountry).map(([cc, id]) => [id, cc])) };
         }
+        // Кампания: сначала её постоянная комната. Занята — значит, кампанию
+        // уже открыл другой игрок, и нам к нему (err.taken).
+        if (resume && resume.net && resume.net.id) {
+            try {
+                this.campRoom = await Net.openPeer(Net.campaignRoom(resume.net.id), () => this.lostRoom());
+            } catch (err) {
+                const e = new Error(err.type === 'unavailable-id' ? 'Кампания уже открыта на другом устройстве' : this.explain(err));
+                e.taken = err.type === 'unavailable-id';
+                throw e;
+            }
+            this.listen(this.campRoom);
+        }
+        // Код — для новых устройств. Старый может быть ещё занят брокером
+        // (он помнит нас минуту после обрыва) — тогда берём новый.
         let code = resume?.net?.code || Net.randomCode();
         for (let attempt = 0; ; attempt++) {
             try {
                 this.room = await Net.openPeer(Net.roomId(code));
                 break;
             } catch (err) {
-                if (err.type !== 'unavailable-id' || attempt >= 5) throw new Error(this.explain(err));
+                if (err.type !== 'unavailable-id' || attempt >= 5) { if (this.campRoom) this.campRoom.destroy(); throw new Error(this.explain(err)); }
                 code = Net.randomCode();
             }
         }
         this.code = code;
         if (this.data) this.data.net = { ...(this.data.net || {}), code };
-        this.room.on('connection', conn => this.accept(conn));
-        this.room.on('error', () => { /* чужие сбои соединений не роняют игру */ });
+        this.listen(this.room);
         this.startBeacon();
         this.changed();
         return code;
+    }
+
+    listen(peer) {
+        peer.on('connection', conn => this.accept(conn));
+        peer.on('error', () => { /* чужие сбои соединений не роняют игру */ });
+    }
+
+    // Новая партия: номер кампании появился при старте — занимаем её комнату,
+    // чтобы после обрыва гости находили нас без кода.
+    async claimCampaignRoom() {
+        const id = this.data && this.data.net && this.data.net.id;
+        for (let attempt = 0; id && !this.campRoom && !this.stopped && attempt < 20; attempt++) {
+            try {
+                this.campRoom = await Net.openPeer(Net.campaignRoom(id), () => this.lostRoom());
+                this.listen(this.campRoom);
+                return;
+            } catch (err) {
+                await Net.sleep(5000);
+            }
+        }
+    }
+
+    // Пока нас не было у брокера, комнату кампании занял другой игрок —
+    // теперь сервер он, а мы подключаемся к нему.
+    lostRoom() {
+        if (this.stopped) return;
+        if (this.callbacks.onTaken) this.callbacks.onTaken();
     }
 
     explain(err) {
@@ -306,8 +397,11 @@ class NetHost {
             let player = this.players.find(p => p.id === id);
             if (!player) {
                 if (this.data) {
-                    // партия идёт: новое устройство занимает свободное место гостя
-                    player = this.players.find(p => !p.host && !p.connected);
+                    // партия идёт: устройство занимает место своей страны (так
+                    // возвращается бывший сервер), иначе — любое свободное
+                    const cc = String(meta.cc || '');
+                    player = this.players.find(p => !p.host && !p.connected && p.cc === cc)
+                        || this.players.find(p => !p.host && !p.connected);
                     if (!player) { reject('Игра уже идёт, свободных мест нет'); return; }
                     this.data.net.clients = Object.fromEntries(Object.entries(this.data.net.clients || {}).filter(([, cc]) => cc !== player.cc));
                     this.data.net.clients[id] = player.cc;
@@ -341,7 +435,11 @@ class NetHost {
             // если у гостя его нет или он отстал на ход
             if (this.chatLog && this.chatLog.length) this.sendTo(player, { t: 'chatlog', list: this.chatLog });
             if (!d) this.broadcastLobby();
-            else if (message.turn !== d.turn) this.sendState(player, message.turn === d.turn - 1 ? this.lastReports[player.cc] : null);
+            else if (player.cc && Number.isInteger(message.turn) && message.turn > d.turn) {
+                // у гостя мир новее (он был сервером, пока нас не было) — берём его
+                this.adopting = player;
+                this.sendTo(player, { t: 'upload' });
+            } else if (message.fresh || message.turn !== d.turn) this.sendState(player, message.turn === d.turn - 1 ? this.lastReports[player.cc] : null);
             this.changed();
         } else if (message.t === 'pick' && !d) {
             const cc = String(message.cc || '');
@@ -370,7 +468,34 @@ class NetHost {
             this.relayPing(player, message.region);
         } else if (message.t === 'nudge' && d) {
             this.relayNudge(player);
+        } else if (message.t === 'bye') {
+            if (player.link) player.link.fail();
+        } else if (message.t === 'world' && d && this.adopting === player) {
+            this.adopting = null;
+            this.adoptWorld(message.state);
         }
+    }
+
+    // Мир от гостя новее нашего: он становится общим.
+    adoptWorld(state) {
+        const d = this.data, me = this.players[0].cc;
+        let fresh;
+        try {
+            fresh = GameData.restore(state);
+            if (fresh.turn <= d.turn || !fresh.isHuman(me)) return;
+            fresh.becomePlayer(me);
+        } catch (e) { console.error(e); return; }
+        fresh.net = { ...(fresh.net || {}), ...d.net, id: d.net.id };
+        for (const key of Object.keys(d)) delete d[key];
+        Object.assign(d, fresh);
+        for (const p of this.players) { p.ready = false; p.commands = null; }
+        this.lastReports = {};
+        this.startClock();
+        if (this.game) this.game.onNewWorld(null);
+        SaveGame.save(d);
+        for (const p of this.players) if (!p.host) this.sendState(p, null);
+        if (this.callbacks.onToast) this.callbacks.onToast(`Взяли более новую копию мира — ход ${d.turn + 1}`);
+        this.changed();
     }
 
     // «Поторопить»: тем, кто ещё не нажал «Конец хода».
@@ -497,6 +622,12 @@ class NetHost {
     attach(game) {
         this.game = game;
         game.loop.net = this;
+        if (!this.campRoom) this.claimCampaignRoom();
+        // закрыли страницу — прощаемся, чтобы гость не ждал тишины
+        if (!this.bye) {
+            this.bye = () => { if (!this.stopped) for (const p of this.players) if (!p.host) this.sendTo(p, { t: 'bye' }); };
+            window.addEventListener('pagehide', this.bye);
+        }
         this.startClock();
         for (const p of this.players) if (!p.host) this.sendState(p, null);
         this.changed();
@@ -540,12 +671,23 @@ class NetHost {
         return this.players.filter(p => p.cc && d.countries[p.cc].alive && !p.ready);
     }
 
+    // Кто без связи — того можно не ждать: ход без него, страну на этот ход
+    // бережёт компьютер.
+    absent() { return this.waitingFor().filter(p => !p.host && !p.connected); }
+
+    skipAbsent() {
+        if (!this.absent().length) return false;
+        this.maybeResolve(true);
+        return true;
+    }
+
     maybeResolve(force) {
         const d = this.data;
         if (!d || !this.game || d.gameOver || this.game.loop.busy) return;
         const late = this.waitingFor();
         if (late.length && !force) return;
         const lateCc = new Set(late.map(p => p.cc));
+        d.autopilot = late.filter(p => !p.host && !p.connected).map(p => p.cc);
         const guests = this.players.filter(p => !p.host);
         const failed = {};
         const reports = this.game.loop.runTurn(() => {
@@ -554,11 +696,14 @@ class NetHost {
             }
         });
         for (const p of this.players) { p.ready = false; p.commands = null; }
+        delete d.autopilot;
         if (!reports) { this.changed(); return; }
         this.startClock();
         for (const p of this.players) {
             const report = reports[p.cc];
-            if (report && lateCc.has(p.cc)) report.turnData.events.unshift('⏱ Время хода вышло — ход посчитан без ваших приказов.');
+            if (report && lateCc.has(p.cc)) report.turnData.events.unshift(p.connected || p.host
+                ? '⏱ Время хода вышло — ход посчитан без ваших приказов.'
+                : '📵 Вас не было на связи — ход посчитан без ваших приказов, страну берёг компьютер.');
         }
         for (const p of guests) {
             const report = reports[p.cc];
@@ -570,8 +715,11 @@ class NetHost {
     }
 
     stop() {
+        this.stopped = true;
+        if (this.bye) window.removeEventListener('pagehide', this.bye);
         clearInterval(this.clockId);
         for (const p of this.players) if (p.link) p.link.close();
+        if (this.campRoom) this.campRoom.destroy();
         if (this.room) this.room.destroy();
         if (this.beacon) this.beacon.destroy();
     }
@@ -623,57 +771,108 @@ class NetGuest {
         return { lan: true, games };
     }
 
-    // Кампания могла открыться с другим кодом — ищем её в сети по номеру.
-    static async findCampaign(id) {
-        const found = await NetGuest.scan();
-        const game = found.games.find(g => g.campaign === id);
-        return game ? game.code : null;
-    }
-
     async join(code) {
         this.code = Net.normalizeCode(code);
         if (this.code.length !== 4) throw new Error('Код — четыре знака');
         await Net.loadLib();
-        this.peer = await Net.openPeer();
+        await this.ensurePeer();
         await this.connect();
         Net.rememberGame({ code: this.code, name: this.name });
     }
 
+    // Кампания: к тому, кто сейчас держит её комнату, — без кода.
+    // saved — своя копия кампании: если она новее, чем у сервера, он её возьмёт.
+    async joinCampaign(id, cc, saved) {
+        this.campaignId = id;
+        if (cc) this.cc = cc;
+        if (saved) this.saved = saved;
+        await Net.loadLib();
+        await this.ensurePeer();
+        await this.connect();
+    }
+
+    // Своё подключение к брокеру: после сна телефона — новое.
+    async ensurePeer() {
+        if (this.peer && !this.peer.destroyed && !this.peer.disconnected) return;
+        if (this.peer) { try { this.peer.destroy(); } catch (e) { /* уже закрыт */ } }
+        this.peer = await Net.openPeer();
+    }
+
+    target() { return this.campaignId ? Net.campaignRoom(this.campaignId) : Net.roomId(this.code); }
+
     connect() {
         return new Promise((resolve, reject) => {
             let settled = false;
-            const fail = text => { if (settled) return; settled = true; clearTimeout(timer); this.peer.off('error', onPeerError); reject(new Error(text)); };
-            const onPeerError = err => { if (err.type === 'peer-unavailable') fail('Игра с таким кодом не найдена. Проверьте код и что игра создана.'); };
+            const fail = (text, missing) => {
+                if (settled) return;
+                settled = true; clearTimeout(timer); this.peer.off('error', onPeerError);
+                const err = new Error(text); err.missing = !!missing; reject(err);
+            };
+            const onPeerError = err => {
+                if (err.type === 'peer-unavailable') fail(this.campaignId ? 'Кампания сейчас не открыта ни на одном устройстве.' : 'Игра с таким кодом не найдена. Проверьте код и что игра создана.', true);
+            };
             const timer = setTimeout(() => fail('Не удалось подключиться. Проверьте, что оба устройства в одной сети Wi-Fi.'), NET.JOIN_MS);
             this.peer.on('error', onPeerError);
-            const conn = this.peer.connect(Net.roomId(this.code), {
-                reliable: true, serialization: 'json', metadata: { clientId: this.clientId, name: this.name },
+            const conn = this.peer.connect(this.target(), {
+                reliable: true, serialization: 'json', metadata: { clientId: this.clientId, name: this.name, cc: this.cc || '' },
             });
             conn.on('open', () => {
                 if (settled) { conn.close(); return; }
                 settled = true;
                 clearTimeout(timer);
                 this.peer.off('error', onPeerError);
-                this.link = new NetLink(conn, message => this.onMessage(message), () => this.lost());
-                this.link.send({ t: 'join', turn: this.game ? this.game.data.turn : -1 });
+                if (this.link) this.link.close();
+                const link = new NetLink(conn, message => this.onMessage(message), () => { if (this.link === link) this.lost(); });
+                this.link = link;
+                // fresh — мира на экране нет, пришлите его в любом случае
+                this.link.send({ t: 'join', turn: this.game ? this.game.data.turn : this.saved ? this.saved.turn : -1, fresh: !this.game });
                 resolve();
             });
         });
     }
 
-    // Связь пропала: пробуем вернуться, пока игрок не выйдет сам.
+    // Связь пропала: пробуем вернуться, пока игрок не выйдет сам. Если
+    // сервера нет совсем несколько попыток подряд — сообщаем: пора стать
+    // сервером самим (onOrphan), чтобы партия не зависела от одного телефона.
     lost() {
         if (this.leaving) return;
         this.connected = false;
+        if (this.link) { this.link.close(); this.link = null; }
         if (this.callbacks.onLost) this.callbacks.onLost();
+        this.scheduleRetry(NET.RETRY_MS);
+    }
+
+    scheduleRetry(ms) {
         clearTimeout(this.retryTimer);
-        this.retryTimer = setTimeout(async () => {
-            if (this.leaving) return;
-            try {
-                if (!this.peer || this.peer.destroyed) this.peer = await Net.openPeer();
-                await this.connect();
-            } catch (e) { this.lost(); }
-        }, 3000);
+        if (!this.wake) {
+            // вернулись в приложение — пробуем сразу, не ждём таймера
+            this.wake = () => { if (document.visibilityState === 'visible' && !this.connected && !this.leaving && !this.trying) this.scheduleRetry(0); };
+            document.addEventListener('visibilitychange', this.wake);
+        }
+        this.retryTimer = setTimeout(() => this.retry(), ms);
+    }
+
+    async retry() {
+        if (this.leaving || this.connected || this.trying) return;
+        this.trying = true;
+        try {
+            await this.ensurePeer();
+            await this.connect();
+            this.missing = 0;
+            this.hostGone = false;
+        } catch (e) {
+            // и «нет такого», и молчание считаем: занять комнату выйдет, только
+            // если прежний сервер её действительно отпустил
+            this.missing = (this.missing || 0) + 1;
+            if ((this.missing >= NET.ORPHAN_TRIES || (this.hostGone && e.missing)) && this.game && this.campaignId && this.callbacks.onOrphan) {
+                this.missing = 0;
+                this.trying = false;
+                if (await this.callbacks.onOrphan()) return;   // стали сервером
+            }
+            if (!this.leaving) this.scheduleRetry(NET.RETRY_MS);
+        } finally {
+            this.trying = false;
+        }
     }
 
     onMessage(message) {
@@ -694,6 +893,14 @@ class NetGuest {
             this.chatLog = message.list.slice(-NET.CHAT_KEEP);
         } else if (message.t === 'nudge') {
             if (this.callbacks.onNudge) this.callbacks.onNudge(message);
+        } else if (message.t === 'bye') {
+            // сервер закрыл игру — не ждём тишины, сразу ищем замену
+            this.hostGone = true;
+            if (this.link) this.link.close();
+            this.lost();
+        } else if (message.t === 'upload' && (this.game || this.saved)) {
+            // сервер открыл старую копию — отдаём свою, она новее
+            this.link.send({ t: 'world', state: (this.game ? this.game.data : this.saved).serialize() });
         } else if (message.t === 'status') {
             this.statusInfo = message;
             this.deadline = Number.isFinite(message.left) ? Date.now() + message.left * 1000 : null;
@@ -718,6 +925,7 @@ class NetGuest {
             return;
         }
         this.cc = message.you;
+        if (fresh.net && fresh.net.id) this.campaignId = fresh.net.id;
         // таймер нового хода — вместе с миром, иначе до статуса виден старый ноль
         this.deadline = Number.isFinite(message.left) ? Date.now() + message.left * 1000 : null;
         fresh.recorder = [];
@@ -739,6 +947,10 @@ class NetGuest {
     attach(game) {
         this.game = game;
         game.loop.net = this;
+        if (!this.bye) {
+            this.bye = () => { if (!this.leaving && this.link) this.link.send({ t: 'bye' }); };
+            window.addEventListener('pagehide', this.bye);
+        }
         // карта построена — сервер перестаёт показывать «загружает»
         if (this.link) this.link.send({ t: 'loaded', turn: game.data.turn });
         if (this.callbacks.onChange) this.callbacks.onChange(this);
@@ -791,6 +1003,8 @@ class NetGuest {
     leave() {
         this.leaving = true;
         clearTimeout(this.retryTimer);
+        if (this.wake) document.removeEventListener('visibilitychange', this.wake);
+        if (this.bye) window.removeEventListener('pagehide', this.bye);
         if (this.link) this.link.close();
         if (this.peer) this.peer.destroy();
     }
