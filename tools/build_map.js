@@ -5,11 +5,14 @@
 //
 //   node tools/build_map.js
 //
-// Делит каждую страну на области сеткой квадратов, обрезанной по границе
-// государства; число областей зависит от площади страны (Россия — 20,
-// Украина — 5, Молдова — 2, совсем малые — 1). Куски мельче 30% средней
+// США, Канада, Россия и Украина делятся по настоящим границам регионов
+// (tools/data/admin1.json). Остальные страны — сеткой с волнистыми
+// сторонами, обрезанной по границе государства; число областей зависит от
+// площади страны (Молдова — 2, совсем малые — 1). Куски мельче 30% средней
 // площади области присоединяются к соседу с самой длинной общей границей.
-// На выходе — js/data/*.js, которые игра грузит напрямую.
+// Острова меньше 2500 км² убираются (lib/source.js).
+// На выходе — js/data/*.js, которые игра грузит напрямую, и таблица
+// переноса сохранений с прежней карты (RegionsRemap).
 // =====================================================================
 
 const fs = require('fs');
@@ -21,6 +24,16 @@ const T = require('./lib/translit');
 const allCities = require('all-the-cities');
 
 const OUT_DIR = path.join(__dirname, '..', 'js', 'data');
+
+// Страны с настоящими границами регионов (tools/data/admin1.json, его
+// готовит prepare_admin1.js): штаты, провинции, субъекты, области.
+const ADMIN1 = (() => {
+    const file = path.join(__dirname, 'data', 'admin1.json');
+    const out = {};
+    if (!fs.existsSync(file)) return out;
+    for (const u of JSON.parse(fs.readFileSync(file, 'utf8'))) (out[u.cc] = out[u.cc] || []).push(u);
+    return out;
+})();
 
 // --- правило деления -------------------------------------------------
 const AREA_RU = 17098242;          // км², опорная точка: Россия -> 20 областей
@@ -55,40 +68,112 @@ function bandHeightPx(y, sideKm) {
     return heightAt(y + first / 2);   // уточняем по середине полосы
 }
 
-function gridPieces(mp, sideKm) {
+// Волнистая сетка: линии разреза изгибаются псевдослучайно (детерминированно
+// — от их положения), поэтому внутренние границы областей не выглядят
+// линейкой. Клетки по-прежнему плотно укладываются: общая граница соседних
+// клеток строится по одному и тому же набору точек с обеих сторон.
+const WAVE = 0.16;                 // размах изгиба — доля размера клетки
+
+// Плавный шум в [-1, 1]: сумма синусоид с фазами от «зерна».
+// Крупный изгиб плюс мелкая рябь — как у границ по рекам и хребтам.
+function wave(u, seed) {
+    const p1 = hash01('a' + seed), p2 = hash01('b' + seed), p3 = hash01('c' + seed);
+    return 0.5 * Math.sin(2 * Math.PI * (u * (0.9 + 0.3 * p3) + p1))
+        + 0.25 * Math.sin(2 * Math.PI * (u * 2.1 + p2))
+        + 0.14 * Math.sin(2 * Math.PI * (u * 4.3 + p1 + p2))
+        + 0.07 * Math.sin(2 * Math.PI * (u * 9.7 + p3))
+        + 0.04 * Math.sin(2 * Math.PI * (u * 17.3 + p2 + p3));
+}
+
+function gridPieces(mp, sideKm, straight = false) {
     const [x1, y1, x2, y2] = G.bboxOf(mp);
     const out = [];
     const maxBand = Math.max(y2 - y1, 1) * 1.5;
 
+    // полосы по широте
+    const bands = [];
     let y = y1;
     for (let guard = 0; y < y2 && guard < 5000; guard++) {
         const h = Math.min(bandHeightPx(y, sideKm), maxBand);
-        const yEnd = y + h;
-        const i1 = Math.floor(x1 / h), i2 = Math.ceil(x2 / h);
+        bands.push({ y0: y, y1: y + h, h });
+        y += h;
+    }
+    const amp = straight ? 0 : WAVE;
+    // граница полос k (между bands[k-1] и bands[k]) — кривая y(x); крайние прямые
+    const boundaryY = (k, x) => {
+        const base = k < bands.length ? bands[k].y0 : bands[k - 1].y1;
+        if (k === 0 || k === bands.length || !amp) return base;
+        const h = Math.min(bands[k - 1].h, bands[k].h);
+        return base + amp * h * wave(x / (2.2 * h), `h${k}:${base.toFixed(3)}`);
+    };
+    // точки кривой границы k между xa и xb: общие для клеток сверху и снизу
+    const breaks = k => {
+        if (breaks.cache[k]) return breaks.cache[k];
+        const set = new Set();
+        const step = Math.min(...[bands[k - 1], bands[k]].filter(Boolean).map(b => b.h)) / 14;
+        for (let v = Math.floor(x1 / step) * step; v <= x2 + step; v += step) set.add(+v.toFixed(6));
+        for (const b of [bands[k - 1], bands[k]]) {
+            if (!b) continue;
+            for (let i = Math.floor(x1 / b.h); i <= Math.ceil(x2 / b.h); i++) set.add(+(i * b.h).toFixed(6));
+        }
+        return (breaks.cache[k] = [...set].sort((a, b) => a - b));
+    };
+    breaks.cache = {};
+    const along = (k, xa, xb) => {
+        const pts = [[xa, boundaryY(k, xa)]];
+        for (const v of breaks(k)) if (v > xa + 1e-9 && v < xb - 1e-9) pts.push([v, boundaryY(k, v)]);
+        pts.push([xb, boundaryY(k, xb)]);
+        return pts;
+    };
+    // вертикальный разрез i в полосе k: концы — на границах полос
+    const side = (k, i) => {
+        const b = bands[k], x = +(i * b.h).toFixed(6);
+        const ya = boundaryY(k, x), yb = boundaryY(k + 1, x);
+        const pts = [];
+        const m = 14;
+        for (let j = 0; j <= m; j++) {
+            const t = j / m;
+            const dx = amp ? amp * b.h * Math.sin(Math.PI * t) * wave(t * 1.3, `v${k}:${i}:${b.y0.toFixed(3)}`) : 0;
+            pts.push([x + dx, ya + (yb - ya) * t]);
+        }
+        return pts;
+    };
+
+    bands.forEach((b, k) => {
+        const i1 = Math.floor(x1 / b.h), i2 = Math.ceil(x2 / b.h);
         for (let i = i1; i < i2; i++) {
-            const rect = [[
-                [i * h, y], [(i + 1) * h, y],
-                [(i + 1) * h, yEnd], [i * h, yEnd], [i * h, y],
-            ]];
+            const xa = +(i * b.h).toFixed(6), xb = +((i + 1) * b.h).toFixed(6);
+            const top = along(k, xa, xb);
+            const right = side(k, i + 1);
+            const bottom = along(k + 1, xa, xb).reverse();
+            const left = side(k, i).reverse();
+            const ring = [...top, ...right.slice(1), ...bottom.slice(1), ...left.slice(1)];
+            ring.push(ring[0]);
             let res;
-            try { res = pc.intersection(mp, [rect]); } catch (e) { continue; }
+            try { res = pc.intersection(mp, [[ring]]); } catch (e) { continue; }
             for (const poly of res) {
                 const piece = [poly];
                 if (G.polyAreaPx(piece) > 1e-7) out.push(piece);
             }
         }
-        y = yEnd;
-    }
+    });
     return out;
 }
 
 function partition(mp, n, areaKm2) {
     if (n <= 1) return [mp];
+    const whole = G.polyAreaPx(mp);
+    const cut = side => {
+        const pieces = gridPieces(mp, side);
+        // волнистая нарезка потеряла кусок страны (сбой отсечения) — прямая
+        const got = pieces.reduce((a, p) => a + G.polyAreaPx(p), 0);
+        return Math.abs(got - whole) > whole * 0.002 ? gridPieces(mp, side, true) : pieces;
+    };
     let side = Math.sqrt(areaKm2 / n);
-    let pieces = gridPieces(mp, side);
+    let pieces = cut(side);
     for (let guard = 0; pieces.length < n && guard < 16; guard++) {
         side *= 0.85;
-        pieces = gridPieces(mp, side);
+        pieces = cut(side);
     }
     return pieces;
 }
@@ -126,6 +211,40 @@ const WORLD_W = G.lonToX(180) - G.lonToX(-180);
 function wrapDist(a, b) {
     const dx = Math.abs(a[0] - b[0]);
     return Math.hypot(Math.min(dx, WORLD_W - dx), a[1] - b[1]);
+}
+
+// --- регионы по настоящим границам -----------------------------------
+// Регион — пересечение страны с его контуром. Кусочки страны, не
+// попавшие ни в один регион (у побережий данные разного масштаба
+// расходятся), достаются соседу с самой длинной общей границей.
+function adminItems(country) {
+    const units = [];
+    for (const u of ADMIN1[country.cc]) {
+        let shape = source.clipToView(source.geometryToMulti({ type: 'MultiPolygon', coordinates: u.mp }));
+        let mp;
+        try { mp = pc.intersection(country.mp, shape); } catch (e) { continue; }
+        mp = mp.filter(poly => G.polyAreaPx([poly]) > 1e-6);
+        if (!mp.length) continue;
+        units.push({ mp, fixedName: u.name, key: u.key });
+    }
+    let rest;
+    try { rest = pc.difference(country.mp, ...units.map(u => u.mp)); } catch (e) { rest = []; }
+    const items = units.map(u => ({ ...u, cells: boundaryCells(u.mp), parts: partCentroids(u.mp) }));
+    for (const poly of rest) {
+        if (G.polyAreaPx([poly]) < 1e-7) continue;
+        const piece = [poly], cells = boundaryCells(piece), parts = partCentroids(piece);
+        let best = null, bestShared = 0;
+        for (const it of items) { const sh = sharedCells(cells, it.cells); if (sh > bestShared) { bestShared = sh; best = it; } }
+        if (!best) {
+            let bestDist = Infinity;
+            for (const it of items) { const d = nearDist(parts, it.parts); if (d < bestDist) { bestDist = d; best = it; } }
+        }
+        if (!best) continue;
+        try { best.mp = pc.union(best.mp, piece); } catch (e) { best.mp = best.mp.concat(piece); }
+        for (const k of cells) best.cells.add(k);
+        best.parts = best.parts.concat(parts);
+    }
+    return items.map(it => ({ mp: it.mp, area: G.areaKm2(it.mp, 48), cells: it.cells, fixedName: it.fixedName }));
 }
 
 // --- слияние мелких кусков -------------------------------------------
@@ -355,6 +474,68 @@ function loadPreviousRegions() {
     return out;
 }
 
+// Карта из js/: области с контурами, отпечаток (как SaveGame.mapId в игре)
+// и таблица переноса, если она уже есть.
+function loadMap() {
+    const vm = require('vm');
+    const files = ['data/RegionsDB', 'data/NeighborsDB', 'data/CitiesDB', 'UnitsDB'].map(f => path.join(__dirname, '..', 'js', f + '.js'));
+    if (!files.every(f => fs.existsSync(f))) return null;
+    const ctx = {};
+    vm.createContext(ctx);
+    for (const f of files) vm.runInContext(fs.readFileSync(f, 'utf8'), ctx);
+    const input = vm.runInContext('JSON.stringify([RegionsDB, NeighborsDB, CitiesDB, Object.keys(UnitsDB)])', ctx);
+    let a = 2166136261, b = 5381;
+    for (let i = 0; i < input.length; i++) {
+        const code = input.charCodeAt(i);
+        a = Math.imul(a ^ code, 16777619);
+        b = Math.imul(b, 33) ^ code;
+    }
+    const regions = Object.entries(vm.runInContext('RegionsDB', ctx)).map(([id, r]) => ({ id, cc: r.cc, lx: r.lx, ly: r.ly, rings: G.parsePath(r.path) }));
+    return {
+        id: `map3:${(a >>> 0).toString(16)}:${(b >>> 0).toString(16)}`,
+        regions,
+        remap: vm.runInContext('typeof RegionsRemap === "undefined" ? null : RegionsRemap', ctx),
+    };
+}
+
+// Перенос сохранений на новую карту. Для каждой новой области — прежняя,
+// в которой лежит её центр (sources: от неё владелец и лояльность); для
+// каждой прежней — новая, в которой лежит её центр (heirs: к ней уходят
+// армия и постройки). Записываются только несовпадающие номера. Если карта
+// не изменилась, таблица остаётся прежней — иначе повторный запуск
+// генератора стёр бы перенос с позапрошлой карты.
+function writeRemap(previousMap, regions) {
+    const current = loadMap();
+    let remap = null;
+    if (previousMap && current.id === previousMap.id) remap = previousMap.remap;
+    else if (previousMap) {
+        const inRings = (pt, rings) => rings.reduce((inside, ring) => inside !== G.pointInRing(pt, ring), false);
+        const locate = (pt, list, shape) => list.find(c => shape(c, pt))
+            || list.reduce((best, c) => (Math.hypot(c.lx - pt[0], c.ly - pt[1]) < Math.hypot(best.lx - pt[0], best.ly - pt[1]) ? c : best));
+        const group = list => list.reduce((m, r) => ((m[r.cc] = m[r.cc] || []).push(r), m), {});
+        const oldBy = group(previousMap.regions), newBy = group(regions);
+        const sources = {}, heirs = {};
+        for (const r of regions) {
+            const list = oldBy[r.cc];
+            if (!list) continue;
+            const o = locate([r.lx, r.ly], list, (c, pt) => inRings(pt, c.rings));
+            if (o.id !== r.id) sources[r.id] = o.id;
+        }
+        for (const o of previousMap.regions) {
+            const list = newBy[o.cc];
+            if (!list) continue;
+            const r = locate([o.lx, o.ly], list, (c, pt) => G.pointInMulti(pt, c.mp));
+            if (r.id !== o.id) heirs[o.id] = r.id;
+        }
+        remap = { from: previousMap.id, sources, heirs };
+        console.log(`  перенос сохранений: ${Object.keys(sources).length} новых областей берут данные прежних, ${Object.keys(heirs).length} прежних отдают армии`);
+    }
+    const file = path.join(OUT_DIR, 'RegionsDB.js');
+    const text = fs.readFileSync(file, 'utf8').replace('module.exports = { RegionsDB };', 'module.exports = { RegionsDB, RegionsRemap };');
+    const at = text.lastIndexOf('\nif (typeof module');
+    fs.writeFileSync(file, text.slice(0, at) + `// перенос сохранений с прежней карты (tools/build_map.js, writeRemap)\nconst RegionsRemap = ${JSON.stringify(remap)};\n` + text.slice(at));
+}
+
 // Номера областей: новой области — номер ближайшей прежней (по точке
 // подписи). Число областей изменилось — нумеруем заново по площади.
 function stableIds(cc, items, previous) {
@@ -392,13 +573,20 @@ function main() {
     const regions = [];      // {id, cc, name, mp, areaKm2, cx, cy, cells}
     const perCountry = {};
     const previous = loadPreviousRegions();
+    const previousMap = loadMap();
 
     console.log('Делим страны на области…');
     for (const country of countries) {
-        const n = targetRegionCount(country);
+        let n = targetRegionCount(country);
         const area = country.drawnAreaKm2 || country.areaKm2;
-        const pieces = partition(country.mp, n, area);
-        const items = mergePieces(pieces, n, area / n);
+        let items;
+        if (ADMIN1[country.cc]) {
+            items = adminItems(country);
+            n = items.length;
+        } else {
+            const pieces = partition(country.mp, n, area);
+            items = mergePieces(pieces, n, area / n);
+        }
 
         // крупные области первыми — осмысленная нумерация для новой карты;
         // если страна уже была поделена так же, номера остаются прежними:
@@ -425,6 +613,7 @@ function main() {
                 ly: pole[1],
                 lr: pole[2],
                 cells: it.cells,
+                fixedName: it.fixedName || null,
                 bbox: G.bboxOf(it.mp),
                 labelRadius: Math.sqrt(G.polyAreaPx(it.mp) / Math.PI),
             });
@@ -452,6 +641,7 @@ function main() {
 
     console.log('Записываем js/data/…');
     writeOutput(countries, regions, perCountry, neighbors, cityIndex);
+    writeRemap(previousMap, regions);
 
     console.log(`Готово за ${((Date.now() - started) / 1000).toFixed(1)} с.`);
 }
@@ -486,6 +676,8 @@ function nameRegions(countries, perCountry, cityIndex) {
         const bbox = mainlandBox(country.mp);
         const taken = new Set();
 
+        // 0. у штатов и провинций — их собственные названия; столица области
+        //    для значка — крупнейший город внутри
         // 1. каждой области — крупнейший город внутри неё
         for (const region of list) {
             let best = null;
@@ -495,6 +687,7 @@ function nameRegions(countries, perCountry, cityIndex) {
                 if (!G.pointInMulti([c.x, c.y], region.mp)) continue;
                 if (!best || c.population > best.population) best = c;
             }
+            if (region.fixedName) { region.name = region.fixedName; if (best) { region.capitalCity = best; taken.add(best.name); } stats.indexed++; continue; }
             if (best) { region.name = best.name; region.capitalCity = best; taken.add(best.name); stats.indexed++; }
         }
         // 2. остальным — крупнейший реальный город ВНУТРИ области (без
@@ -720,33 +913,80 @@ function seaPoints(region, step = 0.25) {
 
 function pxPerKm(y) { return 1 / ((G.R_EARTH / G.K) * Math.cos(G.yToLat(y) * Math.PI / 180)); }
 
+// Переправа — только от берега до берега и только через воду. Иначе мелкие
+// области (субъекты России, области Украины) «перепрыгивали» бы через
+// соседа по суше: Полтава граничила бы с Курском.
+const COAST_EPS = 0.2;   // px: точка ближе к чужой границе — не берег, а суша
+
 function addSeaLinks(regions, links) {
     const CELL = 2.0;
+    const cellKey = (x, y) => `${Math.floor(x / CELL)},${Math.floor(y / CELL)}`;
     const grid = new Map();
     const pts = regions.map(r => seaPoints(r));
     pts.forEach((list, i) => {
         for (const p of list) {
-            const key = `${Math.floor(p[0] / CELL)},${Math.floor(p[1] / CELL)}`;
+            const key = cellKey(p[0], p[1]);
             let bucket = grid.get(key);
             if (!bucket) grid.set(key, bucket = []);
             bucket.push([p[0], p[1], i]);
         }
     });
 
+    // берег: рядом нет точек границы другой области
+    const coastal = pts.map((list, i) => list.filter(p => {
+        const gx = Math.floor(p[0] / CELL), gy = Math.floor(p[1] / CELL);
+        for (let dx = -1; dx <= 1; dx++) {
+            for (let dy = -1; dy <= 1; dy++) {
+                for (const [qx, qy, j] of grid.get(`${gx + dx},${gy + dy}`) || []) {
+                    if (j !== i && Math.hypot(p[0] - qx, p[1] - qy) < COAST_EPS) return false;
+                }
+            }
+        }
+        return true;
+    }));
+    const coastGrid = new Map();
+    coastal.forEach((list, i) => {
+        for (const p of list) {
+            const key = cellKey(p[0], p[1]);
+            let bucket = coastGrid.get(key);
+            if (!bucket) coastGrid.set(key, bucket = []);
+            bucket.push([p[0], p[1], i]);
+        }
+    });
+
+    // суша: области по ячейкам их рамок
+    const LAND_CELL = 4.0;
+    const landGrid = new Map();
+    const boxes = regions.map(r => { const [minX, minY, maxX, maxY] = G.bboxOf(r.mp); return { minX, minY, maxX, maxY }; });
+    boxes.forEach((b, i) => {
+        for (let x = Math.floor(b.minX / LAND_CELL); x <= Math.floor(b.maxX / LAND_CELL); x++) {
+            for (let y = Math.floor(b.minY / LAND_CELL); y <= Math.floor(b.maxY / LAND_CELL); y++) {
+                const key = `${x},${y}`;
+                let bucket = landGrid.get(key);
+                if (!bucket) landGrid.set(key, bucket = []);
+                bucket.push(i);
+            }
+        }
+    });
+    const onLand = (x, y) => (landGrid.get(`${Math.floor(x / LAND_CELL)},${Math.floor(y / LAND_CELL)}`) || [])
+        .some(i => { const b = boxes[i]; return x >= b.minX && x <= b.maxX && y >= b.minY && y <= b.maxY && G.pointInMulti([x, y], regions[i].mp); });
+    // вода: середина и четверти отрезка не на суше
+    const overWater = (p, q) => [0.25, 0.5, 0.75].every(t => !onLand(p[0] + (q[0] - p[0]) * t, p[1] + (q[1] - p[1]) * t));
+
     regions.forEach((r, i) => {
         const reach = SEA_LINK_KM * pxPerKm(r.cy);
         const span = Math.ceil(reach / CELL);
         const found = new Map();
-        for (const p of pts[i]) {
+        for (const p of coastal[i]) {
             const gx = Math.floor(p[0] / CELL), gy = Math.floor(p[1] / CELL);
             for (let dx = -span; dx <= span; dx++) {
                 for (let dy = -span; dy <= span; dy++) {
-                    const bucket = grid.get(`${gx + dx},${gy + dy}`);
+                    const bucket = coastGrid.get(`${gx + dx},${gy + dy}`);
                     if (!bucket) continue;
-                    for (const [qx, qy, j] of bucket) {
-                        if (j === i || links[i].has(j)) continue;
-                        const d = Math.hypot(p[0] - qx, p[1] - qy);
-                        if (d <= reach && d < (found.get(j) ?? Infinity)) found.set(j, d);
+                    for (const q of bucket) {
+                        const j = q[2];
+                        if (j === i || links[i].has(j) || found.has(j)) continue;
+                        if (Math.hypot(p[0] - q[0], p[1] - q[1]) <= reach && overWater(p, q)) found.set(j, true);
                     }
                 }
             }

@@ -11,6 +11,8 @@ const SaveGame = {
     suspended: false,
     error: '',
     signature: null,
+    // перенос с прежней нарезки карты (генератор кладёт его в RegionsDB.js)
+    remap: typeof RegionsRemap !== 'undefined' ? RegionsRemap : null,
 
     mapId() {
         if (this.signature) return this.signature;
@@ -66,6 +68,17 @@ const SaveGame = {
         this.migrated = false;
         const payload = typeof text === 'string' ? JSON.parse(text) : text;
         if (!payload || typeof payload !== 'object' || !payload.game) throw new Error('В файле нет партии');
+        // партия прежней карты: области перерезаны — перекладываем на новые
+        const remap = this.remap;
+        if (remap && payload.map === remap.from) {
+            const game = GameData.remapSave(structuredClone(payload.game), remap);
+            GameData.repairSave(game);
+            try {
+                GameData.validateSave(game);
+                this.migrated = true;
+                return { ...payload, map: this.mapId(), game };
+            } catch (e) { /* не вышло — общий перенос ниже */ }
+        }
         // Карта могла поменяться только формой границ (исправили кусок
         // области) — области и страны те же, партия подходит как есть:
         // переносить её незачем, а перенос потерял бы игроков сетевой кампании.

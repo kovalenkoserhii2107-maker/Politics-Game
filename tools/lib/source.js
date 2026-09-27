@@ -22,6 +22,18 @@ const NAME_TO_CC = {
     'Siachen Glacier': 'IN',
 };
 
+// Мелкие острова убираем с карты: на ней они — пылинки, по которым не
+// попасть пальцем. Главный остров страны остаётся всегда, каким бы
+// маленьким он ни был, — иначе исчезли бы островные государства.
+const ISLAND_MIN_KM2 = 2500;
+
+function dropSmallIslands(mp) {
+    if (mp.length <= 1) return mp;
+    const areas = mp.map(poly => G.areaKm2([poly], 48));
+    const largest = areas.indexOf(Math.max(...areas));
+    return mp.filter((_, i) => i === largest || areas[i] >= ISLAND_MIN_KM2);
+}
+
 // Территории без постоянного населения: всегда одна область, вне игры.
 const UNINHABITED = new Set(['AQ', 'BV', 'HM', 'GS', 'TF', 'UM', 'IO']);
 
@@ -137,7 +149,7 @@ function load() {
     const out = [];
     for (const [cc, list] of parts) {
         let mp = list.length === 1 ? list[0] : pc.union(...list);
-        mp = clipToView(mp);
+        mp = dropSmallIslands(clipToView(mp));
         if (!mp.length) continue;
         const meta = worldCountries.find(c => c.cca2 === cc);
         out.push({
@@ -187,4 +199,4 @@ function countryPopulations() {
     return m;
 }
 
-module.exports = { load, VIEW, LAT_MIN, LAT_MAX, UNINHABITED };
+module.exports = { load, geometryToMulti, clipToView, dropSmallIslands, VIEW, LAT_MIN, LAT_MAX, UNINHABITED };

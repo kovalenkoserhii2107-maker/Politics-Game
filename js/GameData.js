@@ -2020,6 +2020,101 @@ class GameData {
         return data;
     }
 
+    // Карту перерезали (настоящие границы, другое число областей) — партию
+    // прежней карты перекладываем на новую, ничего больше не трогая: игроки
+    // сетевой кампании, дипломатия, наука остаются как были. Новая область
+    // берёт владельца, лояльность и волнения той прежней, где лежит её центр;
+    // армия, постройки, стройки и союзные войска прежней области переходят
+    // к новой, где лежит центр прежней (RegionsRemap из генератора карты).
+    static remapSave(game, remap) {
+        const isObj = o => !!o && typeof o === 'object' && !Array.isArray(o);
+        if (!isObj(game) || !isObj(game.regions) || !Array.isArray(game.units)) return game;
+        const heir = id => remap.heirs[id] || id;
+        const source = id => remap.sources[id] || id;
+        const old = game.regions;
+        const units = game.units.length;
+        const plus = (a, b) => a.map((n, i) => n + (Number.isSafeInteger(b[i]) ? b[i] : 0));
+
+        // что уходит к наследнице: армия и постройки
+        const armies = {}, builds = {}, heirsOf = {};
+        for (const [id, r] of Object.entries(old)) {
+            const to = heir(id);
+            if (!Array.isArray(r) || !RegionsDB[to]) continue;
+            (heirsOf[to] = heirsOf[to] || []).push(id);
+            if (Array.isArray(r[1])) armies[to] = plus(armies[to] || new Array(units).fill(0), r[1]);
+            if (isObj(r[5])) {
+                const b = builds[to] = builds[to] || {};
+                for (const key of Object.keys(DEVELOPMENT)) b[key] = Math.min(5, (b[key] || 0) + (Number.isSafeInteger(r[5][key]) ? r[5][key] : 0));
+            }
+        }
+        const regions = {};
+        for (const [id, base] of Object.entries(RegionsDB)) {
+            const from = old[source(id)];
+            if (!Array.isArray(from)) continue;
+            // область осталась собой — переносим как есть
+            if (source(id) === id && heir(id) === id && (heirsOf[id] || []).length === 1) { regions[id] = from; continue; }
+            const dev = { industry: 0, agro: 0, oil: 0, infra: 0, ...(builds[id] || {}) };
+            const res = { oil: base.oil, agro: base.agro, industry: base.industry };
+            for (const [key, plan] of Object.entries(DEVELOPMENT)) if (plan.resource) res[plan.resource] += dev[key] * plan.gain;
+            regions[id] = [from[0], armies[id] || new Array(units).fill(0), from[2], from[3], res, dev, base.population, from[7] || 0];
+        }
+        game.regions = regions;
+
+        // столица — область со столичным городом, если она вышла из прежней
+        // столичной; иначе наследница прежней; иначе самая населённая своя
+        for (const [cc, c] of Object.entries(isObj(game.countries) ? game.countries : {})) {
+            if (!Array.isArray(c) || !c[6]) continue;
+            const city = CitiesDB.find(x => x.cc === cc && x.isCapital);
+            const to = city && regions[city.regionId] && regions[city.regionId][0] === cc && source(city.regionId) === c[6] ? city.regionId : heir(c[6]);
+            if (regions[to] && regions[to][0] === cc) { c[6] = to; continue; }
+            const mine = Object.keys(regions).filter(id => regions[id][0] === cc);
+            c[6] = mine.length ? mine.reduce((a, b) => (RegionsDB[b].population > RegionsDB[a].population ? b : a)) : null;
+        }
+        const moveKeys = (obj, merge) => {
+            const out = {};
+            for (const [id, v] of Object.entries(obj)) {
+                const to = heir(id);
+                if (!RegionsDB[to]) continue;
+                out[to] = to in out ? merge(out[to], v) : v;
+            }
+            return out;
+        };
+        if (isObj(game.garrisons)) game.garrisons = moveKeys(game.garrisons, (a, b) => {
+            const out = { ...a };
+            for (const [cc, army] of Object.entries(b)) out[cc] = out[cc] && Array.isArray(army) ? plus(out[cc], army) : army;
+            return out;
+        });
+        if (isObj(game.revolts)) game.revolts = moveKeys(game.revolts, a => a);
+        // деньги, отданные за сорванную стройку и приказы хода, — назад
+        const refund = (cc, money, influence = 0) => {
+            const c = isObj(game.countries) && game.countries[cc];
+            if (!Array.isArray(c)) return;
+            if (Number.isFinite(money) && money > 0) c[0] += money;
+            if (Number.isFinite(influence) && influence > 0) c[2] = Math.min(RULES.INFLUENCE_MAX, c[2] + influence);
+        };
+        if (Array.isArray(game.projects)) game.projects = game.projects.map(p => ({ ...p, regionId: heir(p.regionId) })).filter(p => {
+            if (regions[p.regionId] && regions[p.regionId][0] === p.country) return true;
+            refund(p.country, p.cost);
+            return false;
+        });
+        if (isObj(game.orders)) for (const [type, list] of Object.entries(game.orders)) {
+            if (!Array.isArray(list)) continue;
+            for (const o of list) if (o) refund(o.country, type === 'recon' || type === 'recruitment' ? o.cost : o.transportCost, o.transportInfluence);
+        }
+        if (Array.isArray(game.operations)) game.operations = game.operations.map(o => ({ ...o, target: heir(o.target) }));
+        // решения со ссылками на области; сделки с областями — отбрасываем
+        const decisions = list => (Array.isArray(list) ? list : []).filter(x => !(x && x.type === 'trade')).map(x => {
+            if (x && x.type === 'rebels') return { ...x, region: heir(x.region) };
+            if (x && x.type === 'event' && x.ctx && x.ctx.region) return { ...x, ctx: { ...x.ctx, region: heir(x.ctx.region) } };
+            return x;
+        });
+        game.decisions = decisions(game.decisions);
+        if (isObj(game.seats)) for (const seat of Object.values(game.seats)) if (isObj(seat)) seat.decisions = decisions(seat.decisions);
+        // приказы хода отдавались по прежним областям
+        game.orders = { recruitment: [], recon: [], movements: [], attacks: [] };
+        return game;
+    }
+
     // Перенос партии из прошлой версии игры или со слегка другой нарезкой
     // карты. Берём свежий мир как основу и переносим поверх него всё, что
     // в старой партии выглядит правдоподобно; сомнительное — отбрасываем.
