@@ -140,6 +140,7 @@ class GameCore {
             return;
         }
         if (d.gameOver) return;
+        if (action.startsWith('rg-')) { this.regionsAction(action, btn); return; }
         if (['invest', 'cancel-project', 'integrate'].includes(action)) {
             const id = btn.dataset.region;
             const result = action === 'invest' ? d.act('invest', id, btn.dataset.kind)
@@ -328,6 +329,44 @@ class GameCore {
         }
     }
 
+    // Окно «Области»: каждое действие — обычная команда (в сетевой игре её
+    // повторит сервер), потом окно перерисовывается.
+    regionsAction(action, btn) {
+        const d = this.data, id = btn.dataset.region;
+        if (action === 'rg-go') {
+            this.ui.hideModal('regions-modal');
+            this.map.showRegion(id);
+            this.showRegion(id);
+            return;
+        }
+        let text = null;
+        if (action === 'rg-invest') {
+            const r = d.act('invest', id, btn.dataset.kind);
+            text = r.ok ? `🏗️ ${d.regions[id].name}: ${DEVELOPMENT[btn.dataset.kind].name}` : r.reason;
+        } else if (action === 'rg-cancel') {
+            text = d.act('cancelProject', id) ? 'Стройка отменена, деньги вернулись' : 'Нечего отменять';
+        } else if (action === 'rg-recruit') {
+            const unit = this.ui.regionsState().unit;
+            const r = d.act('queueRecruitment', id, unit, parseInt(btn.dataset.amount, 10));
+            text = r.ok ? `🪖 ${d.regions[id].name}: +${btn.dataset.amount} ${UnitsDB[unit].name}` : r.reason;
+        } else if (action === 'rg-build-all') {
+            let done = 0, spent = 0;
+            for (const p of this.ui.bulkBuildPlan(d)) if (d.act('invest', p.region, p.kind).ok) { done++; spent += p.cost; }
+            text = done ? `🏗️ Стройка начата в ${done} обл. · ${this.ui.money(spent)}` : 'Ничего не построено';
+        } else if (action === 'rg-recruit-all') {
+            let done = 0, units = 0;
+            for (const p of this.ui.bulkRecruitPlan(d)) if (d.act('queueRecruitment', p.region, p.unit, p.amount).ok) { done++; units += p.amount; }
+            text = done ? `🪖 Набор: +${units} в ${done} обл.` : 'Никого не набрали';
+        }
+        if (text) this.ui.toast(text);
+        this.ui.haptic(15);
+        this.loop.updateTopBarUI();
+        this.ui.updateOrdersPanel(d);
+        this.map.refreshColors();
+        SaveGame.save(d);
+        this.ui.showRegions(d);
+    }
+
     afterMissions() {
         this.ui.showCampaign(this.data);
         this.loop.updateTopBarUI();
@@ -335,9 +374,13 @@ class GameCore {
     }
 
     // --- сетевая игра ---------------------------------------------------------
+    // Сессию можно сменить на ходу: гость становится сервером, если сервер
+    // пропал; бывший сервер — гостем, если кампанию уже держит другой.
     attachNet(session) {
+        const old = this.net;
         this.net = session;
         document.body.classList.add('net-session');
+        if (old && old !== session && old.chatLog && !session.chatLog) session.chatLog = old.chatLog;
         const callbacks = session.callbacks;
         callbacks.onChange = () => this.renderNetStatus();
         callbacks.onToast = text => this.ui.toast(text);
@@ -346,6 +389,15 @@ class GameCore {
         callbacks.onChat = entry => this.onChat(entry);
         callbacks.onPing = entry => this.onPing(entry);
         callbacks.onNudge = entry => this.onNudge(entry);
+        callbacks.onOrphan = () => this.becomeHost();
+        callbacks.onTaken = () => this.becomeGuest();
+        if (!this.netUiReady) this.initNetUi();
+        session.attach(this);
+        this.renderNetStatus();
+    }
+
+    initNetUi() {
+        this.netUiReady = true;
         this.unread = 0;
         document.getElementById('net-wait-back').addEventListener('click', () => { if (this.net.ready) this.net.toggleReady(); });
         document.getElementById('net-wait-nudge').addEventListener('click', () => {
@@ -368,8 +420,52 @@ class GameCore {
             const ping = e.target.closest('.chat-msg.ping');
             if (ping) { this.ui.hideModal('chat-modal'); this.map.showRegion(ping.dataset.region); this.map.pingRegion(ping.dataset.region); }
         });
-        session.attach(this);
-        this.renderNetStatus();
+    }
+
+    myNetName() {
+        const names = (this.data.net && this.data.net.names) || {};
+        return names[this.data.playerCountry] || (this.net && this.net.name) || 'Игрок';
+    }
+
+    // Сервер пропал надолго: занимаем комнату кампании сами. true — вышло.
+    async becomeHost() {
+        const guest = this.net;
+        if (this.switching || !guest || guest.role !== 'guest' || this.data.gameOver) return false;
+        this.switching = true;
+        try {
+            const host = new NetHost(this.myNetName());
+            this.data.recorder = null;
+            await host.start(this.data);
+            guest.callbacks = {};
+            guest.leave();
+            SaveGame.campaignRole = 'host';
+            this.attachNet(host);
+            SaveGame.save(this.data);
+            this.ui.toast('📶 Сервер пропал — теперь сервер вы. Второй игрок подключится сам.');
+            return true;
+        } catch (err) {
+            return false;   // комнату уже занял другой — остаёмся гостем и стучимся к нему
+        } finally {
+            this.switching = false;
+        }
+    }
+
+    // Пока мы спали, кампанию открыл другой игрок: подключаемся к нему.
+    becomeGuest() {
+        const host = this.net;
+        if (this.switching || !host || host.role !== 'host') return;
+        this.switching = true;
+        host.callbacks = {};
+        host.stop();
+        const guest = new NetGuest(this.myNetName());
+        guest.cc = this.data.playerCountry;
+        guest.campaignId = this.data.net && this.data.net.id;
+        this.data.recorder = [];
+        SaveGame.campaignRole = 'guest';
+        this.attachNet(guest);
+        this.switching = false;
+        this.ui.toast('📶 Кампанию держит другой игрок — подключаемся к нему…');
+        guest.lost();
     }
 
     // --- чат и метки ---
@@ -495,8 +591,10 @@ class GameCore {
                 : others.length ? `Ждём: ${others.map(p => p.name + (p.connected && p.loaded === false ? ' (загружает карту)' : !p.connected ? ' (нет связи)' : '')).join(', ')}` : 'Все готовы — считаем ход…';
             document.getElementById('net-wait-list').innerHTML = players.map(row).join('');
             document.getElementById('net-wait-nudge').hidden = offline || !others.length;
-            document.getElementById('net-wait-hint').textContent = left !== null
-                ? 'Ход посчитается, когда все нажмут «Конец хода» или выйдет время.' : 'Ход посчитается, когда все нажмут «Конец хода».';
+            const away = others.filter(p => !p.connected);
+            document.getElementById('net-wait-hint').textContent = away.length
+                ? `Нет связи: ${away.map(p => p.name).join(', ')}. Ход посчитается, когда вернётся и нажмёт «Конец хода».`
+                : left !== null ? 'Ход посчитается, когда все нажмут «Конец хода» или выйдет время.' : 'Ход посчитается, когда все нажмут «Конец хода».';
             this.renderNudge();
         }
         this.tickClock();
@@ -508,7 +606,7 @@ class GameCore {
     onNewWorld(report) {
         this.cancelTargeting();
         this.ui.closePanel();
-        for (const id of ['diplo-modal', 'campaign-modal', 'gov-modal', 'science-modal']) this.ui.hideModal(id);
+        for (const id of ['diplo-modal', 'campaign-modal', 'gov-modal', 'science-modal', 'decision-modal', 'trade-modal', 'regions-modal']) this.ui.hideModal(id);
         this.loop.failed = false;
         this.loop.awaitingSummary = false;
         if (report) this.loop.showReport(report);
@@ -888,6 +986,7 @@ class GameCore {
             document.getElementById('gov-economy-section').scrollIntoView({ block: 'start' });
         });
         document.getElementById('diplo-btn').addEventListener('click', () => this.openDiplomacy());
+        document.getElementById('regions-btn').addEventListener('click', () => { this.cancelTargeting(); this.ui.closePanel(); this.ui.showRegions(this.data); });
         document.getElementById('campaign-btn').addEventListener('click', () => this.ui.showCampaign(this.data));
         document.getElementById('log-btn').addEventListener('click', () => this.ui.showHistory(this.data.history));
         document.getElementById('gameover-new-btn').addEventListener('click', () => { SaveGame.discard(); location.reload(); });
@@ -1132,7 +1231,11 @@ class GameCore {
                     ${note}`;
                 return;
             }
-            if (netView === 'busy') { body.innerHTML = `<p class="net-wait-line"><span class="spinner"></span>${escape(netNote || 'Подключаемся…')}</p>`; return; }
+            if (netView === 'busy') {
+                body.innerHTML = `<p class="net-wait-line"><span class="spinner"></span>${escape(netNote || 'Подключаемся…')}</p>
+                    <div class="net-actions"><button id="net-leave-btn" class="btn btn-ghost btn-sm" type="button">Отмена</button></div>`;
+                return;
+            }
             if (netView === 'search') {
                 body.innerHTML = `<div class="net-found">${foundList()}</div>
                     <div class="net-code-row"><label class="sr-only" for="net-code-input">Код игры</label><input id="net-code-input" maxlength="4" autocapitalize="characters" autocomplete="off" placeholder="Код: ABCD"><button id="net-join-btn" class="btn btn-light" type="button">Войти</button></div>
@@ -1154,10 +1257,10 @@ class GameCore {
                 }).join(' · ');
                 const date = new Date(meta.date || savedAt);
                 const goal = GOALS[meta.goal] ? ' · ' + GOALS[meta.goal].short : '';
-                const role = meta.role === 'guest' ? 'вы — гость' : 'вы — сервер';
-                const buttons = meta.gameOver ? '' : meta.role === 'guest'
-                    ? `<button class="btn btn-light btn-sm" type="button" data-campaign-join="${escape(meta.id)}">Подключиться</button><button class="btn btn-ghost btn-sm" type="button" data-campaign-host="${escape(meta.id)}">Стать сервером</button>`
-                    : `<button class="btn btn-light btn-sm" type="button" data-campaign-host="${escape(meta.id)}">Продолжить</button>`;
+                const role = 'по Wi-Fi';
+                // одна кнопка для всех: кто открыл первым — сервер, второй
+                // подключается к нему сам
+                const buttons = meta.gameOver ? '' : `<button class="btn btn-light btn-sm" type="button" data-campaign-open="${escape(meta.id)}">▶ Продолжить</button>`;
                 return `<div class="net-campaign">
                     <div class="nc-text"><span>${players}</span><small>Ход ${meta.turn} · ${date.getDate()}.${String(date.getMonth() + 1).padStart(2, '0')}.${date.getFullYear()}${goal} · код ${escape(meta.code || '—')} · ${role}${meta.gameOver ? ' · окончена' : ''}</small></div>
                     <div class="nc-actions">${buttons}<button class="btn btn-ghost btn-sm nc-del" type="button" data-campaign-del="${escape(meta.id)}" aria-label="Удалить кампанию">✕</button></div>
@@ -1234,11 +1337,13 @@ class GameCore {
             if (selectedId) net.pick(selectedId);
             refreshLobby();
         };
-        const joinGame = async (code, campaignId) => {
+        // campaign — { id, cc, data }: подключение к кампании без кода, к тому,
+        // кто её сейчас держит. Возвращает true, если подключились.
+        const joinGame = async (code, campaign) => {
             code = Net.normalizeCode(code);
-            if (code.length !== 4) { netNote = 'Код — четыре знака с экрана хозяина'; renderNet(); return; }
-            const name = playerName();
-            netNote = `Подключаемся к игре ${code}…`; netView = 'busy'; renderNet();
+            if (!campaign && code.length !== 4) { netNote = 'Код — четыре знака с экрана хозяина'; renderNet(); return false; }
+            const name = campaign ? ((campaign.data.net && campaign.data.net.names) || {})[campaign.cc] || playerName() : playerName();
+            if (!campaign) { netNote = `Подключаемся к игре ${code}…`; netView = 'busy'; renderNet(); }
             const session = new NetGuest(name, {
                 onLobby: lobby => {
                     // режим и уровень выбирает хозяин
@@ -1264,20 +1369,21 @@ class GameCore {
                 },
             });
             net = session;
+            if (campaign) {
+                try { await session.joinCampaign(campaign.id, campaign.cc, campaign.data); }
+                catch (err) { session.leave(); if (net === session) net = null; return false; }
+                return true;   // мир придёт следом — onStart
+            }
             try {
                 await session.join(code);
             } catch (err) {
-                // кампания могла открыться с другим кодом — ищем её в сети
-                const other = campaignId ? await NetGuest.findCampaign(campaignId).catch(() => null) : null;
-                if (!other || other === code) {
-                    netError(campaignId ? 'Сервер кампании не найден. Попросите открыть её («Продолжить») или станьте сервером сами.' : err.message);
-                    return;
-                }
-                try { await session.join(other); } catch (err2) { netError(err2.message); return; }
+                netError(err.message);
+                return false;
             }
-            if (session.game) return;   // партия уже идёт — мир пришёл сразу
+            if (session.game) return true;   // партия уже идёт — мир пришёл сразу
             netView = 'lobby'; netNote = '';
             refreshLobby();
+            return true;
         };
         // Поиск идёт, пока открыт экран поиска: новые игры появляются сами.
         // Обновляем только список — введённый код не сбрасывается.
@@ -1295,23 +1401,40 @@ class GameCore {
             if (result.lan) setTimeout(() => { if (netView === 'search') scan(); }, 2500);
         };
         // Открыть кампанию у себя как сервер (своя копия — сервера или гостя).
+        // «Продолжить» кампанию — одинаково для всех. Комната кампании
+        // свободна — мы сервер. Занята — значит, её уже открыл другой игрок:
+        // подключаемся к нему. Не вышло (брокер ещё помнит прежний сервер) —
+        // пробуем снова, пока не получится.
         const resumeCampaign = async data => {
-            netNote = 'Открываем сетевую кампанию…'; netView = 'busy'; renderNet();
             $('net-box').scrollIntoView({ block: 'nearest' });
             const names = (data.net && data.net.names) || {};
-            const session = new NetHost(names[data.playerCountry] || playerName());
-            try { await session.start(data); }
-            catch (err) { netView = 'idle'; netNote = err.message; renderNet(); return; }
-            netView = 'idle'; netNote = '';
-            launch(data, false, session);
-            SaveGame.save(data);
-            window.game.ui.toast(`Кампания открыта, код ${session.code}. Остальные — «Подключиться» или «Найти игру».`);
+            const id = data.net && data.net.id;
+            const until = Date.now() + 90000;
+            netNote = 'Открываем сетевую кампанию…'; netView = 'busy'; renderNet();
+            for (let attempt = 0; Date.now() < until && netView === 'busy'; attempt++) {
+                const session = new NetHost(names[data.playerCountry] || playerName());
+                try {
+                    await session.start(data);
+                    netView = 'idle'; netNote = '';
+                    launch(data, false, session);
+                    SaveGame.save(data);
+                    window.game.ui.toast('Кампания открыта. Второй игрок — «▶ Продолжить» у себя, подключится сам.');
+                    return;
+                } catch (err) {
+                    if (!err.taken || !id) { netView = 'idle'; netNote = err.message; renderNet(); return; }
+                }
+                netNote = 'Кампанию уже открыл другой игрок — подключаемся к нему…'; renderNet();
+                if (await joinGame('', { id, cc: data.playerCountry, data })) return;
+                netNote = `Ждём, пока освободится связь (попытка ${attempt + 2})…`; renderNet();
+                await Net.sleep(2500);
+            }
+            if (netView === 'busy') { netView = 'idle'; netNote = 'Не удалось открыть кампанию. Проверьте интернет и попробуйте ещё раз.'; renderNet(); }
         };
         $('net-box').addEventListener('click', e => {
             const btn = e.target.closest('button');
             if (!btn) return;
-            if (btn.dataset.campaignHost || btn.dataset.campaignJoin || btn.dataset.campaignDel) {
-                const id = btn.dataset.campaignHost || btn.dataset.campaignJoin || btn.dataset.campaignDel;
+            if (btn.dataset.campaignOpen || btn.dataset.campaignDel) {
+                const id = btn.dataset.campaignOpen || btn.dataset.campaignDel;
                 if (btn.dataset.campaignDel) {
                     if (confirm('Удалить сетевую кампанию с этого устройства?')) { SaveGame.removeCampaign(id); renderNet(); }
                     return;
@@ -1319,8 +1442,6 @@ class GameCore {
                 let payload;
                 try { payload = SaveGame.loadCampaign(id); }
                 catch (err) { netNote = 'Не удалось прочитать кампанию.'; renderNet(); return; }
-                if (btn.dataset.campaignJoin) { playerName(); joinGame(payload.meta.code, id); return; }
-                if (payload.meta.role === 'guest' && !confirm('Открыть кампанию у себя как сервер? Остальные подключатся к вам. Ходы, сделанные на старом сервере после вашей последней копии, потеряются.')) return;
                 let data;
                 try { data = GameData.restore(payload.game); }
                 catch (err) { netNote = 'Кампания повреждена или от другой версии карты.'; renderNet(); return; }

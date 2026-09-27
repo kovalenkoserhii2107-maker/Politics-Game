@@ -651,3 +651,35 @@ body.hotseat-handoff #ui-layer > :not(#hotseat-screen) { visibility: hidden; }
 .seat-chip { display: inline-flex; align-items: center; gap: 6px; min-height: 36px; padding: 0 4px 0 10px; border: 1px solid var(--line-2); border-radius: var(--r); background: var(--s3); color: var(--text); font-size: 0.85rem; }
 .seat-chip button { min-width: 32px; min-height: 32px; border: 0; background: transparent; color: var(--text-2); font: inherit; cursor: pointer; }
 .seat-hint { color: var(--text-2); font-size: 0.82rem; }
+
+/* --- все области списком --- */
+#regions-modal .modal-content.wide { width: min(860px, 100%); }
+.rg-summary { font-size: 0.9rem; color: var(--text-2); margin-bottom: 8px; }
+.rg-summary b { color: var(--text); }
+.rg-filters { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+.rg-filters .chip { min-height: 36px; padding: 0 10px; font: inherit; font-size: 0.82rem; cursor: pointer; }
+.rg-filters .chip.on { background: var(--light); color: var(--ink); }
+.rg-sort { display: flex; align-items: center; gap: 8px; font-size: 0.85rem; color: var(--text-2); margin-bottom: 8px; }
+.rg-sort select, .rg-bulk select { min-height: 36px; background: var(--s3); color: var(--text); border: 1px solid var(--line-2); border-radius: var(--r); font: inherit; font-size: 0.85rem; padding: 0 6px; max-width: 100%; }
+.rg-bulk { display: flex; flex-direction: column; gap: 8px; padding: 10px; margin-bottom: 10px; background: var(--s2); border: 1px solid var(--line); border-radius: var(--r); font-size: 0.85rem; }
+.rg-bulk-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.rg-bulk-row > span { flex: 1 1 100%; color: var(--text-2); }
+.rg-bulk-row select { flex: 1 1 180px; min-width: 0; }
+.rg-reserve { display: flex; align-items: center; gap: 8px; color: var(--text-2); min-height: 32px; }
+.rg-list { display: flex; flex-direction: column; gap: 8px; }
+.rg-row { padding: 10px; border: 1px solid var(--line); border-radius: var(--r); background: var(--s2); display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.rg-row.front { border-left: 3px solid var(--accent-2, #ff5a4f); }
+.rg-row.restless { box-shadow: inset 0 0 0 1px var(--warn-soft); }
+.rg-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; }
+.rg-name { background: none; border: 0; padding: 0; color: var(--text); font: inherit; cursor: pointer; text-align: left; min-height: 32px; }
+.rg-name b { text-decoration: underline; text-decoration-color: var(--line-2); text-underline-offset: 3px; }
+.rg-meta { font-size: 0.78rem; color: var(--text-2); font-family: var(--mono); }
+.rg-dev { display: flex; flex-wrap: wrap; gap: 10px; font-size: 0.82rem; color: var(--text-2); font-family: var(--mono); }
+.rg-queued { color: var(--good); }
+.rg-builds { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
+@media (min-width: 640px) { .rg-builds { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+.rg-build { min-height: 40px; padding: 4px 6px; border: 1px solid var(--line-2); border-radius: var(--r); background: var(--s3); color: var(--text); font: inherit; font-size: 0.78rem; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; touch-action: manipulation; }
+.rg-build.best { border-color: var(--good); color: var(--good); }
+.rg-build:disabled { opacity: 0.45; cursor: default; }
+.rg-project { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 0.85rem; color: var(--warn); }
+.rg-recruit .mini-btn, .rg-bulk .mini-btn { min-height: 36px; }

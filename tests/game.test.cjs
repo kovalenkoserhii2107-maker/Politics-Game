@@ -270,8 +270,9 @@ test('multiplayer: seats survive save, one human defeated does not end the game'
 });
 
 test('network framing: long messages are chunked under the PeerJS byte limit and reassembled', () => {
-    const context = vm.createContext({ console, JSON, Math, Map, String, Number, Array, Object });
-    vm.runInContext(fs.readFileSync(path.join(__dirname, '../js/Net.js'), 'utf8') + ';this.NetLink = NetLink;', context);
+    const timers = [];
+    const context = vm.createContext({ console, JSON, Math, Map, String, Number, Array, Object, Date, setInterval: f => timers.push(f), clearInterval() {} });
+    vm.runInContext(fs.readFileSync(path.join(__dirname, '../js/Net.js'), 'utf8') + ';this.NetLink = NetLink;this.NET = NET;', context);
     const handlers = {}, sent = [];
     const conn = { open: true, send: x => sent.push(x), on: (e, f) => { handlers[e] = f; }, close() {} };
     const got = [];
@@ -286,6 +287,21 @@ test('network framing: long messages are chunked under the PeerJS byte limit and
     handlers.data({ c: 'x', i: 0, n: 2, d: '{"t":' });              // неполное — ждём
     handlers.data('мусор');
     assert.equal(got.length, 1);
+    // «я на связи»: тишина дольше DEAD_MS — связь считается оборванной
+    let closed = 0;
+    const quiet = { open: true, send: x => sent.push(x), on: (e, f) => { handlers[e] = f; }, close() {} };
+    sent.length = 0;
+    const alive = new context.NetLink(quiet, () => {}, () => closed++);
+    const beat = timers[timers.length - 1];
+    beat();
+    assert.ok(sent.some(x => x.h === 1), 'шлёт сигнал');
+    handlers.data({ h: 1 });
+    assert.equal(got.length, 1, 'сигнал — не сообщение');
+    alive.lastSeen -= context.NET.DEAD_MS + 1;
+    beat();
+    assert.equal(closed, 1);
+    beat(); handlers.close();
+    assert.equal(closed, 1, 'сообщаем один раз');
 });
 
 // --- помощь, уступки, совместные атаки, цели ---

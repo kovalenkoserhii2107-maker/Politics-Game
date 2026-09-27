@@ -500,6 +500,12 @@ class MapEngine {
         this.pointers = new Map();
         this.container.addEventListener('pointerdown', e => {
             if (e.pointerType === 'mouse' && e.button !== 0) return;
+            // Первый палец нового касания: всё, что помнили раньше, —
+            // «застрявшие» указатели (iOS не присылает отпускание, если
+            // свернуть приложение посреди жеста). Иначе один палец
+            // щипает вместе с призраком и карта уменьшается вместо сдвига.
+            if (e.isPrimary) this.resetPointers();
+            else if (this.pointers.size >= 2) return;   // третий палец не участвует
             this.stopMotion();
             this.measure();
             this.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY, type: e.pointerType });
@@ -576,6 +582,24 @@ class MapEngine {
         };
         this.container.addEventListener('pointerup', release);
         this.container.addEventListener('pointercancel', release);
+        // Касания браузер считает точно: пальцев на экране нет — значит, и
+        // тач-указателей нет, даже если отпускание потерялось.
+        const sync = e => {
+            if (e.touches.length) return;
+            for (const [id, p] of this.pointers) if (p.type === 'touch') this.pointers.delete(id);
+            if (this.pointers.size < 2) this.pinch = null;
+            if (!this.pointers.size) this.isDragging = false;
+        };
+        this.container.addEventListener('touchend', sync, { passive: true });
+        this.container.addEventListener('touchcancel', sync, { passive: true });
+        // свернули приложение или ушли со страницы — жест точно закончился
+        window.addEventListener('blur', () => this.resetPointers());
+        window.addEventListener('pagehide', () => this.resetPointers());
+        document.addEventListener('visibilitychange', () => { if (document.hidden) this.resetPointers(); });
+        // Safari масштабирует всю страницу щипком поверх карты — не даём.
+        for (const type of ['gesturestart', 'gesturechange']) {
+            document.addEventListener(type, e => { if (document.body.classList.contains('in-game')) e.preventDefault(); }, { passive: false });
+        }
 
         // Клавиатура на компьютере: + и − масштаб, стрелки — сдвиг.
         window.addEventListener('keydown', e => {
@@ -600,6 +624,12 @@ class MapEngine {
             this.updateLabelVisibility();
             document.dispatchEvent(new CustomEvent('zoomLevelChanged', { detail: { isRegional: this.isRegionalZoom } }));
         });
+    }
+
+    resetPointers() {
+        this.pointers.clear();
+        this.pinch = null;
+        this.isDragging = false;
     }
 
     startDrag(x, y) {
