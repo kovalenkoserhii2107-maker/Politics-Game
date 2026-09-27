@@ -125,6 +125,16 @@ class GameCore {
         const cc = btn.dataset.country;
         const action = btn.dataset.action;
         if (action === 'stats') { this.ui.showStats(d); return; }
+        if (action === 'recall-garrison') {
+            const result = d.act('recallGarrison', btn.dataset.region);
+            if (!result.ok) { this.ui.toast(result.reason); return; }
+            this.ui.toast(result.to ? `↩ Войска вернулись в ${d.regions[result.to].name}` : 'Войскам некуда вернуться — они распущены');
+            this.map.drawArmyMarkers();
+            this.loop.updateTopBarUI();
+            SaveGame.save(d);
+            this.showRegion(btn.dataset.region);
+            return;
+        }
         if (action === 'open-country') {
             this.ui.hideModal('diplo-modal');
             this.map.focusCountry(cc);
@@ -845,9 +855,9 @@ class GameCore {
             || a.region.name.localeCompare(b.region.name, 'ru'));
 
         const from = d.getRegion(state.fromId);
-        document.getElementById('target-title').textContent = give ? 'Кому передать войска' : isMove ? 'Куда перебросить войска' : 'Кого атаковать';
+        document.getElementById('target-title').textContent = give ? 'Куда отправить войска в помощь' : isMove ? 'Куда перебросить войска' : 'Кого атаковать';
         document.getElementById('target-hint').textContent = `Из области ${from.name}. `
-            + (give ? 'Войска станут войсками союзника.' : isMove ? 'Выберите свою область.' : 'Шансы считаются по отправленным войскам.');
+            + (give ? 'Войска останутся вашими и будут оборонять область союзника; вернуть — в её карточке.' : isMove ? 'Выберите свою область.' : 'Шансы — вместе с уже назначенными ударами по этой цели.');
         document.getElementById('target-list').innerHTML = rows.slice(0, LIMIT).map(({ id, region, transport, odds }) => {
             const owner = d.countries[region.owner];
             const sea = transport.cost ? ` · морем ${this.ui.money(transport.cost)}` : '';
@@ -1054,9 +1064,9 @@ class GameCore {
             this.cancelTargeting();
             if (!targets.includes(regionId)) return;
             if (state.type === 'give') {
-                const result = this.data.act('giveTroops', state.fromId, regionId, state.forces);
+                const result = this.data.act('sendGarrison', state.fromId, regionId, state.forces);
                 if (!result.ok) { this.ui.toast(result.reason); return; }
-                this.ui.toast(`Передано союзнику (${this.data.countries[this.data.regions[regionId].owner].name}): ${result.text}`);
+                this.ui.toast(`🛡️ Войска в помощь: ${this.data.regions[regionId].name} (${this.data.countries[this.data.regions[regionId].owner].name}). Вернуть — в карточке области`);
                 this.map.drawArmyMarkers();
                 this.loop.updateTopBarUI();
                 SaveGame.save(this.data);

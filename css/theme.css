@@ -685,3 +685,14 @@ body.hotseat-handoff #ui-layer > :not(#hotseat-screen) { visibility: hidden; }
 .rg-recruit .mini-btn, .rg-bulk .mini-btn { min-height: 36px; }
 
 #decision-accept.danger { background: var(--accent); color: #fff; }
+
+/* войска в помощь союзнику */
+.garrison-box { display: flex; flex-direction: column; gap: 6px; padding: 8px 10px; margin: 8px 0; border: 1px solid #6aa8ff55; border-radius: var(--r); background: var(--s2); font-size: 0.85rem; }
+.garrison-title { font-family: var(--mono); font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-3); }
+.garrison-line { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; color: var(--text-2); }
+.garrison-line b { color: #6aa8ff; }
+.garrison-line.mine b { color: var(--good); }
+.army-badge.garrison.ally rect:first-child { stroke: #6aa8ff; }
+.army-badge.garrison.ally text { fill: #9cc4ff; }
+.army-badge.garrison.mine rect:first-child { stroke: var(--good); stroke-dasharray: 3 2; }
+.army-badge.garrison.mine text { fill: var(--good); }

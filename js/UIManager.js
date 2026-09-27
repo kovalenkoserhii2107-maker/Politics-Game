@@ -329,6 +329,21 @@ class UIManager {
         block.classList.toggle('top', top);
     }
 
+    // Войска союзников в области: кто, сколько, какая сила. Свои — можно вернуть.
+    garrisonBlock(data, region) {
+        const player = data.playerCountry;
+        const list = data.garrisonsIn(region.id);
+        if (!list.length) return '';
+        const visible = region.owner === player || list.some(g => g.cc === player) || Diplomacy.isAllied(data, player, region.owner);
+        if (!visible) return '';
+        const rows = list.map(g => {
+            const mine = g.cc === player;
+            return `<div class="garrison-line ${mine ? 'mine' : ''}">🛡️ <b>${this.escape(data.countries[g.cc].name)}${mine ? ' (ваши)' : ''}</b>: ${this.escape(data.describeForces(g.army))} · сила ${data.armyPower(g.army, g.cc)}
+                ${mine ? `<button class="mini-btn" type="button" data-action="recall-garrison" data-region="${region.id}">↩ Вернуть домой</button>` : ''}</div>`;
+        }).join('');
+        return `<div class="garrison-box"><div class="garrison-title">Войска союзников в обороне</div>${rows}</div>`;
+    }
+
     // Совместная операция: объявить удар по вражеской области или увидеть,
     // что союзник её уже наметил.
     operationBlock(data, region) {
@@ -482,7 +497,7 @@ class UIManager {
                     </button>
                 </div>`;
         }
-        html = this.unrestBlock(data, region) + this.operationBlock(data, region) + html;
+        html = this.unrestBlock(data, region) + this.operationBlock(data, region) + this.garrisonBlock(data, region) + html;
         if (data.multiplayer) html += `<button class="mini-btn ping-btn" data-action="ping" data-region="${region.id}">📍 Показать игрокам</button>`;
         document.getElementById('region-army-container').innerHTML = html;
         this.placeDiplomacy(false);

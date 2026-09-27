@@ -80,6 +80,7 @@ class GameData {
         Missions.init(this);
         Unrest.init(this);
         this.operations = [];       // совместные операции союзников: { by, target, turn }
+        this.garrisons = {};        // войска в помощь союзнику: область → страна → войска
         Council.init(this);
         this.diploEvents = [];      // что случилось в дипломатии между отчётами хода
         // Страны под управлением людей. В одиночной игре — только игрок; в
@@ -416,7 +417,86 @@ class GameData {
     calculateMilitaryPower(countryId) {
         let total = 0;
         for (const region of this.getCountryRegions(countryId)) total += this.calculateRegionMilitaryPower(region.id);
+        for (const g of this.garrisonsOf(countryId)) total += this.armyPower(g.army, countryId);
         return total;
+    }
+
+    armyPower(army, countryId) {
+        let power = 0;
+        for (const unitId of Object.keys(UnitsDB)) {
+            const count = army[unitId] || 0;
+            if (count) power += count * (UnitsDB[unitId].baseAttack + UnitsDB[unitId].baseDefense) * this.techMultiplier(countryId, unitId);
+        }
+        return Math.floor(power);
+    }
+
+    // --- войска в помощь союзнику ---------------------------------------------
+    // Остаются войсками своей страны: она за них платит, они в её силе,
+    // вернуть их можно в любой момент. В области союзника обороняются
+    // вместе с хозяином.
+    garrisonsIn(regionId) {
+        return Object.entries((this.garrisons || {})[regionId] || {}).map(([cc, army]) => ({ cc, army, region: regionId }));
+    }
+
+    garrisonsOf(countryId) {
+        const out = [];
+        for (const [regionId, byCountry] of Object.entries(this.garrisons || {})) {
+            if (byCountry[countryId]) out.push({ cc: countryId, army: byCountry[countryId], region: regionId });
+        }
+        return out;
+    }
+
+    sendGarrison(fromId, toId, forces, countryId = this.playerCountry) {
+        if (this.gameOver || !this.validateForces(fromId, forces, countryId)) return { ok: false, reason: 'Недоступный состав войск' };
+        if (!this.allyTargets(fromId, countryId).includes(toId)) return { ok: false, reason: 'Отправить можно только в соседнюю область союзника' };
+        const from = this.regions[fromId], to = this.regions[toId];
+        const byCountry = this.garrisons[toId] || (this.garrisons[toId] = {});
+        const army = byCountry[countryId] || (byCountry[countryId] = this.emptyArmy());
+        for (const [unitId, n] of Object.entries(forces)) { from.army[unitId] -= n; army[unitId] += n; }
+        if (this.isHuman(to.owner)) this.diploEvents.push({ type: 'troops', for: to.owner, message: `🛡️ ${this.countries[countryId].name} прислала войска вам в помощь в ${to.name}: ${this.describeForces(forces)}. Они обороняют область вместе с вашими.` });
+        return { ok: true, text: this.describeForces(forces) };
+    }
+
+    // Куда вернуть контингент: соседняя своя область, иначе столица, иначе любая своя.
+    garrisonHome(regionId, countryId) {
+        const near = this.getNeighbors(regionId).map(id => this.regions[id]).find(r => r && r.owner === countryId);
+        if (near) return near;
+        const capital = this.regions[this.countries[countryId].capital];
+        if (capital && capital.owner === countryId) return capital;
+        return this.getCountryRegions(countryId)[0] || null;
+    }
+
+    recallGarrison(regionId, countryId = this.playerCountry) {
+        const army = (this.garrisons[regionId] || {})[countryId];
+        if (this.gameOver || !army) return { ok: false, reason: 'Здесь нет ваших войск' };
+        const home = this.garrisonHome(regionId, countryId);
+        delete this.garrisons[regionId][countryId];
+        if (!Object.keys(this.garrisons[regionId]).length) delete this.garrisons[regionId];
+        if (!home) return { ok: true, to: null };
+        for (const unitId of Object.keys(UnitsDB)) home.army[unitId] += army[unitId] || 0;
+        return { ok: true, to: home.id };
+    }
+
+    // Конец хода: союз распался, область отошла не союзнику, страна пала —
+    // войска возвращаются домой.
+    checkGarrisons(events) {
+        for (const [regionId, byCountry] of Object.entries(this.garrisons || {})) {
+            const region = this.regions[regionId];
+            for (const cc of Object.keys(byCountry)) {
+                const c = this.countries[cc];
+                if (!c || !c.alive || !this.regionsByCountry[cc].length) { delete byCountry[cc]; continue; }
+                if (region.owner !== cc && Diplomacy.isAllied(this, cc, region.owner)) continue;
+                if (region.owner === cc) {
+                    // область теперь наша — контингент становится её гарнизоном
+                    for (const unitId of Object.keys(UnitsDB)) region.army[unitId] += byCountry[cc][unitId] || 0;
+                    delete byCountry[cc];
+                    continue;
+                }
+                const result = this.recallGarrison(regionId, cc);
+                if (this.isHuman(cc)) events.push({ type: 'troops', for: cc, message: `🛡️ Ваши войска из ${region.name} вернулись домой${result.to ? ` в ${this.regions[result.to].name}` : ''}: союза с хозяином области больше нет.` });
+            }
+            if (this.garrisons[regionId] && !Object.keys(this.garrisons[regionId]).length) delete this.garrisons[regionId];
+        }
     }
 
     getCountryStats(countryId) {
@@ -1114,7 +1194,7 @@ class GameData {
         for (const orders of battles) {
             const result = this.resolveBattle(orders);
             if (!result) continue;
-            const viewers = [...result.coalition, result.defender].filter(cc => this.isHuman(cc));
+            const viewers = [...result.coalition, result.defender, ...(result.helpers || [])].filter((cc, i, all) => this.isHuman(cc) && all.indexOf(cc) === i);
             // каждому участнику — своя запись: победа с его стороны
             for (const cc of viewers) {
                 const attacking = result.coalition.includes(cc);
@@ -1235,6 +1315,16 @@ class GameData {
             defLosses[unitId] = Math.min(defAmount, Math.ceil(defAmount * defLossPct));
             target.army[unitId] -= defLosses[unitId];
         }
+        // войска союзников в области теряют ту же долю
+        const helpers = this.garrisonsIn(target.id);
+        for (const g of helpers) {
+            for (const unitId of Object.keys(UnitsDB)) {
+                const n = g.army[unitId] || 0;
+                const lost = Math.min(n, Math.ceil(n * defLossPct));
+                g.army[unitId] -= lost;
+                defLosses[unitId] += lost;
+            }
+        }
         // потери каждой страны раскладываем по её областям-источникам
         const survivorsBySource = sources.map(src => ({ region: src.region, country: src.country, left: { ...src.sent } }));
         for (const cc of coalition) {
@@ -1263,6 +1353,7 @@ class GameData {
         const extra = [];
         if (joint) extra.push(`Совместное наступление: +${Math.round(RULES.JOINT_ATTACK_BONUS * 100)}% к удару.`);
         if (flank) extra.push(`Удар с ${directions} направлений: +${Math.round(flank * 100)}%.`);
+        if (helpers.length) extra.push(`В обороне помогали войска: ${helpers.map(g => this.countries[g.cc].name).join(', ')}.`);
         if (operation) extra.push(`По плану операции: +${Math.round(RULES.OPERATION_BONUS * 100)}%.`);
         let message;
 
@@ -1280,6 +1371,8 @@ class GameData {
                 }
             }
             target.army = this.emptyArmy();
+            // войска союзников отходят к себе домой
+            for (const g of helpers) this.recallGarrison(target.id, g.cc);
             // в область входят войска нового хозяина, союзники возвращаются домой
             for (const s of survivorsBySource) {
                 const into = s.country === attacker ? target : s.region;
@@ -1304,7 +1397,7 @@ class GameData {
             success: coalition.includes(this.playerCountry) ? success : !success,
             message,
             detail: extra.filter(Boolean).join(' '),
-            attacker, defender, coalition, joint,
+            attacker, defender, coalition, joint, helpers: helpers.map(g => g.cc),
             playerIsAttacker: coalition.includes(this.playerCountry),
             power: { attack: Math.round(powerAtt), defense: Math.round(powerDef), capital: isCapital },
             losses: { attacker: attLosses, defender: defLosses, initialAttacker: forces },
@@ -1315,6 +1408,7 @@ class GameData {
     // используется ИИ для оценки целей.
     defensePower(target, attackers) {
         let power = this.sidePower(target.army, target.owner, 'baseDefense', attackers) + this.militia(target) + 1;
+        for (const g of this.garrisonsIn(target.id)) power += this.sidePower(g.army, g.cc, 'baseDefense', attackers);
         power *= RULES.DEFENSE_BONUS * Tech.factor(this.countries[target.owner], 'defense');
         if (this.countries[target.owner].capital === target.id) power *= 1 + RULES.CAPITAL_DEFENSE;
         power *= 0.7 + 0.3 * target.loyalty;
@@ -1430,6 +1524,7 @@ class GameData {
             social += region.population * policy.socialCost;
             upkeep += this.armyUpkeep(region.army);
         }
+        for (const g of this.garrisonsOf(countryId)) upkeep += this.armyUpkeep(g.army);
         const cycle = Economy.cycle(this);
         tax *= Economy.taxFactor(country) * Tech.factor(country, 'tax') * cycle.tax
             * (Unrest.civilWar(this, countryId) ? REVOLT.CIVIL_TAX : 1);
@@ -1488,6 +1583,7 @@ class GameData {
         if (cycleEvent) events.push(cycleEvent);
         this.processResearch(events);
         Diplomacy.endTurn(this, events);
+        this.checkGarrisons(events);
         const balances = {};
         const markets = Economy.runMarkets(this);
 
@@ -1705,6 +1801,8 @@ class GameData {
             cycle: this.cycle ? { ...this.cycle } : undefined,
             revolts: Unrest.serialize(this),
             operations: (this.operations || []).map(o => ({ ...o })),
+            garrisons: Object.fromEntries(Object.entries(this.garrisons || {}).map(([id, byCountry]) =>
+                [id, Object.fromEntries(Object.entries(byCountry).map(([cc, army]) => [cc, units.map(u => army[u] || 0)]))])),
             council: Council.serialize(this),
             chronicle: this.chronicle ? structuredClone(this.chronicle) : undefined,
             diplomacy: Diplomacy.serialize(this),
@@ -1784,6 +1882,9 @@ class GameData {
         if (save.revolts !== undefined && !Unrest.valid(save.revolts)) fail();
         if (save.chronicle !== undefined && !Score.validChronicle(save.chronicle)) fail('хроника');
         if (save.council !== undefined && !Council.valid(save.council)) fail('совет');
+        if (save.garrisons !== undefined && (!save.garrisons || typeof save.garrisons !== 'object' || !Object.entries(save.garrisons).every(([id, byCountry]) =>
+            RegionsDB[id] && byCountry && typeof byCountry === 'object' && Object.entries(byCountry).every(([cc, army]) =>
+                CountriesDB[cc] && Array.isArray(army) && army.length === save.units.length && army.every(count))))) fail('войска союзников');
         if (save.operations !== undefined && (!Array.isArray(save.operations) || save.operations.some(o => !o || !CountriesDB[o.by] || !RegionsDB[o.target] || !Number.isInteger(o.turn)))) fail();
         if (save.cycle !== undefined && (!save.cycle || !CYCLES[save.cycle.phase] || !Number.isInteger(save.cycle.until))) fail();
         if (save.scoreStart !== undefined && !Score.valid(save.scoreStart)) fail();
@@ -1894,6 +1995,14 @@ class GameData {
         if (save.cycle) data.cycle = { ...save.cycle };
         if (save.revolts) data.revolts = structuredClone(save.revolts);
         if (save.operations) data.operations = save.operations.map(o => ({ ...o }));
+        data.garrisons = {};
+        for (const [id, byCountry] of Object.entries(save.garrisons || {})) {
+            for (const [cc, army] of Object.entries(byCountry)) {
+                const out = data.emptyArmy();
+                save.units.forEach((u, i) => { if (UnitsDB[u]) out[u] = army[i]; });
+                (data.garrisons[id] = data.garrisons[id] || {})[cc] = out;
+            }
+        }
         Council.restore(data, save.council);
         // хроника: у старых партий графики начинаются с момента загрузки
         if (save.chronicle) data.chronicle = structuredClone(save.chronicle);
@@ -2014,7 +2123,7 @@ GameData.SEAT_FIELDS = ['missions', 'stats', 'decisions', 'history', 'campaign']
 // Команды игрока → номер аргумента со страной (−1 — страна не указывается).
 GameData.COMMANDS = {
     queueRecruitment: 3, queueMovement: 3, queueAttack: 3, queueRecon: -1, cancelOwnOrder: -1,
-    disband: 2, invest: 2, cancelProject: 1, integrateTerritory: -1,
+    disband: 2, invest: 2, cancelProject: 1, integrateTerritory: -1, sendGarrison: 3, recallGarrison: 1,
     setTrade: 0, research: 0, startResearch: 0, cancelResearch: 0, setPolicy: 0, setTaxRate: 0,
     declareWar: 0, proposePeace: -1, diplomacyAction: -1, answerDecision: -1,
     claimMission: -1, skipMission: -1, transfer: -1, cedeRegion: -1, borrow: 1, repay: 1, suppressRevolt: -1, appeaseRevolt: -1, proposeTrade: -1, giveTroops: 3, planOperation: -1,

@@ -867,3 +867,53 @@ test('battle: a strike from several regions gets a flank bonus; odds include str
     assert.ok(two.detail.includes('направлений'));
     assert.equal(GameData.flankBonus(5), RULES.FLANK_MAX);
 });
+
+test('garrisons: troops sent to an ally stay mine, defend, cost upkeep, come home when the alliance ends', () => {
+    const { GameData, Diplomacy, RULES } = engine();
+    const d = new GameData('PL', { humans: ['DE'] });
+    Diplomacy.sign(d, 'PL', 'DE', 'alliance');
+    const from = d.getCountryRegions('PL').find(r => d.getNeighbors(r.id).some(id => d.regions[id]?.owner === 'DE'));
+    const to = d.getNeighbors(from.id).find(id => d.regions[id]?.owner === 'DE');
+    from.army = { ...d.emptyArmy(), infantry: 30, tanks: 5 };
+    const powerBefore = d.calculateMilitaryPower('PL'), upkeepBefore = d.countryBalance('PL').upkeep;
+    const defBefore = d.defensePower(d.regions[to], { infantry: 10 });
+    assert.equal(d.act('sendGarrison', from.id, to, { infantry: 20, tanks: 5 }).ok, true);
+    assert.equal(from.army.infantry, 10);
+    assert.equal(d.regions[to].army.infantry === undefined ? 0 : 1, 1, 'армия хозяина не тронута');
+    assert.equal(d.garrisonsIn(to)[0].cc, 'PL');
+    assert.equal(d.calculateMilitaryPower('PL'), powerBefore, 'войска по-прежнему в силе Польши');
+    assert.equal(d.countryBalance('PL').upkeep, upkeepBefore, 'и Польша за них платит');
+    assert.ok(d.defensePower(d.regions[to], { infantry: 10 }) > defBefore, 'оборона области сильнее');
+    assert.ok(d.seatOf('DE').diploEvents === undefined);
+    assert.ok(d.diploEvents.some(e => e.for === 'DE' && e.message.includes('в помощь')));
+    // сохранение
+    const back = GameData.restore(JSON.parse(JSON.stringify(d.serialize())));
+    assert.equal(back.garrisonsIn(to)[0].army.infantry, 20);
+    // бой: враг бьёт по области — контингент теряет долю и отходит домой при падении
+    d.startWar('CZ', 'DE');
+    const enemyFrom = d.getNeighbors(to).find(id => d.regions[id]?.owner === 'CZ');
+    if (enemyFrom) {
+        d.regions[enemyFrom].army = { ...d.emptyArmy(), tanks: 400 };
+        d.queueAttack(enemyFrom, to, { tanks: 400 }, 'CZ');
+        const { logs } = d.processOrders();
+        assert.ok(logs.some(l => l.for === 'DE' && l.detail.includes('помогали')));
+        if (d.regions[to].owner === 'CZ') assert.equal(d.garrisonsIn(to).length, 0, 'из павшей области отошли');
+    }
+    // возврат вручную
+    const g = d.garrisonsOf('PL')[0];
+    if (g) { const r = d.act('recallGarrison', g.region); assert.equal(r.ok, true); assert.equal(d.garrisonsOf('PL').length, 0); }
+    // союз распался — войска дома сами
+    const e = new GameData('PL', { humans: ['DE'] });
+    Diplomacy.sign(e, 'PL', 'DE', 'alliance');
+    const f2 = e.getCountryRegions('PL').find(r => e.getNeighbors(r.id).some(id => e.regions[id]?.owner === 'DE'));
+    const t2 = e.getNeighbors(f2.id).find(id => e.regions[id]?.owner === 'DE');
+    f2.army = { ...e.emptyArmy(), infantry: 10 };
+    e.act('sendGarrison', f2.id, t2, { infantry: 10 });
+    delete e.alliances[e.pairKey('PL', 'DE')];
+    const { events } = e.applyEndOfTurn();
+    assert.equal(e.garrisonsOf('PL').length, 0);
+    assert.ok(events.some(x => x.for === 'PL' && x.message.includes('вернулись домой')));
+    assert.ok(e.getCountryRegions('PL').reduce((a, r) => a + r.army.infantry, 0) >= 10 * 0.8, 'войска дома (с учётом дезертирства)');
+    const bad = d.serialize(); bad.garrisons = { 'XX-1': {} };
+    assert.throws(() => GameData.restore(bad), /войска союзников/);
+});
