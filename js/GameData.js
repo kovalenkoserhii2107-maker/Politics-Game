@@ -504,22 +504,27 @@ class GameData {
         return result;
     }
 
+    // Предложение живому игроку: решает он сам, после хода. Условия ИИ
+    // (отношения, сила) и цена во влиянии здесь не нужны — договариваются люди.
     proposeToHuman(target, kind) {
-        const p = this.playerCountry, me = this.countries[p];
+        const p = this.playerCountry;
         if (kind === 'tribute') return { ok: false, reason: 'Дань с живого игрока не требуют — договоритесь с ним' };
-        const cost = { deal: DIPLOMACY.DEAL_COST, pact: DIPLOMACY.PACT_COST, alliance: DIPLOMACY.ALLIANCE_COST, peace: RULES.PEACE_COST }[kind];
-        if (kind !== 'peace' && this.isAtWar(p, target)) return { ok: false, reason: 'Вы воюете' };
+        if (kind !== 'peace' && this.isAtWar(p, target)) return { ok: false, reason: 'Вы воюете — сначала мир' };
         if (kind === 'deal' && Diplomacy.hasDeal(this, p, target)) return { ok: false, reason: 'Договор уже есть' };
         if (kind === 'deal' && Diplomacy.dealCount(this, p) >= DIPLOMACY.DEAL_MAX) return { ok: false, reason: `Не больше ${DIPLOMACY.DEAL_MAX} торговых договоров` };
         if (kind === 'pact' && Diplomacy.pactLeft(this, p, target)) return { ok: false, reason: 'Пакт уже действует' };
         if (kind === 'alliance' && Diplomacy.isAllied(this, p, target)) return { ok: false, reason: 'Уже союзники' };
         const seat = this.seatOf(target);
         if (!seat) return { ok: false, reason: 'Нельзя' };
-        if (seat.decisions.some(x => x.type === kind && x.from === p)) return { ok: false, reason: 'Предложение уже отправлено' };
-        if (me.influence < cost) return { ok: false, reason: `Нужно ${cost} влияния` };
-        me.influence -= cost;
+        if (this.proposalPending(target, kind)) return { ok: false, reason: 'Предложение уже отправлено — ждём ответа' };
         seat.decisions.push({ type: kind, from: p });
         return { ok: true, pending: true };
+    }
+
+    // Уже ждёт ли игрок target ответа на такое предложение от нас.
+    proposalPending(target, kind) {
+        const seat = this.seatOf(target);
+        return !!seat && seat.decisions.some(x => x.type === kind && x.from === this.playerCountry);
     }
 
     // Предложение мира: ИИ решает сразу, человек — после хода.

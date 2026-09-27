@@ -23,7 +23,7 @@ class UIManager {
         bind('close-science-btn', () => this.hideModal('science-modal'));
         bind('close-summary-btn', () => this.closeSummary());
 
-        for (const id of ['history-modal', 'gov-modal', 'diplo-modal', 'campaign-modal']) {
+        for (const id of ['history-modal', 'gov-modal', 'diplo-modal', 'campaign-modal', 'science-modal', 'chat-modal']) {
             const modal = document.getElementById(id);
             if (modal) modal.addEventListener('click', e => { if (e.target === modal) this.hideModal(id); });
         }
@@ -246,8 +246,17 @@ class UIManager {
         const me = data.countries[player];
         const meter = this.relationMeter(data, countryId);
 
+        const human = data.isHuman(countryId);
         if (data.isAtWar(player, countryId)) {
             const info = data.warInfo(player, countryId);
+            if (human) {
+                const sent = data.proposalPending(countryId, 'peace');
+                return `${meter}
+                <div class="war-summary">Война идёт ${info.turns} ход. · заняли ${info.taken} · потеряли ${info.lost}</div>
+                <button class="action-btn peace" data-action="peace" data-country="${countryId}" ${sent ? 'disabled' : ''}>
+                    🕊️ ${sent ? 'Мир предложен — ждём ответа' : 'Предложить мир'} <small>решит игрок · бесплатно</small>
+                </button>`;
+            }
             const can = me.influence >= RULES.PEACE_COST;
             return `${meter}
                 <div class="war-summary">Война идёт ${info.turns} ход. · заняли ${info.taken} · потеряли ${info.lost}</div>
@@ -265,6 +274,11 @@ class UIManager {
             </button>`;
         const infl = n => `${n} 🔷`;
         const offer = (kind, icon, name, cost, benefit) => {
+            // живому игроку — всегда можно предложить, решит он сам
+            if (human) {
+                const sent = data.proposalPending(countryId, kind);
+                return row(kind, icon, name, sent ? '' : 'бесплатно', sent ? 'Отправлено — ждём ответа после хода' : `${benefit} · решит игрок`, !sent);
+            }
             const answer = Diplomacy.willAccept(data, countryId, player, kind);
             if (me.influence < cost) return row(kind, icon, name, infl(cost), `Нужно ${cost} влияния`, false);
             return row(kind, icon, name, infl(cost), answer.likely ? `${benefit} · согласятся` : answer.reason, answer.likely);
@@ -284,11 +298,13 @@ class UIManager {
         if (Diplomacy.isAllied(data, player, countryId)) html += cancel('alliance', '🛡️', 'Выйти из союза');
         else html += offer('alliance', '🛡️', 'Оборонительный союз', DIPLOMACY.ALLIANCE_COST, 'Защищаете друг друга');
 
-        const tribute = Diplomacy.willAccept(data, countryId, player, 'tribute');
-        const tributeNote = me.influence < DIPLOMACY.TRIBUTE_COST ? `Нужно ${DIPLOMACY.TRIBUTE_COST} влияния`
-            : tribute.likely ? `Заплатят ${this.money(Diplomacy.tributeAmount(data, countryId))} · отношения ${DIPLOMACY.TRIBUTE_RELATION}` : tribute.reason;
-        html += row('tribute', '💰', 'Потребовать дань', infl(DIPLOMACY.TRIBUTE_COST), tributeNote,
-            tribute.likely && me.influence >= DIPLOMACY.TRIBUTE_COST && !Diplomacy.isAllied(data, player, countryId));
+        const tribute = human ? null : Diplomacy.willAccept(data, countryId, player, 'tribute');
+        if (!human) {
+            const tributeNote = me.influence < DIPLOMACY.TRIBUTE_COST ? `Нужно ${DIPLOMACY.TRIBUTE_COST} влияния`
+                : tribute.likely ? `Заплатят ${this.money(Diplomacy.tributeAmount(data, countryId))} · отношения ${DIPLOMACY.TRIBUTE_RELATION}` : tribute.reason;
+            html += row('tribute', '💰', 'Потребовать дань', infl(DIPLOMACY.TRIBUTE_COST), tributeNote,
+                tribute.likely && me.influence >= DIPLOMACY.TRIBUTE_COST && !Diplomacy.isAllied(data, player, countryId));
+        }
 
         const check = data.canDeclareWar(player, countryId);
         return `${meter}${this.helpBlock(data, countryId)}<div class="diplo-acts">${html}</div>
@@ -750,7 +766,9 @@ class UIManager {
             const info = data.warInfo(player, cc);
             return `<div class="diplo-row">
                 <div><b>${name(cc)}</b><div class="muted">${info.turns} ход. · заняли ${info.taken} · потеряли ${info.lost}</div></div>
-                <button class="mini-btn peace" data-action="peace" data-country="${cc}" ${me.influence >= RULES.PEACE_COST ? '' : 'disabled'}>Мир · ${RULES.PEACE_COST} 🔷</button>
+                ${data.isHuman(cc)
+                    ? `<button class="mini-btn peace" data-action="peace" data-country="${cc}" ${data.proposalPending(cc, 'peace') ? 'disabled' : ''}>${data.proposalPending(cc, 'peace') ? 'Ждём ответа' : 'Мир?'}</button>`
+                    : `<button class="mini-btn peace" data-action="peace" data-country="${cc}" ${me.influence >= RULES.PEACE_COST ? '' : 'disabled'}>Мир · ${RULES.PEACE_COST} 🔷</button>`}
             </div>`;
         }).join('') : '<div class="muted">Вы ни с кем не воюете.</div>';
 
