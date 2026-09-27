@@ -541,6 +541,8 @@ class AI {
         const ratio = d.calculateMilitaryPower(ai) / Math.max(1, d.calculateMilitaryPower(other));
         const score = info.taken - info.lost;
         if (Nuclear.isPower(d, other) && !Nuclear.isPower(d, ai)) return true;
+        // под санкциями или эмбарго ООН воевать дорого
+        if ((Council.sanctioned(d, ai) || Council.embargoed(d, ai)) && score <= 2) return true;
         return score < 0 || ratio < 0.9 || (info.turns >= 12 && score <= 0) || (info.turns >= 6 && Diplomacy.relation(d, ai, other) > -30);
     }
 

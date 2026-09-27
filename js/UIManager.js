@@ -444,6 +444,9 @@ class UIManager {
             this.tag(`${stats.regions} обл.`),
             Nuclear.isPower(data, country.id) ? this.tag(`☢️ Ядерная держава${isPlayer || data.nuclear.founders.includes(country.id) ? ` · ${Nuclear.describe(data, country.id)}` : ''}`, 'war') : '',
             Council.sanctioned(data, country.id) ? this.tag(`🚫 Санкции (ещё ${data.sanctions[country.id] - data.turn} ход.)`, 'truce') : '',
+            Council.embargoed(data, country.id) ? this.tag('🔒 Эмбарго ООН', 'truce') : '',
+            data.un.peacekeepers[country.id] ? this.tag('🪖 Миротворцы ООН', '') : '',
+            Council.taken(data, country.id) ? this.tag(`Захватила: ${Council.regionsWord(Council.taken(data, country.id))}`, 'war') : '',
             Unrest.civilWar(data, country.id) ? this.tag('🔥 Гражданская война', 'war')
                 : Unrest.revoltsOf(data, country.id).length ? this.tag(`🔥 Восстаний: ${Unrest.revoltsOf(data, country.id).length}`, 'war') : '',
         ].join('');
@@ -481,6 +484,7 @@ class UIManager {
         if (data.isCapital(region.id)) tags.push(this.tag('🏛️ Столица', 'capital'));
         if (region.owner !== region.originalOwner) tags.push(this.tag(`Оккупирована (${data.countries[region.originalOwner].name})`, 'war'));
         tags.push(this.tag(`Лояльность ${Math.round(region.loyalty * 100)}%`, region.loyalty < 0.6 ? 'war' : ''));
+        if (Council.peacekeeping(data, region) > 1) tags.push(this.tag('🪖 Миротворцы ООН: оборона +30%', ''));
         if (Nuclear.fallout(data, region.id)) tags.push(this.tag(`☢️ Заражение: ещё ${data.nuclear.fallout[region.id] - data.turn} ход., налогов нет`, 'war'));
         if (data.revolts[region.id]) tags.push(this.tag('🔥 Восстание', 'war'));
         else if ((region.unrest || 0) >= REVOLT.WARN) tags.push(this.tag(`⚠️ Недовольство ${Math.round(region.unrest * 100)}%`, 'truce'));
@@ -1065,23 +1069,49 @@ class UIManager {
             <p class="hint">Очки: 10 за область, население, налоги и казна, технологии, сила армии. Большие величины считаются «под корнем» — маленькая страна может обогнать большую.</p>`;
     }
 
-    // Мировой совет: что на голосовании и кто под санкциями.
+    // ООН: что на голосовании, ваше место, действующие меры, состав
+    // Совбеза и последние резолюции.
     councilBlock(data) {
+        const me = data.playerCountry;
+        const name = cc => this.escape(data.countries[cc].name);
         const lines = [];
         const c = data.council;
         if (c) {
-            const title = c.target === data.playerCountry ? 'санкции против вас' : COUNCIL_KINDS[c.kind].title(data, c);
-            const mine = c.target === data.playerCountry ? 'ваш голос — против; соседей склонят подарки и договоры'
-                : data.playerCountry in c.votes ? (c.votes[data.playerCountry] ? 'вы — за' : 'вы — против') : 'ваш голос ещё не отдан';
-            lines.push(`🏛️ На голосовании совета: <b>${this.escape(title)}</b> · ${mine}`);
+            const kind = COUNCIL_KINDS[c.kind];
+            const body = kind.body === 'sc' ? 'Совбез' : 'Генассамблея';
+            const mine = c.target === me && kind.targeted ? 'против вас; ваш голос — против'
+                : !Council.canVote(data, me, c) ? 'вы не голосуете — вы не в Совбезе'
+                : me in c.votes ? (c.votes[me] ? 'вы — за' : 'вы — против') : 'ваш голос ещё не отдан';
+            lines.push(`${kind.icon} На голосовании (${body}): <b>${this.escape(kind.title(data, c))}</b> · ${mine}`);
+        } else {
+            const next = data.turn < COUNCIL.FIRST ? COUNCIL.FIRST : COUNCIL.FIRST + Math.ceil((data.turn - COUNCIL.FIRST + 1) / COUNCIL.EVERY) * COUNCIL.EVERY;
+            lines.push(`🗓️ Следующая сессия — ход ${next}.`);
         }
-        const until = data.sanctions || {};
-        for (const cc of Object.keys(until).filter(x => Council.sanctioned(data, x))) {
-            const who = cc === data.playerCountry ? ' против вас' : `: ${this.escape(data.countries[cc].name)}`;
-            lines.push(`🚫 Санкции${who} — торговля −${Math.round((1 - COUNCIL.SANCTION_TRADE) * 100)}%, ещё ${until[cc] - data.turn} ход.`);
+        const perm = COUNCIL.SC_PERMANENT.includes(me), elected = data.un.seats.includes(me);
+        lines.push(perm ? '🏛️ Вы — постоянный член Совбеза: ваше «против» — вето.'
+            : elected ? `🏛️ Вы в Совбезе до хода ${data.un.term}: ваш голос нужен для санкций и миротворцев.`
+            : '🏛️ Вы не в Совбезе: голосуете в Генассамблее. Выборы — раз в 16 ходов.');
+        const left = until => `ещё ${until - data.turn} ход.`;
+        for (const cc of Object.keys(data.sanctions || {}).filter(x => Council.sanctioned(data, x))) {
+            lines.push(`🚫 Санкции${cc === me ? ' против вас' : `: ${name(cc)}`} — торговля −${Math.round((1 - COUNCIL.SANCTION_TRADE) * 100)}%, ${left(data.sanctions[cc])}`);
         }
-        if (!c && !lines.length) lines.push(`🏛️ Мировой совет собирается раз в ${COUNCIL.EVERY} ходов с ${COUNCIL.FIRST}-го: санкции против захватчика чужих земель или всеобщее перемирие.`);
-        return `<div class="council-box">${lines.map(l => `<div>${l}</div>`).join('')}</div>`;
+        for (const cc of Object.keys(data.un.embargo).filter(x => Council.embargoed(data, x))) {
+            lines.push(`🔒 Оружейное эмбарго${cc === me ? ' против вас' : `: ${name(cc)}`} — без новых родов войск и модернизации, ${left(data.un.embargo[cc])}`);
+        }
+        for (const [cc, p] of Object.entries(data.un.peacekeepers)) {
+            lines.push(`🪖 Миротворцы в ${cc === me ? 'вашей стране' : name(cc)} на границе с ${name(p.against)} — оборона +${Math.round((COUNCIL.PEACEKEEPING_DEFENSE - 1) * 100)}%, ${left(p.until)}`);
+        }
+        for (const r of data.un.reparations) {
+            lines.push(`⚖️ Репарации: ${name(r.from)} → ${name(r.to)}, ${Council.money(r.amount)} за ход, осталось ${r.left}`);
+        }
+        const members = Council.members(data);
+        const record = data.un.record.slice(-5).reverse();
+        return `<div class="council-box un-box"><div class="un-title">🇺🇳 ООН</div>${lines.map(l => `<div>${l}</div>`).join('')}
+            <details class="un-more"><summary>Совбез и последние резолюции</summary>
+                <div class="un-members">${members.map(cc => `<span class="un-member${COUNCIL.SC_PERMANENT.includes(cc) ? ' perm' : ''}${cc === me ? ' me' : ''}">${COUNCIL.SC_PERMANENT.includes(cc) ? '★ ' : ''}${name(cc)}</span>`).join('')}</div>
+                ${record.length ? record.map(r => `<div class="un-rec">${r.passed ? '✅' : '❌'} ход ${r.turn}: ${this.escape(r.title)}${r.veto ? ` · вето: ${r.veto.map(name).join(', ')}` : ''}</div>`).join('') : '<div class="muted">Резолюций ещё не было.</div>'}
+                <p class="hint">Совбез: 5 постоянных членов с вето и 10 выборных; решение — при 60% «за» и без «против» постоянных. Санкции, эмбарго, миротворцы, принуждение к миру и прекращение огня решает Совбез; вето переносит дело в Генассамблею — там могут осудить агрессора. Помощь, репарации и всеобщее перемирие — Генассамблея. Агрессор — кто захватил чужое в начатой им войне; кто отбился и отбросил напавшего, агрессором не считается.</p>
+            </details></div>`;
     }
 
     // --- дипломатия ----------------------------------------------------------------------------
@@ -1353,7 +1383,7 @@ class UIManager {
                 html += this.researchRow(kind, `${k.icon} Собрать: ${k.name.toLowerCase()}`,
                     `${k.turns} ход. · содержание ${this.money(k.upkeep)}/ход`, k.cost, player.money).replace('data-action="research"', 'data-action="nuke-build"');
             }
-            if (!data.nuclear.powers.includes(player.id)) html += '<p class="hint">Первая боеголовка — это испытание: отношения со всеми ухудшатся, совет обсудит санкции.</p>';
+            if (!data.nuclear.powers.includes(player.id)) html += '<p class="hint">Первая боеголовка — это испытание: отношения со всеми ухудшатся, Совбез ООН обсудит санкции.</p>';
         }
         return html + '</div>';
     }

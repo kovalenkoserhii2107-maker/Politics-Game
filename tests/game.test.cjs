@@ -719,19 +719,21 @@ test('chronicle: records every turn for humans and top AI, survives save, reject
     assert.equal(GameData.restore(old).chronicle.turns.length, 1, 'старое сохранение начинает хронику заново');
 });
 
-test('council: convenes on schedule, humans vote, sanctions cut trade and expire, truce ends wars', () => {
+test('UN: the Security Council puts sanctions on the aggressor; humans on the council vote; sanctions cut trade and expire; truce ends wars', () => {
     const { GameData, GameLoop, AI, Council, COUNCIL, Economy, Diplomacy } = engine();
     const d = new GameData('DE', { humans: ['PL'] });
-    // Германия захватила три области Франции
+    d.un.seats = ['PL', 'IT', 'ES', 'NL', 'BE', 'SE', 'NO', 'DK', 'AT', 'CZ'];
+    // Германия напала на Францию и захватила три области
     d.startWar('DE', 'FR');
     for (const r of d.getCountryRegions('FR').filter(r => r.id !== d.countries.FR.capital).slice(0, 3)) d.setOwner(r.id, 'DE');
     assert.equal(Council.aggressor(d), 'DE');
     d.turn = COUNCIL.FIRST;
+    const item = Council.agenda(d)[0];
+    assert.equal(item.kind, 'sanctions');
+    assert.equal(item.target, 'DE');
     const events = [];
-    Council.convene(d, events);
-    assert.equal(d.council.kind, 'sanctions');
-    assert.equal(d.council.target, 'DE');
-    assert.ok(events.some(e => e.message.includes('Мировой совет')));
+    Council.open(d, item, events);
+    assert.ok(events.some(e => e.message.includes('Совбез ООН')));
     assert.equal(d.decisions.length, 0, 'цель санкций не голосует');
     assert.equal(d.seatOf('PL').decisions[0].type, 'council');
     // Польша голосует «за» — командой, как в сетевой игре
@@ -743,8 +745,8 @@ test('council: convenes on schedule, humans vote, sanctions cut trade and expire
     assert.equal(d.council.votes.DE, false, 'голос цели — против сам');
     const back = GameData.restore(JSON.parse(JSON.stringify(d.serialize())));
     assert.equal(JSON.stringify(back.council), JSON.stringify(d.council));
-    // соседи Германии не любят захватчиков: принимают
-    for (const cc of d.neighbourCountries('DE')) if (!d.isHuman(cc)) Diplomacy.changeRelation(d, cc, 'DE', -50);
+    // члены Совбеза не любят захватчиков: принимают
+    for (const cc of Council.members(d)) if (!d.isHuman(cc)) { Diplomacy.changeRelation(d, cc, 'DE', -50); delete d.deals[d.pairKey(cc, 'DE')]; delete d.alliances[d.pairKey(cc, 'DE')]; }
     const tradeBefore = Economy.runMarkets(GameData.restore(JSON.parse(JSON.stringify(d.serialize())))).DE;
     d.turn++;
     const out = [];
@@ -758,11 +760,12 @@ test('council: convenes on schedule, humans vote, sanctions cut trade and expire
     d.turn += COUNCIL.SANCTION_TURNS;
     Council.resolve(d, out);
     assert.equal(Council.sanctioned(d, 'DE'), false);
-    // перемирие: захватчик под санкциями не выбирается повторно, войн много
+    // всеобщее перемирие — Генассамблея, голосуют все
     const w = new GameData('FR');
     w.startWar('FR', 'ES'); w.startWar('IT', 'AT');
-    w.turn = COUNCIL.FIRST; Council.convene(w, []);
-    assert.equal(w.council.kind, 'truce');
+    w.turn = COUNCIL.FIRST;
+    Council.open(w, { kind: 'truce' }, []);
+    assert.equal(w.decisions[0].kind, 'truce');
     w.act('answerDecision', true);
     w.turn++; const r2 = Council.resolve(w, []);
     assert.equal(r2.passed, true);
@@ -774,7 +777,7 @@ test('council: convenes on schedule, humans vote, sanctions cut trade and expire
     g.turn = COUNCIL.FIRST - 1; g.startWar('IT', 'AT');
     const rep = loop.resolveTurn();
     assert.ok(g.council, 'созван в ходе');
-    assert.ok(rep.UA.turnData.events.some(m => m.includes('Мировой совет')));
+    assert.ok(rep.UA.turnData.events.some(m => m.includes('ООН')));
     const bad = g.serialize(); bad.council.council.kind = 'nope';
     assert.throws(() => GameData.restore(bad));
 });
@@ -817,25 +820,32 @@ test('a country with debt that loses its last region keeps a finite treasury; br
     assert.throws(() => GameData.restore(bad), /страна KG/);
 });
 
-test('council: the sanctioned human does not vote against themselves', () => {
+test('UN: the target does not vote against itself; a permanent member target vetoes and the case goes to the General Assembly', () => {
     const { GameData, Council, COUNCIL } = engine(), d = new GameData('FR', { humans: ['DE'] });
+    d.un.seats = ['DE', 'IT', 'PL', 'NL', 'BE', 'SE', 'NO', 'DK', 'AT', 'CZ'];
     d.startWar('FR', 'ES');
     for (const r of d.getCountryRegions('ES').filter(r => r.id !== d.countries.ES.capital).slice(0, 3)) d.setOwner(r.id, 'FR');
     d.turn = COUNCIL.FIRST;
     const events = [];
-    Council.convene(d, events);
+    Council.open(d, Council.agenda(d).find(x => x.kind === 'sanctions'), events);
     assert.equal(d.council.target, 'FR');
     assert.equal(d.decisions.filter(x => x.type === 'council').length, 0, 'Франции не предлагают голосовать против себя');
-    assert.equal(d.seatOf('DE').decisions.filter(x => x.type === 'council').length, 1, 'Германия голосует');
+    assert.equal(d.seatOf('DE').decisions.filter(x => x.type === 'council').length, 1, 'Германия в Совбезе голосует');
     assert.equal(d.council.votes.FR, false, 'голос цели — против');
-    assert.ok(events.some(e => e.for === 'FR' && e.message.includes('против вас') && e.message.includes('3 области')));
-    assert.ok(events.some(e => e.exceptFor === 'FR' && e.message.includes('созван')));
+    assert.ok(events.some(e => e.for === 'FR' && e.message.includes('против вас') && e.message.includes('3 области') && e.message.includes('вето')));
+    assert.ok(events.some(e => e.exceptFor === 'FR' && e.message.includes('на голосовании')));
     assert.equal(Council.vote(d, 'FR', true), false, 'и командой «за» тоже нельзя');
-    assert.equal(d.council.votes.FR, false);
     // старое сохранение, где решение уже лежит у цели, — отвечается «против» само
     d.decisions.push({ type: 'council', from: 'FR', kind: 'sanctions' });
     d.answerDecision(true);
     assert.equal(d.council.votes.FR, false);
+    // Франция — постоянный член: её «против» — вето, дело уходит в Ассамблею
+    d.turn++;
+    const out = [];
+    assert.equal(Council.resolve(d, out).passed, false);
+    assert.ok(out.some(e => e.message.includes('Франция')));
+    assert.ok(d.un.vetoed.some(v => v.target === 'FR'));
+    assert.ok(Council.agenda(d).some(x => x.kind === 'condemn' && x.target === 'FR'));
     assert.equal(Council.regionsWord(1) + '|' + Council.regionsWord(21) + '|' + Council.regionsWord(12) + '|' + Council.regionsWord(5), '1 область|21 область|12 областей|5 областей');
 });
 
@@ -970,7 +980,10 @@ test('nuclear: real powers start armed; research, build, first test alarms the w
     assert.ok(Diplomacy.relation(d, 'UA', 'US') - relUS < Diplomacy.relation(d, 'UA', 'JP') - relJP, 'ядерные державы — сильнее прочих');
     assert.ok(d.countryBalance('UA').upkeep >= upkeep0 + NUCLEAR.KINDS.atom.upkeep - 1, 'арсенал стоит содержания');
     // совет ставит на голосование санкции за программу
-    d.turn = 8; const events = []; Council.convene(d, events);
+    d.turn = 10; const events = [];
+    const item = Council.agenda(d).find(x => x.kind === 'nuclear');
+    assert.equal(item.target, 'UA');
+    Council.open(d, item, events);
     assert.equal(d.council.kind, 'nuclear');
     assert.equal(d.council.target, 'UA');
     assert.equal(d.council.votes.UA, false, 'против себя не голосуют');
@@ -1037,4 +1050,163 @@ test('nuclear: deterrence — the AI does not start wars on nuclear powers and s
     const e = GameData.restore(old);
     assert.equal(Nuclear.describe(e, 'RU'), Nuclear.describe(d, 'RU'));
     assert.ok(e.countries.FR.techs.includes('hydrogen'));
+});
+
+test('UN: who is the aggressor — a defender who pushed the invader back is not; treaties and secession are not conquest', () => {
+    const { GameData, Council, COUNCIL } = engine();
+    const d = new GameData('UA', { scenario: 'war2024' });
+    // Россия напала; Украина отбилась и заняла три области России
+    const ru = d.getCountryRegions('RU').filter(r => d.getNeighbors(r.id).some(id => d.regions[id]?.owner === 'UA')).slice(0, 3);
+    for (const r of ru) d.setOwner(r.id, 'UA');
+    assert.equal(Council.taken(d, 'UA'), 0, 'отбить у напавшего — не агрессия');
+    assert.equal(Council.aggressor(d), null);
+    // и после мира тоже
+    d.makePeace('UA', 'RU');
+    assert.equal(Council.taken(d, 'UA'), 0);
+    d.turn = COUNCIL.FIRST;
+    assert.ok(!Council.agenda(d).some(x => x.target === 'UA' && ['sanctions', 'embargo', 'enforce', 'condemn'].includes(x.kind)));
+    // Россия проиграла начатую войну — Генассамблея может назначить репарации
+    assert.ok(Council.agenda(d).some(x => x.kind === 'reparations' && x.target === 'RU' && x.victim === 'UA'));
+    // союзник жертвы, вступивший по договору, — тоже защитник
+    const e = new GameData('PL');
+    e.alliances[e.pairKey('FR', 'BE')] = 0;
+    e.startWar('DE', 'BE');
+    assert.ok(e.isAtWar('FR', 'DE'));
+    for (const r of e.getCountryRegions('DE').slice(0, 3)) e.setOwner(r.id, 'FR');
+    assert.equal(Council.taken(e, 'FR'), 0);
+    // а напавший — агрессор
+    for (const r of e.getCountryRegions('BE').filter(r => r.id !== e.countries.BE.capital).slice(0, 1)) e.setOwner(r.id, 'DE');
+    assert.equal(Council.taken(e, 'DE'), Math.min(1, e.getCountryRegions('DE').filter(r => r.originalOwner === 'BE').length));
+    // область, отданная по договору, — не захват
+    const f = new GameData('PL');
+    const gift = f.getCountryRegions('CZ').find(r => r.id !== f.countries.CZ.capital);
+    f.handoverRegion(gift.id, 'CZ', 'DE');
+    assert.equal(Council.taken(f, 'DE'), 0);
+    // а отнятая в бою после этого — снова захват
+    f.setOwner(gift.id, 'CZ'); f.startWar('DE', 'CZ'); f.setOwner(gift.id, 'DE');
+    assert.equal(Council.taken(f, 'DE'), 1, 'отнятая в бою — захват');
+});
+
+test('UN measures: embargo, peacekeepers, ceasefire, enforcement coalition, condemnation, aid and reparations', () => {
+    const { GameData, Council, COUNCIL, Diplomacy } = engine();
+    const d = new GameData('PL', { humans: ['UA'] });
+    const apply = (item, ayes = []) => Council.apply(d, { votes: {}, victim: null, against: null, pair: null, target: null, ...item }, ayes, []);
+    // эмбарго: новые рода войск и модернизация закрыты
+    d.startWar('DE', 'CZ');
+    const de = d.countries.DE;
+    de.techs.push('motorized'); de.money = 1e9;
+    const region = d.getCountryRegions('DE')[0].id;
+    apply({ kind: 'embargo', target: 'DE', victim: 'CZ' });
+    assert.ok(Council.embargoed(d, 'DE'));
+    assert.equal(d.queueRecruitment(region, 'mech', 1, 'DE').ok, false);
+    assert.equal(d.queueRecruitment(region, 'infantry', 1, 'DE').ok, true, 'пехоту — можно');
+    assert.equal(d.research('DE', 'infantry').ok, false);
+    // миротворцы: приграничная область жертвы держится крепче
+    const border = d.getCountryRegions('CZ').find(r => d.getNeighbors(r.id).some(id => d.regions[id]?.owner === 'DE'));
+    const before = d.defensePower(border, d.emptyArmy());
+    apply({ kind: 'peacekeepers', target: 'CZ', against: 'DE' });
+    assert.ok(Math.abs(d.defensePower(border, d.emptyArmy()) / before - COUNCIL.PEACEKEEPING_DEFENSE) < 1e-9);
+    // прекращение огня
+    apply({ kind: 'ceasefire', pair: ['CZ', 'DE'] });
+    assert.equal(d.isAtWar('DE', 'CZ'), false);
+    assert.ok(d.truceLeft('DE', 'CZ') > 0);
+    // принуждение к миру: соседи агрессора из голосовавших «за» вступают в войну — и это не агрессия
+    d.startWar('DE', 'CZ');
+    const ayes = d.neighbourCountries('DE').filter(cc => cc !== 'CZ' && !d.isHuman(cc) && d.countries[cc].playable);
+    apply({ kind: 'enforce', target: 'DE', victim: 'CZ' }, ayes);
+    const coalition = ayes.filter(cc => d.isAtWar(cc, 'DE'));
+    assert.ok(coalition.length >= 1 && coalition.length <= COUNCIL.ENFORCE_ALLIES);
+    for (const r of d.getCountryRegions('DE').filter(r => r.id !== de.capital).slice(0, 2)) d.setOwner(r.id, coalition[0]);
+    assert.equal(Council.taken(d, coalition[0]), 0);
+    assert.ok(Council.sanctioned(d, 'DE'));
+    // осуждение Ассамблеей
+    de.influence = 50;
+    const rel = Diplomacy.relation(d, 'DE', 'FR');
+    apply({ kind: 'condemn', target: 'DE' }, ['FR']);
+    assert.equal(de.influence, 50 - COUNCIL.CONDEMN_INFLUENCE);
+    assert.equal(Diplomacy.relation(d, 'DE', 'FR'), Math.max(-100, rel + COUNCIL.CONDEMN_RELATION));
+    // гуманитарная помощь
+    const money = d.countries.UA.money;
+    apply({ kind: 'aid', target: 'UA' });
+    assert.ok(d.countries.UA.money > money);
+    // репарации: каждый ход, пока не выплачено
+    apply({ kind: 'reparations', target: 'DE', victim: 'CZ' });
+    const cz = d.countries.CZ.money, per = d.un.reparations[0].amount;
+    const events = [];
+    d.turn++; Council.upkeep(d, events);
+    assert.equal(d.countries.CZ.money, cz + per);
+    assert.equal(d.un.reparations[0].left, COUNCIL.REPARATION_TURNS - 1);
+    // сроки: всё снимается само
+    d.turn += 20; Council.upkeep(d, events);
+    assert.equal(Council.embargoed(d, 'DE'), false);
+    assert.equal(Object.keys(d.un.peacekeepers).length, 0);
+    assert.ok(events.some(e => e.message.includes('эмбарго снято')));
+    // выборы в Совбез раз в срок; сохранение
+    assert.equal(d.un.seats.length, COUNCIL.SC_ELECTED);
+    assert.ok(!d.un.seats.some(cc => COUNCIL.SC_PERMANENT.includes(cc)));
+    const back = GameData.restore(JSON.parse(JSON.stringify(d.serialize())));
+    assert.equal(JSON.stringify(back.un), JSON.stringify(d.un));
+    // партия до ООН: летопись берётся из идущих войн, Совбез выбирается заново
+    const old = d.serialize(); delete old.council.un;
+    const o = GameData.restore(old);
+    assert.equal(o.un.seats.length, COUNCIL.SC_ELECTED);
+    assert.equal(o.un.wars[o.pairKey('DE', 'CZ')].aggressor, 'DE');
+});
+
+test('UN events: peacekeepers request, IAEA, border incident, tribunal and UN fund work both ways', () => {
+    const { GameData, Council, Events, EVENTS, Tech, Diplomacy, Nuclear } = engine();
+    const fresh = () => {
+        const d = new GameData('PL');
+        d.startWar('DE', 'CZ');
+        d.un.peacekeepers.CZ = { against: 'DE', until: d.turn + 5 };
+        return d;
+    };
+    const run = (d, key, choice) => {
+        const decision = { type: 'event', from: 'PL', event: key, ctx: EVENTS[key].when(d, 'PL') };
+        assert.ok(decision.ctx, `${key}: условие выполнено`);
+        assert.ok(Events.validDecision(JSON.parse(JSON.stringify(decision))), `${key}: решение сохраняется`);
+        const text = Events.apply(d, decision, choice);
+        assert.equal(typeof text, 'string');
+        return { text, ctx: decision.ctx };
+    };
+    // миротворцы
+    let d = fresh();
+    const home = d.regions[d.countries.PL.capital];
+    home.army.infantry = 20;
+    const infl = d.countries.PL.influence;
+    run(d, 'un_peacekeepers', true);
+    assert.equal(home.army.infantry, 15);
+    assert.equal(d.countries.PL.influence, Math.min(100, infl + 8));
+    // МАГАТЭ: только у тех, кто сам завёл бомбу
+    d = fresh();
+    assert.equal(EVENTS.iaea.when(d, 'PL'), null);
+    Tech.grant(d.countries.PL, 'nuclear');
+    d.nuclear.arsenal.PL = { atom: 1, hydrogen: 0 };
+    run(d, 'iaea', false);
+    assert.ok(d.nuclear.council.includes('PL'), 'отказ — ООН обратит внимание');
+    // инцидент на границе
+    d = fresh();
+    run(d, 'border_incident', true);
+    run(d, 'border_incident', false);
+    // суд ООН: захваченная область возвращается
+    d = fresh();
+    d.startWar('PL', 'LT');
+    const lt = d.getCountryRegions('LT').find(r => r.id !== d.countries.LT.capital);
+    d.setOwner(lt.id, 'PL');
+    d.makePeace('PL', 'LT');
+    const { ctx } = run(d, 'tribunal', true);
+    assert.equal(d.regions[ctx.region].owner, 'LT');
+    assert.equal(Council.taken(d, 'PL'), 0);
+    // отказ — дело в Ассамблее
+    d.startWar('PL', 'LT');
+    d.setOwner(lt.id, 'PL');
+    d.makePeace('PL', 'LT');
+    run(d, 'tribunal', false);
+    assert.ok(d.un.vetoed.some(v => v.target === 'PL'));
+    // взнос в фонд ООН
+    d = fresh();
+    d.countries.PL.money = 1e9;
+    const rel = Diplomacy.relation(d, 'PL', 'CZ');
+    run(d, 'un_fund', true);
+    assert.ok(Diplomacy.relation(d, 'PL', 'CZ') > rel, 'жертва войны благодарна');
 });

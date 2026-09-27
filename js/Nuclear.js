@@ -173,7 +173,7 @@ class Nuclear {
         const toll = `Погибло около ${Nuclear.people(dead + splashDead)} человек, армия в области почти уничтожена, заражение на ${Nuclear.turns(k.fallout)}.`;
         for (const h of d.humans) {
             let message;
-            if (h === cc) message = `${k.icon} Ваш ${retaliation ? 'ответный ' : ''}ядерный удар по области ${place}. ${toll}${retaliation ? '' : ` Мировой совет ввёл против вас санкции на ${Nuclear.turns(NUCLEAR.SANCTION_TURNS)}.`}`;
+            if (h === cc) message = `${k.icon} Ваш ${retaliation ? 'ответный ' : ''}ядерный удар по области ${place}. ${toll}${retaliation ? '' : ` Совбез ООН ввёл против вас санкции на ${Nuclear.turns(NUCLEAR.SANCTION_TURNS)}.`}`;
             else if (h === victim) message = `${k.icon} ${who} нанесла ядерный удар по вашей области ${region.name}! ${toll}`;
             else message = `${k.icon} ${who} нанесла ${retaliation ? 'ответный ' : ''}ядерный удар: ${place}. ${toll}`;
             d.diploEvents.push({ type: 'nuclear', for: h, message });
@@ -227,7 +227,7 @@ class Nuclear {
         }
     }
 
-    // Новая ядерная держава: мир настораживается, совет обсудит санкции.
+    // Новая ядерная держава: мир настораживается, Совбез ООН обсудит санкции.
     static firstTest(d, cc, events) {
         const n = d.nuclear;
         const near = new Set(d.neighbourCountries(cc));
@@ -242,8 +242,8 @@ class Nuclear {
         n.powers.push(cc);
         if (!n.council.includes(cc)) n.council.push(cc);
         const name = d.countries[cc].name;
-        events.push({ type: 'nuclear', ...(d.isHuman(cc) ? { exceptFor: cc } : {}), message: `☢️ ${name} провела ядерное испытание и стала ядерной державой. Соседи встревожены, Мировой совет обсудит санкции.` });
-        if (d.isHuman(cc)) events.push({ type: 'nuclear', for: cc, message: `☢️ Испытание прошло успешно: вы — ядерная держава. Отношения со всеми ухудшились (с соседями и ядерными державами — сильнее), на ближайшем Мировом совете обсудят санкции. Зато напасть на вас теперь решится не всякий.` });
+        events.push({ type: 'nuclear', ...(d.isHuman(cc) ? { exceptFor: cc } : {}), message: `☢️ ${name} провела ядерное испытание и стала ядерной державой. Соседи встревожены, Совбез ООН обсудит санкции.` });
+        if (d.isHuman(cc)) events.push({ type: 'nuclear', for: cc, message: `☢️ Испытание прошло успешно: вы — ядерная держава. Отношения со всеми ухудшились (с соседями и ядерными державами — сильнее), в Совбезе ООН обсудят санкции. Зато напасть на вас теперь решится не всякий.` });
     }
 
     static describe(d, cc) {
@@ -252,17 +252,6 @@ class Nuclear {
         if (s.hydrogen) parts.push(`${NUCLEAR.KINDS.hydrogen.icon} ${s.hydrogen} термоядерных`);
         if (s.atom) parts.push(`${NUCLEAR.KINDS.atom.icon} ${s.atom} атомных`);
         return parts.join(', ') || 'пусто';
-    }
-
-    // Кого совет обсуждает за ядерную программу: самый свежий, кто ещё жив
-    // и не под санкциями.
-    static councilTarget(d) {
-        const list = d.nuclear.council;
-        while (list.length) {
-            const cc = list.shift();
-            if (d.countries[cc] && d.countries[cc].alive && !Council.sanctioned(d, cc)) return cc;
-        }
-        return null;
     }
 
     // --- ИИ ------------------------------------------------------------------
