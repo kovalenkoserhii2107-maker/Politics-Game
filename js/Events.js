@@ -161,6 +161,115 @@ const EVENTS = {
             { label: x => `Концессия · +${Ev.money(x.sale)}`, apply: (d, cc, x) => { d.countries[cc].money += x.sale; return `Казна +${Ev.money(x.sale)}`; } },
         ],
     },
+    // --- ООН и мир вокруг -------------------------------------------------
+    un_peacekeepers: {
+        icon: '🪖', title: 'ООН просит миротворцев',
+        when: (d, cc) => {
+            const mission = Object.entries(d.un.peacekeepers).find(([x, p]) => x !== cc && p.against !== cc && d.countries[x].alive && !d.isAtWar(cc, p.against));
+            const home = Ev.capital(d, cc);
+            return mission && home && home.army.infantry >= 8 ? { from: mission[0], infantry: 5 } : null;
+        },
+        text: (d, cc, x) => `Миссии ООН в стране ${d.countries[x.from].name} не хватает людей. Отправить ${x.infantry} пехоты из столицы — это уважение в мире и благодарность защищаемой страны, но и недовольство той, от кого её защищают.`,
+        options: [
+            { label: x => `Отправить ${x.infantry} пехоты · +8 влияния`, apply: (d, cc, x) => {
+                const r = Ev.capital(d, cc);
+                if (!r || r.army.infantry < x.infantry) return 'В столице не хватило пехоты';
+                r.army.infantry -= x.infantry;
+                d.countries[cc].influence = Math.min(RULES.INFLUENCE_MAX, d.countries[cc].influence + 8);
+                Diplomacy.changeRelation(d, cc, x.from, 10);
+                const p = d.un.peacekeepers[x.from];
+                if (p) Diplomacy.changeRelation(d, cc, p.against, -5);
+                return `Миротворцы отправлены: влияние +8, отношения со страной ${d.countries[x.from].name} +10`;
+            } },
+            { label: () => 'Отказать', apply: (d, cc, x) => { Diplomacy.changeRelation(d, cc, x.from, -3); return `Отношения со страной ${d.countries[x.from].name} −3`; } },
+        ],
+    },
+    iaea: {
+        icon: '🔬', title: 'Инспекторы МАГАТЭ',
+        when: (d, cc) => (Tech.has(d.countries[cc], 'nuclear') && !d.nuclear.founders.includes(cc) ? { cost: 0 } : null),
+        text: () => 'Международное агентство по атомной энергии просит пустить инспекторов на ядерные объекты. Согласие успокоит ядерные державы, но сборка боеголовок задержится на ход. Отказ насторожит их и привлечёт внимание ООН.',
+        options: [
+            { label: () => 'Пустить инспекторов', apply: (d, cc) => {
+                for (const x of d.nuclear.founders) if (d.countries[x].alive) Diplomacy.changeRelation(d, cc, x, 5);
+                const b = d.nuclear.building[cc];
+                if (b) b.left++;
+                return `Отношения с ядерными державами +5${b ? ', сборка — на ход дольше' : ''}`;
+            } },
+            { label: () => 'Отказать', apply: (d, cc) => {
+                for (const x of d.nuclear.founders) if (d.countries[x].alive) Diplomacy.changeRelation(d, cc, x, -8);
+                if (Nuclear.isPower(d, cc) && !d.nuclear.council.includes(cc)) d.nuclear.council.push(cc);
+                return 'Отношения с ядерными державами −8, ООН следит за вами';
+            } },
+        ],
+    },
+    border_incident: {
+        icon: '🚧', title: 'Инцидент на границе',
+        when: (d, cc) => {
+            const around = d.neighbourCountries(cc).filter(x => d.countries[x].playable && d.countries[x].alive && !d.isAtWar(cc, x) && !Diplomacy.isAllied(d, cc, x));
+            return around.length ? { from: around[Math.floor(Math.random() * around.length)] } : null;
+        },
+        text: (d, cc, x) => `На границе со страной ${d.countries[x.from].name} перестрелка, есть раненые. Кто начал — неясно. Можно передать дело в ООН (разберутся, но не обязательно в вашу пользу) или ответить демонстрацией силы.`,
+        options: [
+            { label: () => 'В ООН · −5 влияния', apply: (d, cc, x) => {
+                d.countries[cc].influence = Math.max(0, d.countries[cc].influence - 5);
+                if (Math.random() < 0.55) {
+                    for (const n of d.neighbourCountries(x.from)) if (n !== cc) Diplomacy.changeRelation(d, n, x.from, -3);
+                    d.countries[cc].influence = Math.min(RULES.INFLUENCE_MAX, d.countries[cc].influence + 12);
+                    Diplomacy.changeRelation(d, cc, x.from, -5);
+                    return `Комиссия ООН признала виновной ${d.countries[x.from].name}: ваше влияние +12, её репутация у соседей хуже`;
+                }
+                return 'Комиссия ООН не нашла виновных. Дело закрыто';
+            } },
+            { label: () => 'Показать силу', apply: (d, cc, x) => {
+                Diplomacy.changeRelation(d, cc, x.from, -10);
+                Ev.loyalty(d, cc, 0.03);
+                return `Отношения со страной ${d.countries[x.from].name} −10, лояльность дома +3%`;
+            } },
+        ],
+    },
+    tribunal: {
+        icon: '⚖️', title: 'Международный суд ООН',
+        when: (d, cc) => {
+            const r = Council.illegal(d, cc).find(x => !d.isAtWar(cc, x.originalOwner) && d.countries[x.originalOwner].alive && x.id !== d.countries[cc].capital);
+            return r ? { region: r.id, from: r.originalOwner } : null;
+        },
+        text: (d, cc, x) => `Суд ООН постановил: область ${d.regions[x.region].name} незаконно захвачена у страны ${d.countries[x.from].name} и должна быть возвращена. Подчиниться — потерять землю, но вернуть доверие. Отказ ударит по репутации, и Генассамблея может вас осудить.`,
+        options: [
+            { label: () => 'Вернуть область', apply: (d, cc, x) => {
+                const r = d.regions[x.region];
+                if (!r || r.owner !== cc) return 'Область уже не ваша';
+                d.handoverRegion(r.id, cc, x.from);
+                Diplomacy.changeRelation(d, cc, x.from, 15);
+                d.countries[cc].influence = Math.min(RULES.INFLUENCE_MAX, d.countries[cc].influence + 10);
+                return `${r.name} возвращена: отношения со страной ${d.countries[x.from].name} +15, влияние +10`;
+            } },
+            { label: () => 'Не подчиняться', apply: (d, cc, x) => {
+                for (const n of [...d.neighbourCountries(x.from), ...Diplomacy.allies(d, x.from)]) if (n !== cc) Diplomacy.changeRelation(d, cc, n, -5);
+                d.countries[cc].influence = Math.max(0, d.countries[cc].influence - 5);
+                d.un.vetoed.push({ target: cc, victim: x.from, turn: d.turn, by: cc });
+                return 'Отношения с соседями пострадавшей −5, влияние −5, дело передано в Генассамблею';
+            } },
+        ],
+    },
+    un_fund: {
+        icon: '🇺🇳', title: 'Взнос в фонд ООН',
+        when: (d, cc) => (d.countries[cc].money > Ev.week(d, cc) * 6 && d.wars.size ? { cost: Ev.round(Ev.week(d, cc) * 0.8) } : null),
+        text: (d, cc, x) => `ООН собирает деньги на помощь жертвам войн. Взнос ${Ev.money(x.cost)} улучшит отношения со всеми, кто сейчас воюет не по своей воле.`,
+        options: [
+            { label: x => `Внести · −${Ev.money(x.cost)} · +5 влияния`, apply: (d, cc, x) => {
+                d.countries[cc].money -= x.cost;
+                d.countries[cc].influence = Math.min(RULES.INFLUENCE_MAX, d.countries[cc].influence + 5);
+                let n = 0;
+                for (const [key, w] of Object.entries(d.un.wars)) {
+                    if (w.end !== null) continue;
+                    const victim = key.split('|').find(v => v !== w.aggressor);
+                    if (victim && victim !== cc && d.countries[victim].alive) { Diplomacy.changeRelation(d, cc, victim, 6); n++; }
+                }
+                return `Влияние +5${n ? `, отношения с жертвами войн (${n}) +6` : ''}`;
+            } },
+            { label: () => 'Не сейчас', apply: () => 'Взнос не внесён' },
+        ],
+    },
 };
 
 class Events {

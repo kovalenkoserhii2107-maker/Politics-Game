@@ -97,6 +97,7 @@ class GameData {
         for (const cc of this.humans.slice(1)) this.seats[cc] = GameData.emptySeat();
         this.build();
         if (!options.restoring) {
+            Council.elect(this);
             this.setupScenario();
             for (const cc of this.humans) {
                 const human = this.countries[cc];
@@ -382,6 +383,7 @@ class GameData {
         if (index >= 0) list.splice(index, 1);
         this.regionsByCountry[newOwner].push(regionId);
         region.owner = newOwner;
+        Council.clearLegit(this, regionId);
         if (this.isHuman(newOwner) && region.originalOwner !== newOwner) this.seatOf(newOwner).campaign.conquest = true;
         if (this.countries[old] && this.isAtWar(newOwner, old)) {
             Diplomacy.onConquest(this, newOwner, old);
@@ -576,6 +578,11 @@ class GameData {
         this.wars.set(this.pairKey(attacker, target), { start: this.turn, attacker });
         this.truces.delete(this.pairKey(attacker, target));
         const joined = Diplomacy.onWar(this, attacker, target);
+        // для ООН агрессор — тот, кто напал; союзники жертвы — защитники,
+        // а по мандату ООН война против агрессора — не агрессия
+        const mandate = this.un.record.some(r => r.kind === 'enforce' && r.passed && r.target === target && this.turn - r.turn <= COUNCIL.SANCTION_TURNS);
+        Council.recordWar(this, attacker, target, mandate ? target : attacker);
+        for (const ally of joined) Council.recordWar(this, ally, attacker, attacker);
         const name = cc => this.countries[cc].name;
         for (const ally of joined) {
             if (this.isHuman(ally)) this.diploEvents.push({ type: 'alliance', for: ally, message: `🛡️ ${name(attacker)} напала на вашего союзника ${name(target)} — по договору вы вступили в войну.` });
@@ -803,6 +810,7 @@ class GameData {
         if (home) for (const unitId of Object.keys(UnitsDB)) home.army[unitId] += region.army[unitId];
         region.army = this.emptyArmy();
         this.setOwner(regionId, to);
+        Council.markLegit(this, regionId, to);     // по договору — не захват
         region.loyalty = Math.min(region.loyalty, 0.7);
         return !!home;
     }
@@ -818,6 +826,7 @@ class GameData {
         const key = this.pairKey(a, b);
         this.wars.delete(key);
         this.truces.set(key, this.turn + RULES.TRUCE_TURNS);
+        Council.endWar(this, a, b);
         Diplomacy.onPeace(this, a, b);
         // приказы на атаку между бывшими врагами теряют смысл
         for (let i = this.orders.attacks.length - 1; i >= 0; i--) {
@@ -953,6 +962,9 @@ class GameData {
         if (!Tech.unitUnlocked(country, unitId)) {
             return { ok: false, reason: `Сначала исследуйте: ${TECH_TREE[unit.requires].name}` };
         }
+        if (unit.requires && Council.embargoed(this, countryId)) {
+            return { ok: false, reason: 'Оружейное эмбарго ООН: новые рода войск набирать нельзя' };
+        }
         if (unit.industryCost * amount > this.recruitCapacityLeft(regionId)) {
             return { ok: false, reason: 'Не хватает мощности индустрии области' };
         }
@@ -1002,6 +1014,7 @@ class GameData {
         if (!country || !Object.hasOwn(UnitsDB, unitId)) return { ok: false, reason: 'Неизвестный род войск' };
         const cost = this.techCost(countryId, unitId);
         if (cost === null) return { ok: false, reason: Tech.unitUnlocked(country, unitId) ? 'Максимальная ступень' : 'Род войск ещё не открыт' };
+        if (Council.embargoed(this, countryId)) return { ok: false, reason: 'Оружейное эмбарго ООН: модернизация запрещена' };
         if (country.money < cost) return { ok: false, reason: 'Недостаточно средств' };
         country.money -= cost;
         country.tech[unitId] = (country.tech[unitId] || 1) + 1;
@@ -1418,6 +1431,7 @@ class GameData {
         power *= RULES.DEFENSE_BONUS * Tech.factor(this.countries[target.owner], 'defense');
         if (this.countries[target.owner].capital === target.id) power *= 1 + RULES.CAPITAL_DEFENSE;
         power *= 0.7 + 0.3 * target.loyalty;
+        power *= Council.peacekeeping(this, target);
         return power;
     }
 

@@ -170,6 +170,7 @@ class Unrest {
         region.army = d.emptyArmy();
         const wasCapital = d.countries[owner].capital === regionId;
         d.setOwner(regionId, sponsor);
+        Council.markLegit(d, regionId, sponsor);   // ушла сама — не захват
         region.loyalty = 0.7;
         region.unrest = 0;
         if (wasCapital) d.onCapitalLost(owner);

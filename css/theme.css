@@ -705,3 +705,12 @@ body.hotseat-handoff #ui-layer > :not(#hotseat-screen) { visibility: hidden; }
 .nuke-btn:disabled { opacity: 0.45; }
 .sci-card.arsenal { border-color: rgba(255, 196, 0, 0.45); }
 #world-map .region.fallout { stroke: #facc15 !important; stroke-width: calc(var(--sw) * 2.5) !important; stroke-dasharray: calc(var(--sw) * 2) calc(var(--sw) * 2); filter: saturate(0.35) brightness(0.8); }
+
+/* ООН в «Дипломатии» */
+.un-box .un-title { font-weight: 700; color: var(--text); letter-spacing: 0.02em; }
+.un-more summary { cursor: pointer; color: var(--text-2); margin-top: 4px; }
+.un-members { display: flex; flex-wrap: wrap; gap: 4px; margin: 6px 0; }
+.un-member { padding: 2px 8px; border-radius: 999px; border: 1px solid var(--line); font-size: 0.78rem; }
+.un-member.perm { border-color: #6aa8ff; color: #9cc4ff; }
+.un-member.me { background: rgba(106, 168, 255, 0.18); color: var(--text); font-weight: 700; }
+.un-rec { font-size: 0.8rem; padding: 2px 0; }
