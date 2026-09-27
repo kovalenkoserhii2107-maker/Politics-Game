@@ -517,3 +517,10 @@ body.net-waiting #end-turn-btn { background: var(--s3); }
         margin: -6px -6px -6px 8px;
     }
 }
+/* финансы */
+.cycle-line { display: flex; flex-direction: column; gap: 2px; padding: 8px 10px; margin-bottom: 8px; border-radius: var(--r); background: var(--s3); }
+.cycle-line.boom { background: var(--good-soft); color: var(--good); }
+.cycle-line.recession { background: var(--accent-soft); color: var(--accent-2); }
+.cycle-line small { color: var(--text-2); }
+.rating-A { color: var(--good); } .rating-B { color: var(--text); } .rating-C { color: var(--warn); } .rating-D { color: var(--accent-2); }
+#gov-finance .help-chips { margin: 8px 0; }

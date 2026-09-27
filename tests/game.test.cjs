@@ -4,7 +4,7 @@ const fs=require('node:fs'),path=require('node:path'),vm=require('node:vm');
 function engine(){
  const values=new Map();let seed=123456;const math=Object.create(Math);math.random=()=>{seed=(Math.imul(seed,1664525)+1013904223)>>>0;return seed/4294967296;};const context=vm.createContext({console,Date,Math:math,structuredClone,localStorage:{setItem:(k,v)=>values.set(k,v),getItem:k=>values.get(k)||null,removeItem:k=>values.delete(k),key:i=>[...values.keys()][i]??null,get length(){return values.size;}}});
  for(const file of ['data/CountriesDB','data/RegionsDB','data/NeighborsDB','data/CitiesDB','UnitsDB','Tech','Economy','Diplomacy','Missions','Score','Events','GameData','AI','GameLoop'])vm.runInContext(fs.readFileSync(path.join(__dirname,'../js',file+'.js'),'utf8'),context);
- return Object.assign(vm.runInContext('({GameData,AI,SaveGame,GameLoop,RegionsDB,UnitsDB,DEVELOPMENT,POLICIES,Economy,RESOURCES,ECONOMY,Tech,TECH_TREE,MODERNIZATION,Diplomacy,DIPLOMACY,Missions,MISSION_KINDS,MISSION_RULES,Score,GOALS,Events,EVENTS})',context),{localStorage:context.localStorage});
+ return Object.assign(vm.runInContext('({GameData,AI,SaveGame,GameLoop,RegionsDB,UnitsDB,DEVELOPMENT,POLICIES,Economy,RESOURCES,ECONOMY,Tech,TECH_TREE,MODERNIZATION,Diplomacy,DIPLOMACY,Missions,MISSION_KINDS,MISSION_RULES,Score,GOALS,Events,EVENTS,DEBT,CYCLES,INFRA})',context),{localStorage:context.localStorage});
 }
 test('casualties are invariant under splitting an attack into orders',()=>{
  const {GameData}=engine();const fight=split=>{const d=new GameData('UA',{scenario:'war2024'});for(const id of ['UA-1','RU-19']){d.regions[id].army=d.emptyArmy();d.regions[id].army.infantry=10;}
@@ -455,4 +455,59 @@ test('network campaigns: own save slots for host and guest, guest can become the
     SaveGame.removeCampaign('c7');
     assert.ok(!SaveGame.campaigns().some(c => c.meta.id === 'c7'));
     assert.ok(localStorage.getItem('politics-game-save'));
+});
+
+// --- экономика: долг, цикл, инфраструктура ---
+test('debt: borrow up to the limit, interest in the budget, repay, survives save', () => {
+    const { GameData, Economy, DEBT } = engine(), d = new GameData('DE');
+    const de = d.countries.DE, money = de.money;
+    const limit = Economy.debtLimit(d, 'DE');
+    assert.ok(limit > 0);
+    const r = d.act('borrow', limit * 2);
+    assert.equal(r.ok, true);
+    assert.equal(de.debt, limit, 'больше лимита не дают');
+    assert.equal(de.money, money + limit);
+    assert.equal(d.act('borrow', 1e6).ok, false);
+    const b = d.countryBalance('DE');
+    assert.ok(b.interest > 0 && b.expense >= b.interest);
+    assert.ok(Economy.debtRate(d, 'DE') <= DEBT.RATE_MAX + 1e-9);
+    assert.equal(Economy.debtRating(d, 'DE').grade, 'D');
+    const back = GameData.restore(JSON.parse(JSON.stringify(d.serialize())));
+    assert.equal(back.countries.DE.debt, limit);
+    assert.equal(d.act('repay', 1e15).ok, true);
+    assert.equal(de.debt, 0);
+    assert.equal(d.countryBalance('DE').interest, 0);
+    assert.equal(d.act('repay', 1).ok, false);
+});
+
+test('world cycle changes phases, affects taxes and is saved', () => {
+    const { GameData, Economy, CYCLES } = engine(), d = new GameData('DE');
+    const base = d.countryBalance('DE').tax;
+    d.cycle = { phase: 'boom', until: d.turn + 5 };
+    assert.ok(Math.abs(d.countryBalance('DE').tax - base * CYCLES.boom.tax) < 1);
+    d.cycle = { phase: 'recession', until: d.turn + 5 };
+    assert.ok(d.countryBalance('DE').tax < base);
+    const back = GameData.restore(JSON.parse(JSON.stringify(d.serialize())));
+    assert.equal(back.cycle.phase, 'recession');
+    const seen = new Set();
+    for (let t = 0; t < 200; t++) { d.turn = t; Economy.advanceCycle(d); seen.add(d.cycle.phase); }
+    assert.ok(seen.has('boom') && seen.has('recession') && seen.has('normal'));
+    const bad = d.serialize(); bad.cycle = { phase: 'crash', until: 3 };
+    assert.throws(() => GameData.restore(bad));
+});
+
+test('infrastructure raises regional taxes and loyalty target; old saves get level 0', () => {
+    const { GameData } = engine(), d = new GameData('DE');
+    const region = d.getCountryRegions('DE')[0];
+    d.countries.DE.money = 1e9;
+    const tax = d.countryBalance('DE').tax;
+    assert.equal(d.act('invest', region.id, 'infra').ok, true);
+    d.projects.find(p => p.regionId === region.id).remaining = 1;
+    d.processProjects();
+    assert.equal(region.development.infra, 1);
+    assert.ok(d.countryBalance('DE').tax > tax);
+    const old = d.serialize();
+    for (const r of Object.values(old.regions)) delete r[5].infra;
+    const back = GameData.restore(JSON.parse(JSON.stringify(old)));
+    assert.equal(back.regions[region.id].development.infra, 0);
 });

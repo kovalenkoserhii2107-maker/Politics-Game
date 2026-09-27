@@ -100,6 +100,15 @@ class GameCore {
             this.afterMissions();
             return;
         }
+        if (action === 'borrow' || action === 'repay') {
+            const result = d.act(action, Number(btn.dataset.amount));
+            if (!result.ok) { this.ui.toast(result.reason); return; }
+            this.ui.toast(action === 'borrow' ? `Взято в долг ${this.ui.money(result.amount)}` : `Возвращено ${this.ui.money(result.amount)}`);
+            this.ui.renderGovernment(d);
+            this.loop.updateTopBarUI();
+            SaveGame.save(d);
+            return;
+        }
         if (action === 'transfer') {
             const result = d.act('transfer', cc, btn.dataset.kind, Number(btn.dataset.amount));
             if (!result.ok) { this.ui.toast(result.reason); return; }

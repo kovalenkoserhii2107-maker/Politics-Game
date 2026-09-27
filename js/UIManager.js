@@ -637,17 +637,19 @@ class UIManager {
         }
         const project = data.projects.find(p => p.regionId === region.id);
         container.open = false;
-        let html = `<summary>Развитие области${project ? ` · ${project.remaining} ход.` : ' · 3 проекта'}</summary>`;
+        let html = `<summary>Развитие области${project ? ` · ${project.remaining} ход.` : ' · 4 проекта'}</summary>`;
         if (project) {
             html += `<div class="development-card"><strong>${DEVELOPMENT[project.kind].name}</strong><p>До завершения: ${project.remaining} ход. Средства зарезервированы.</p><button class="mini-btn" data-action="cancel-project" data-region="${region.id}">Отменить · вернуть ${this.money(project.cost)}</button></div>`;
         } else {
             for (const [kind, plan] of Object.entries(DEVELOPMENT)) {
-                const level = region.development[kind], cost = data.developmentCost(region.id, kind);
+                const level = region.development[kind] || 0, cost = data.developmentCost(region.id, kind);
                 const value = Economy.projectValue(data, region.id, kind);
-                const res = RESOURCES[plan.yields];
                 const payback = value > 0 ? Math.ceil(cost / value) : null;
                 const disabled = level >= 5 || data.countries[data.playerCountry].money < cost || data.gameOver;
-                html += `<div class="development-card"><strong>${plan.name} · ${level}/5</strong><p>${plan.turns} ход. стройки · больше ресурса «${res.icon} ${res.name}» · по нынешним ценам около +${this.money(value)}/ход${payback ? `, окупится за ~${payback} ход.` : ''}${kind === 'industry' ? ' Заводам нужна энергия. Также растёт мощность набора войск.' : ''}</p><button class="mini-btn" data-action="invest" data-region="${region.id}" data-kind="${kind}" ${disabled ? 'disabled' : ''}>${level >= 5 ? 'Максимальный уровень' : `Построить · ${this.money(cost)}`}</button></div>`;
+                const what = plan.yields
+                    ? `больше ресурса «${RESOURCES[plan.yields].icon} ${RESOURCES[plan.yields].name}»`
+                    : `налоги области +${Math.round(INFRA.TAX * 100)}% и лояльность +${Math.round(INFRA.LOYALTY * 100)}% за уровень`;
+                html += `<div class="development-card"><strong>${plan.name} · ${level}/5</strong><p>${plan.turns} ход. стройки · ${what} · по нынешним ценам около +${this.money(value)}/ход${payback ? `, окупится за ~${payback} ход.` : ''}${kind === 'industry' ? ' Заводам нужна энергия. Также растёт мощность набора войск.' : ''}</p><button class="mini-btn" data-action="invest" data-region="${region.id}" data-kind="${kind}" ${disabled ? 'disabled' : ''}>${level >= 5 ? 'Максимальный уровень' : `Построить · ${this.money(cost)}`}</button></div>`;
             }
         }
         container.innerHTML = html;
@@ -802,6 +804,33 @@ class UIManager {
     }
 
     // --- правительство -----------------------------------------------------------------------------
+    // Финансы: мировой цикл и госдолг с кнопками «занять» и «вернуть».
+    renderFinance(data) {
+        const player = data.countries[data.playerCountry];
+        const balance = data.countryBalance(player.id);
+        const cycle = Economy.cycle(data);
+        const left = data.cycle ? Math.max(0, data.cycle.until - data.turn) : 0;
+        const debt = player.debt || 0;
+        const limit = Economy.debtLimit(data, player.id);
+        const rating = Economy.debtRating(data, player.id);
+        const rate = Economy.rateFor(debt, balance.tax);
+        const week = Math.max(1e5, Math.round(balance.tax / 1e5) * 1e5);
+        const room = Math.max(0, limit - debt);
+        const chip = (action, amount, label, ok) => `<button class="chip help-chip" data-action="${action}" data-amount="${amount}" ${ok ? '' : 'disabled'}>${label}</button>`;
+        document.getElementById('gov-finance').innerHTML = `
+            <div class="cycle-line ${data.cycle ? data.cycle.phase : 'normal'}"><b>${cycle.icon} ${cycle.name}</b><small>${cycle.text}${left ? ` Ещё ${left} ход.` : ''}</small></div>
+            <div class="budget-row"><span>Госдолг</span><b>${this.money(debt)} <small class="muted">из ${this.money(limit)}</small></b></div>
+            <div class="budget-row"><span>Кредитный рейтинг</span><b class="rating-${rating.grade}">${rating.grade} · ${rating.text}</b></div>
+            <div class="budget-row"><span>Ставка за ход</span><b>${(rate * 100).toFixed(2)}%${debt ? ` · −${this.money(balance.interest)}` : ''}</b></div>
+            <div class="help-chips">
+                ${chip('borrow', week, `Занять ${this.money(week)}`, room >= week && !data.gameOver)}
+                ${chip('borrow', week * 4, `Занять ${this.money(week * 4)}`, room >= week * 4 && !data.gameOver)}
+                ${debt ? chip('repay', Math.min(debt, week), `Вернуть ${this.money(Math.min(debt, week))}`, player.money > 0) : ''}
+                ${debt > week ? chip('repay', debt, 'Вернуть всё', player.money >= debt) : ''}
+            </div>
+            <p class="hint">Занять можно до ${DEBT.LIMIT_WEEKS} недельных налоговых сборов. Чем больше долг, тем выше ставка — выгодно брать на стройки, которые окупятся быстрее, или на войну, которую нельзя проиграть.</p>`;
+    }
+
     renderGovernment(data) {
         const player = data.countries[data.playerCountry];
         const balance = data.countryBalance(player.id);
@@ -821,12 +850,14 @@ class UIManager {
             : 'Налог до 10% не снижает лояльность.';
 
         this.renderEconomy(data);
+        this.renderFinance(data);
         document.getElementById('gov-budget').innerHTML = `
             <div class="budget-row"><span>Налоги</span><span class="pos">+${this.money(balance.tax)}</span></div>
             <div class="budget-row"><span>Продажа ресурсов</span><span class="pos">+${this.money(balance.sales)}</span></div>
             <div class="budget-row"><span>Закупка ресурсов</span><span class="neg">−${this.money(balance.purchases)}</span></div>
             <div class="budget-row"><span>Социальная программа</span><span class="neg">−${this.money(balance.social)}</span></div>
             <div class="budget-row"><span>Содержание армии</span><span class="neg">−${this.money(balance.upkeep)}</span></div>
+            ${balance.interest ? `<div class="budget-row"><span>Проценты по долгу</span><span class="neg">−${this.money(balance.interest)}</span></div>` : ''}
             <div class="budget-row total"><span>Итого за ход</span><span class="${net >= 0 ? 'pos' : 'neg'}">${net >= 0 ? '+' : ''}${this.money(net)}</span></div>`;
 
     }
