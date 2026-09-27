@@ -17,13 +17,14 @@ class UIManager {
         };
         bind('close-panel-btn', () => this.closePanel());
         bind('close-campaign-btn', () => this.hideModal('campaign-modal'));
+        bind('close-stats-btn', () => this.hideModal('stats-modal'));
         bind('close-gov-btn', () => this.hideModal('gov-modal'));
         bind('close-history-btn', () => this.hideModal('history-modal'));
         bind('close-diplo-btn', () => this.hideModal('diplo-modal'));
         bind('close-science-btn', () => this.hideModal('science-modal'));
         bind('close-summary-btn', () => this.closeSummary());
 
-        for (const id of ['history-modal', 'gov-modal', 'diplo-modal', 'campaign-modal', 'science-modal', 'chat-modal']) {
+        for (const id of ['history-modal', 'gov-modal', 'diplo-modal', 'campaign-modal', 'science-modal', 'chat-modal', 'stats-modal']) {
             const modal = document.getElementById(id);
             if (modal) modal.addEventListener('click', e => { if (e.target === modal) this.hideModal(id); });
         }
@@ -255,7 +256,9 @@ class UIManager {
                 <div class="war-summary">Война идёт ${info.turns} ход. · заняли ${info.taken} · потеряли ${info.lost}</div>
                 <button class="action-btn peace" data-action="peace" data-country="${countryId}" ${sent ? 'disabled' : ''}>
                     🕊️ ${sent ? 'Мир предложен — ждём ответа' : 'Предложить мир'} <small>решит игрок · бесплатно</small>
-                </button>`;
+                </button>
+                <button class="action-btn trade-btn" data-action="trade-open" data-country="${countryId}" ${data.proposalPending(countryId, 'trade') ? 'disabled' : ''}>
+                    📦 ${data.proposalPending(countryId, 'trade') ? 'Сделка отправлена' : 'Мир на условиях'} <small>области, деньги, запасы в обмен на мир</small></button>`;
             }
             const can = me.influence >= RULES.PEACE_COST;
             return `${meter}
@@ -307,7 +310,9 @@ class UIManager {
         }
 
         const check = data.canDeclareWar(player, countryId);
-        return `${meter}${this.helpBlock(data, countryId)}<div class="diplo-acts">${html}</div>
+        const trade = human ? `<button class="action-btn trade-btn" data-action="trade-open" data-country="${countryId}" ${data.proposalPending(countryId, 'trade') ? 'disabled' : ''}>
+                ${data.proposalPending(countryId, 'trade') ? '⏳ Сделка отправлена — ждём ответа' : '📦 Предложить сделку'} <small>деньги, запасы, области, договоры — пакетом</small></button>` : '';
+        return `${meter}${trade}${this.helpBlock(data, countryId)}<div class="diplo-acts">${html}</div>
             <button class="action-btn war" data-action="war" data-country="${countryId}" ${check.ok ? '' : 'disabled'}>
                 ⚔️ Объявить войну <small>−${RULES.WAR_COST} влияния</small>
             </button>
@@ -321,6 +326,17 @@ class UIManager {
         const anchor = document.getElementById(top ? 'panel-tags' : 'region-army-container');
         if (anchor.nextElementSibling !== block) anchor.after(block);
         block.classList.toggle('top', top);
+    }
+
+    // Совместная операция: объявить удар по вражеской области или увидеть,
+    // что союзник её уже наметил.
+    operationBlock(data, region) {
+        const player = data.playerCountry;
+        const ops = data.visibleOperations().filter(o => o.target === region.id);
+        const info = ops.map(o => `<div class="operation-line">🎯 Операция: ${this.escape(data.countries[o.by].name)}${o.by === player ? ' (вы)' : ''} — удар на ${o.turn === data.turn ? 'этом' : 'следующем'} ходу, +${Math.round(RULES.OPERATION_BONUS * 100)}% к удару союзников</div>`).join('');
+        const canPlan = data.isAtWar(player, region.owner) && Diplomacy.allies(data, player).length > 0 && !ops.some(o => o.by === player);
+        const plan = canPlan ? `<button class="mini-btn operation-btn" data-action="operation" data-region="${region.id}">🎯 Совместная операция на следующий ход</button>` : '';
+        return info || plan ? `<div class="operation-box">${info}${plan}</div>` : '';
     }
 
     // Недовольство и восстание в области — видно всем, действовать может хозяин.
@@ -403,7 +419,8 @@ class UIManager {
         this.fillEconomy(data, { countryId: country.id });
 
         const container = document.getElementById('region-army-container');
-        const seeArmy = isPlayer || data.isAtWar(data.playerCountry, country.id);
+        // союзники делятся разведкой: их армии видны как свои
+        const seeArmy = isPlayer || data.isAtWar(data.playerCountry, country.id) || Diplomacy.isAllied(data, data.playerCountry, country.id);
         container.innerHTML = this.powerBlock('Военная мощь', data.calculateMilitaryPower(country.id))
             + (seeArmy ? this.armyList(stats.army, 'Вооружённые силы', false)
                 : '<div class="hint">Точный состав армии известен только своих войск и противников.</div>');
@@ -442,8 +459,9 @@ class UIManager {
         const isNeighbor = data.isNeighborToPlayer(region.id);
         const reconActive = region.reconActiveUntil && region.reconActiveUntil >= data.currentDate;
         const atWar = data.isAtWar(player, region.owner);
-        const canSeePower = isOwner || isNeighbor || reconActive || atWar;
-        const canSeeGarrison = isOwner || reconActive;
+        const allied = Diplomacy.isAllied(data, player, region.owner);
+        const canSeePower = isOwner || isNeighbor || reconActive || atWar || allied;
+        const canSeeGarrison = isOwner || reconActive || allied;
 
         let html = canSeePower ? this.powerBlock('Военная мощь области', data.calculateRegionMilitaryPower(region.id)) : '';
         if (canSeeGarrison) {
@@ -463,7 +481,7 @@ class UIManager {
                     </button>
                 </div>`;
         }
-        html = this.unrestBlock(data, region) + html;
+        html = this.unrestBlock(data, region) + this.operationBlock(data, region) + html;
         if (data.multiplayer) html += `<button class="mini-btn ping-btn" data-action="ping" data-region="${region.id}">📍 Показать игрокам</button>`;
         document.getElementById('region-army-container').innerHTML = html;
         this.placeDiplomacy(false);
@@ -641,18 +659,89 @@ class UIManager {
     }
 
     // --- решения и конец игры ------------------------------------------------------------------
-    showDecision({ title, text, accept, decline, onAccept, onDecline }) {
+    showDecision({ title, text, accept, decline, onAccept, onDecline, alt, onAlt }) {
         document.getElementById('decision-title').textContent = title;
-        document.getElementById('decision-text').textContent = text;
+        const body = document.getElementById('decision-text');
+        body.textContent = text;
+        body.classList.toggle('multiline', text.includes('\n'));
         const yes = document.getElementById('decision-accept');
         const no = document.getElementById('decision-decline');
+        const other = document.getElementById('decision-alt');
         yes.textContent = accept;
         no.textContent = decline;
-        const close = then => { this.hideModal('decision-modal'); yes.onclick = no.onclick = null; then(); };
+        other.hidden = !alt;
+        other.textContent = alt || '';
+        const close = then => { this.hideModal('decision-modal'); yes.onclick = no.onclick = other.onclick = null; then(); };
         yes.onclick = () => close(onAccept);
         no.onclick = () => close(onDecline);
+        other.onclick = alt ? () => close(onAlt) : null;
         this.showModal('decision-modal');
         this.haptic(30);
+    }
+
+    // Редактор сделки: слева — что отдаём, справа — что просим, внизу — договоры.
+    // preset — готовая сделка (для встречного предложения). onSend(offer) → true, если ушла.
+    showTradeEditor(data, target, preset, onSend, onCancel) {
+        const me = data.playerCountry, them = target;
+        const offer = Trade.normalize(preset || {});
+        const cMe = data.countries[me], cThem = data.countries[them];
+        Economy.initCountry(cMe); Economy.initCountry(cThem);
+        const atWar = data.isAtWar(me, them);
+        const side = (key, owner, partner, values) => {
+            const c = data.countries[owner];
+            const regions = Trade.tradableRegions(data, owner, partner);
+            return `<div class="trade-side" data-side="${key}">
+                <span class="label">${key === 'give' ? 'Вы отдаёте' : 'Вы получаете взамен'}</span>
+                <label class="trade-field"><span>💰 Деньги, $M <small>есть ${this.money(Math.max(0, c.money))}</small></span>
+                    <input type="number" inputmode="decimal" min="0" step="0.5" data-k="money" value="${values.money ? values.money / 1e6 : ''}" placeholder="0"></label>
+                ${Object.entries(RESOURCES).map(([k, r]) => `<label class="trade-field"><span>${r.icon} ${r.name} <small>на складе ${Math.floor(c.stock[k] || 0)}</small></span>
+                    <input type="number" inputmode="decimal" min="0" step="1" data-k="${k}" value="${values[k] || ''}" placeholder="0"></label>`).join('')}
+                <div class="trade-regions"><span>🗺️ Области ${regions.length ? '' : '<small>— нет приграничных</small>'}</span>
+                    ${regions.map(r => `<label class="chip trade-region"><input type="checkbox" data-region="${r.id}" ${values.regions.includes(r.id) ? 'checked' : ''}> ${this.escape(r.name)}</label>`).join('')}</div>
+            </div>`;
+        };
+        const treaty = (t, label, ok, note) => `<label class="chip trade-treaty ${ok ? '' : 'off'}"><input type="checkbox" data-treaty="${t}" ${offer.treaties.includes(t) ? 'checked' : ''} ${ok ? '' : 'disabled'}> ${label}${note ? ` <small>${note}</small>` : ''}</label>`;
+        document.getElementById('trade-title').textContent = `Сделка: ${cThem.name}`;
+        document.getElementById('trade-body').innerHTML = `
+            <p class="hint">Соберите пакет. ${this.escape(cThem.name)} увидит его после хода и примет, откажет или предложит свой вариант. Ничего не списывается, пока сделку не приняли.</p>
+            <div class="trade-cols">${side('give', me, them, offer.give)}${side('get', them, me, offer.get)}</div>
+            <span class="label">Договоры в придачу</span>
+            <div class="trade-treaties">
+                ${treaty('peace', '🕊️ Мир', atWar, atWar ? '' : 'войны нет')}
+                ${treaty('deal', '🤝 Торговый договор', !Diplomacy.hasDeal(data, me, them), Diplomacy.hasDeal(data, me, them) ? 'уже есть' : '')}
+                ${treaty('pact', '📜 Пакт', !Diplomacy.pactLeft(data, me, them), Diplomacy.pactLeft(data, me, them) ? 'уже есть' : '')}
+                ${treaty('alliance', '🛡️ Союз', !Diplomacy.isAllied(data, me, them), Diplomacy.isAllied(data, me, them) ? 'уже есть' : '')}
+            </div>
+            <p class="trade-error neg" id="trade-error"></p>
+            <div class="decision-buttons"><button id="trade-cancel" type="button">Отмена</button><button id="trade-send" type="button">Отправить сделку</button></div>`;
+        const read = () => {
+            const out = { give: { regions: [] }, get: { regions: [] }, treaties: [] };
+            for (const el of document.querySelectorAll('#trade-body .trade-side')) {
+                const s = out[el.dataset.side];
+                for (const input of el.querySelectorAll('input[data-k]')) {
+                    const n = parseFloat(String(input.value).replace(',', '.'));
+                    if (Number.isFinite(n) && n > 0) s[input.dataset.k] = input.dataset.k === 'money' ? Math.round(n * 1e6) : n;
+                }
+                for (const box of el.querySelectorAll('input[data-region]:checked')) s.regions.push(box.dataset.region);
+            }
+            for (const box of document.querySelectorAll('#trade-body input[data-treaty]:checked')) out.treaties.push(box.dataset.treaty);
+            return out;
+        };
+        const close = () => this.hideModal('trade-modal');
+        document.getElementById('close-trade-btn').onclick = () => { close(); if (onCancel) onCancel(); };
+        document.getElementById('trade-cancel').onclick = () => { close(); if (onCancel) onCancel(); };
+        document.getElementById('trade-send').onclick = () => {
+            const result = onSend(read());
+            if (result && result.ok) close();
+            else document.getElementById('trade-error').textContent = (result && result.reason) || 'Не получилось';
+        };
+        this.showModal('trade-modal');
+    }
+
+    // Графики строим по ширине открытого окна — поэтому сначала показать.
+    showStats(data) {
+        this.showModal('stats-modal');
+        Charts.render(document.getElementById('stats-body'), data);
     }
 
     showGameOver(data) {
@@ -761,7 +850,26 @@ class UIManager {
                 </div>`;
             }).join('')}</div>
             <div class="score-parts">Ваш счёт: ${parts}</div>
+            <button class="btn-back stats-open" type="button" data-action="stats">📊 Графики партии</button>
             <p class="hint">Очки: 10 за область, население, налоги и казна, технологии, сила армии. Большие величины считаются «под корнем» — маленькая страна может обогнать большую.</p>`;
+    }
+
+    // Мировой совет: что на голосовании и кто под санкциями.
+    councilBlock(data) {
+        const lines = [];
+        const c = data.council;
+        if (c) {
+            const title = COUNCIL_KINDS[c.kind].title(data, c);
+            const mine = data.playerCountry in c.votes ? (c.votes[data.playerCountry] ? 'вы — за' : 'вы — против') : 'ваш голос ещё не отдан';
+            lines.push(`🏛️ На голосовании совета: <b>${this.escape(title)}</b> · ${mine}`);
+        }
+        const until = data.sanctions || {};
+        for (const cc of Object.keys(until).filter(x => Council.sanctioned(data, x))) {
+            const who = cc === data.playerCountry ? ' против вас' : `: ${this.escape(data.countries[cc].name)}`;
+            lines.push(`🚫 Санкции${who} — торговля −${Math.round((1 - COUNCIL.SANCTION_TRADE) * 100)}%, ещё ${until[cc] - data.turn} ход.`);
+        }
+        if (!c && !lines.length) lines.push(`🏛️ Мировой совет собирается раз в ${COUNCIL.EVERY} ходов с ${COUNCIL.FIRST}-го: санкции против захватчика чужих земель или всеобщее перемирие.`);
+        return `<div class="council-box">${lines.map(l => `<div>${l}</div>`).join('')}</div>`;
     }
 
     // --- дипломатия ----------------------------------------------------------------------------
@@ -782,6 +890,7 @@ class UIManager {
             Diplomacy.hasDeal(data, player, cc) ? '🤝 торговля' : '',
             Diplomacy.pactLeft(data, player, cc) ? `📜 пакт ${Diplomacy.pactLeft(data, player, cc)} ход.` : '',
             data.truceLeft(player, cc) ? `🕊️ перемирие ${data.truceLeft(player, cc)} ход.` : '',
+            Council.sanctioned(data, cc) ? '🚫 санкции' : '',
         ].filter(Boolean).join(' · ');
         const strength = cc => {
             const ratio = data.calculateMilitaryPower(cc) / myPower;
@@ -794,6 +903,7 @@ class UIManager {
 
         let html = `<div class="diplo-influence">Влияние: <b>${me.influence}</b> / ${RULES.INFLUENCE_MAX}
             <span class="muted">· +${RULES.INFLUENCE_PER_TURN} за ход и награды за задания</span></div>
+            ${this.councilBlock(data)}
             <p class="hint">Отношения улучшают подарки и договоры. Торговый договор: +${Math.round(DIPLOMACY.DEAL_BONUS * 100)}% к выручке и −${Math.round(DIPLOMACY.DEAL_BONUS * 100)}% к закупкам на рынке (до ${DIPLOMACY.DEAL_MAX}). Союзник вступит в войну, если на вас нападут. Нажмите страну, чтобы договориться.</p>`;
 
         const enemies = data.enemiesOf(player);

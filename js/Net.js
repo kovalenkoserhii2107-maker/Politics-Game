@@ -28,6 +28,9 @@ const NET = {
     CODE_CHARS: 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789',
     CHAT_MAX: 140,          // длина сообщения в чате
     CHAT_KEEP: 40,          // сколько сообщений помнит сервер
+    NUDGE_MS: 15000,        // «Поторопить» — не чаще раза в 15 секунд
+    TIMERS: [0, 120, 300],  // таймер хода: нет, 2 и 5 минут
+    GRACE_MS: 8000,         // после таймера сервер ждёт опоздавших столько
     CLIENT_KEY: 'politics-net-client',
     LAST_KEY: 'politics-net-last',
 };
@@ -365,8 +368,26 @@ class NetHost {
             this.relayChat(player, message.text);
         } else if (message.t === 'ping') {
             this.relayPing(player, message.region);
+        } else if (message.t === 'nudge' && d) {
+            this.relayNudge(player);
         }
     }
+
+    // «Поторопить»: тем, кто ещё не нажал «Конец хода».
+    relayNudge(player) {
+        const now = Date.now();
+        if (!player.cc || now - (player.nudgedAt || 0) < NET.NUDGE_MS) return false;
+        player.nudgedAt = now;
+        const entry = { t: 'nudge', from: player.name, cc: player.cc };
+        for (const p of this.waitingFor()) {
+            if (p === player) continue;
+            if (p.host) { if (this.callbacks.onNudge) this.callbacks.onNudge(entry); }
+            else this.sendTo(p, entry);
+        }
+        return true;
+    }
+
+    nudge() { return this.relayNudge(this.players[0]); }
 
     // --- чат и метки: сервер пересылает всем ---------------------------
     relayChat(player, text) {
@@ -395,7 +416,7 @@ class NetHost {
         return {
             t: 'lobby', code: this.code,
             players: this.players.map(p => ({ id: p.id, name: p.name, cc: p.cc, host: p.host, connected: p.connected })),
-            scenario: this.options?.scenario || 'peace', difficulty: this.options?.difficulty || 'normal', goal: this.options?.goal || 'domination',
+            scenario: this.options?.scenario || 'peace', difficulty: this.options?.difficulty || 'normal', goal: this.options?.goal || 'domination', timer: this.options?.timer || 0,
         };
     }
 
@@ -407,7 +428,7 @@ class NetHost {
     status() {
         const d = this.data;
         return {
-            t: 'status', turn: d ? d.turn : 0, code: this.code,
+            t: 'status', turn: d ? d.turn : 0, code: this.code, left: this.timeLeft(),
             players: this.players.map(p => ({
                 name: p.name, cc: p.cc, host: p.host, connected: p.connected, ready: p.ready, loaded: p.host || p.loaded !== false,
                 alive: !d || !p.cc || d.countries[p.cc].alive,
@@ -466,6 +487,7 @@ class NetHost {
             code: this.code,
             clients: Object.fromEntries(guests.map(p => [p.id, p.cc])),
             names: Object.fromEntries(this.players.map(p => [p.cc, p.name])),
+            timer: NET.TIMERS.includes(Number(options.timer)) ? Number(options.timer) : 0,
         };
         this.data = d;
         return d;
@@ -475,14 +497,33 @@ class NetHost {
     attach(game) {
         this.game = game;
         game.loop.net = this;
+        this.startClock();
         for (const p of this.players) if (!p.host) this.sendState(p, null);
         this.changed();
+        clearInterval(this.clockId);
+        this.clockId = setInterval(() => this.tick(), 1000);
+    }
+
+    // --- таймер хода ------------------------------------------------------
+    get timer() { return (this.data && this.data.net && this.data.net.timer) || 0; }
+
+    startClock() { this.deadline = this.timer ? Date.now() + this.timer * 1000 : null; }
+
+    // Секунд до конца хода; null — таймера нет.
+    timeLeft() {
+        if (!this.deadline || !this.data || this.data.gameOver) return null;
+        return Math.max(0, Math.ceil((this.deadline - Date.now()) / 1000));
+    }
+
+    // Время вышло, а кто-то так и не отправил ход — считаем без него.
+    tick() {
+        if (this.deadline && Date.now() > this.deadline + NET.GRACE_MS) this.maybeResolve(true);
     }
 
     sendState(player, report) {
         if (!player.cc) return;
         if (!this.game || !report) player.loaded = false;   // пока гость строит карту
-        this.sendTo(player, { t: 'state', state: this.data.serialize(), you: player.cc, report: report || null, code: this.code });
+        this.sendTo(player, { t: 'state', state: this.data.serialize(), you: player.cc, report: report || null, code: this.code, left: this.timeLeft() });
     }
 
     get ready() { return this.players[0].ready; }
@@ -499,10 +540,12 @@ class NetHost {
         return this.players.filter(p => p.cc && d.countries[p.cc].alive && !p.ready);
     }
 
-    maybeResolve() {
+    maybeResolve(force) {
         const d = this.data;
-        if (!d || !this.game || d.gameOver) return;
-        if (this.waitingFor().length) return;
+        if (!d || !this.game || d.gameOver || this.game.loop.busy) return;
+        const late = this.waitingFor();
+        if (late.length && !force) return;
+        const lateCc = new Set(late.map(p => p.cc));
         const guests = this.players.filter(p => !p.host);
         const failed = {};
         const reports = this.game.loop.runTurn(() => {
@@ -512,6 +555,11 @@ class NetHost {
         });
         for (const p of this.players) { p.ready = false; p.commands = null; }
         if (!reports) { this.changed(); return; }
+        this.startClock();
+        for (const p of this.players) {
+            const report = reports[p.cc];
+            if (report && lateCc.has(p.cc)) report.turnData.events.unshift('⏱ Время хода вышло — ход посчитан без ваших приказов.');
+        }
         for (const p of guests) {
             const report = reports[p.cc];
             if (report && failed[p.cc]) report.turnData.events.unshift(`⚠️ Не выполнено приказов: ${failed[p.cc]} — обстановка изменилась, пока вы планировали.`);
@@ -522,6 +570,7 @@ class NetHost {
     }
 
     stop() {
+        clearInterval(this.clockId);
         for (const p of this.players) if (p.link) p.link.close();
         if (this.room) this.room.destroy();
         if (this.beacon) this.beacon.destroy();
@@ -643,8 +692,11 @@ class NetGuest {
             if (cb) cb(message);
         } else if (message.t === 'chatlog' && Array.isArray(message.list)) {
             this.chatLog = message.list.slice(-NET.CHAT_KEEP);
+        } else if (message.t === 'nudge') {
+            if (this.callbacks.onNudge) this.callbacks.onNudge(message);
         } else if (message.t === 'status') {
             this.statusInfo = message;
+            this.deadline = Number.isFinite(message.left) ? Date.now() + message.left * 1000 : null;
             const me = message.players.find(p => p.cc === this.cc);
             // готовность держит сервер: после его перезапуска можно ходить снова
             if (me && this.game && message.turn === this.game.data.turn) this.ready = !!me.ready;
@@ -666,6 +718,8 @@ class NetGuest {
             return;
         }
         this.cc = message.you;
+        // таймер нового хода — вместе с миром, иначе до статуса виден старый ноль
+        this.deadline = Number.isFinite(message.left) ? Date.now() + message.left * 1000 : null;
         fresh.recorder = [];
         // наша страна пала, а партия идёт — для нас она закончилась
         if (!fresh.countries[this.cc].alive && !fresh.gameOver) { fresh.gameOver = true; fresh.outcome = 'defeat'; }
@@ -696,6 +750,20 @@ class NetGuest {
     }
 
     say(text) { if (this.link) this.link.send({ t: 'chat', text }); }
+
+    nudge() {
+        const now = Date.now();
+        if (!this.link || now - (this.nudgedAt || 0) < NET.NUDGE_MS) return false;
+        this.nudgedAt = now;
+        this.link.send({ t: 'nudge' });
+        return true;
+    }
+
+    timeLeft() {
+        if (!this.deadline || !this.game || this.game.data.gameOver) return null;
+        return Math.max(0, Math.ceil((this.deadline - Date.now()) / 1000));
+    }
+
     ping(region) {
         if (!this.link) return;
         this.link.send({ t: 'ping', region });

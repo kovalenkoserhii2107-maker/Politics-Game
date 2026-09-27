@@ -13,6 +13,8 @@ const GOALS = {
     coop: { name: 'Вместе против мира', short: 'Вместе', share: 0.2, multiplayer: true, text: 'Все игроки — одна команда. Победа, когда вместе держите пятую часть областей мира.' },
 };
 
+const SCORE_CHRONICLE_MAX = 300;   // сколько ходов помнит хроника
+
 const SCORE_PARTS = {
     land: { name: 'Земли', icon: '🚩' },
     people: { name: 'Люди', icon: '👥' },
@@ -140,6 +142,41 @@ class Score {
             return { victory: true, title: 'Мировое господство', text: `${name}: все ${d.campaignProgress(cc).total} областей суверенных стран под вашим управлением. Победа на ${d.turn}-м ходу${d.cheatMode ? ' в режиме бога' : ''}.` };
         }
         return { victory: false, title: 'Кампания завершена', text: `${name} потеряла все области на ${d.turn}-м ходу. Попробуйте другой экономический курс или другую страну.` };
+    }
+
+    // --- хроника партии: показатели по ходам для графиков ------------------
+    // Люди и три самых сильных соседа — с ними и сравнивать; соседей мало —
+    // добираем сильнейшими в мире.
+    static initChronicle(d) {
+        const pool = Object.keys(d.scoreStart || {}).filter(cc => !d.isHuman(cc))
+            .sort((a, b) => d.scoreStart[b] - d.scoreStart[a]);
+        const near = new Set();
+        for (const cc of d.humans) {
+            for (const region of d.getCountryRegions(cc)) {
+                for (const id of d.getNeighbors(region.id)) if (d.regions[id]) near.add(d.regions[id].owner);
+            }
+        }
+        const ai = [...pool.filter(cc => near.has(cc)), ...pool.filter(cc => !near.has(cc))].slice(0, 3);
+        d.chronicle = { countries: [...d.humans, ...ai], turns: [] };
+        Score.record(d);
+    }
+
+    static record(d) {
+        if (!d.chronicle) return;
+        const row = d.chronicle.countries.map(cc => {
+            const c = d.countries[cc];
+            const alive = c.alive && d.regionsByCountry[cc].length;
+            return alive ? [d.regionsByCountry[cc].length, Math.round(c.money / 1e5) / 10, Math.round(d.calculateMilitaryPower(cc)), Score.total(d, cc)] : [0, 0, 0, 0];
+        });
+        d.chronicle.turns = d.chronicle.turns.filter(t => t[0] !== d.turn);
+        d.chronicle.turns.push([d.turn, row]);
+        if (d.chronicle.turns.length > SCORE_CHRONICLE_MAX) d.chronicle.turns.shift();
+    }
+
+    static validChronicle(c) {
+        if (!c || !Array.isArray(c.countries) || !c.countries.every(cc => CountriesDB[cc]) || !Array.isArray(c.turns)) return false;
+        return c.turns.every(t => Array.isArray(t) && Number.isInteger(t[0]) && Array.isArray(t[1]) && t[1].length === c.countries.length
+            && t[1].every(v => Array.isArray(v) && v.length === 4 && v.every(Number.isFinite)));
     }
 
     static valid(start) {

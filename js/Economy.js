@@ -172,7 +172,7 @@ class Economy {
             let offers = 0, bids = 0;
             for (const c of countries) {
                 const f = flowOf(c);
-                const reach = data.enemiesOf(c.id).length ? ECONOMY.WAR_TRADE : 1;
+                const reach = (data.enemiesOf(c.id).length ? ECONOMY.WAR_TRADE : 1) * (Council.sanctioned(data, c.id) ? COUNCIL.SANCTION_TRADE : 1);
                 const cap = f.need * ECONOMY.STOCK_CAP;
                 const target = f.need * ECONOMY.STOCK_TARGET;
                 const entry = { c, f, cap, offer: 0, bid: 0, deficit: 0 };
