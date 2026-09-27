@@ -228,6 +228,8 @@ input[type=range] { width: 100%; cursor: pointer; accent-color: var(--ui-accent)
 .modal-header h2 { margin: 0; font-size: 1.3em; color: var(--ui-accent-country); }
 .modal-header .close-btn { position: static; border-radius: 50%; }
 .modal-body { overflow-y: auto; display: flex; flex-direction: column; gap: 10px; padding-right: 5px; }
+/* содержимое окна не сжимается под высоту экрана — окно прокручивается */
+.modal-body > * { flex-shrink: 0; }
 .gov-section {
     background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.05);
     padding: 14px; border-radius: 8px; margin-bottom: 14px;
