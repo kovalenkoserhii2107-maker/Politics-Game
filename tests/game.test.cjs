@@ -2,7 +2,7 @@ const {test}=require('node:test');
 const assert=require('node:assert/strict');
 const fs=require('node:fs'),path=require('node:path'),vm=require('node:vm');
 function engine(){
- const values=new Map();let seed=123456;const math=Object.create(Math);math.random=()=>{seed=(Math.imul(seed,1664525)+1013904223)>>>0;return seed/4294967296;};const context=vm.createContext({console,Date,Math:math,structuredClone,localStorage:{setItem:(k,v)=>values.set(k,v),getItem:k=>values.get(k)||null,removeItem:k=>values.delete(k)}});
+ const values=new Map();let seed=123456;const math=Object.create(Math);math.random=()=>{seed=(Math.imul(seed,1664525)+1013904223)>>>0;return seed/4294967296;};const context=vm.createContext({console,Date,Math:math,structuredClone,localStorage:{setItem:(k,v)=>values.set(k,v),getItem:k=>values.get(k)||null,removeItem:k=>values.delete(k),key:i=>[...values.keys()][i]??null,get length(){return values.size;}}});
  for(const file of ['data/CountriesDB','data/RegionsDB','data/NeighborsDB','data/CitiesDB','UnitsDB','Tech','Economy','Diplomacy','Missions','Score','Events','GameData','AI','GameLoop'])vm.runInContext(fs.readFileSync(path.join(__dirname,'../js',file+'.js'),'utf8'),context);
  return Object.assign(vm.runInContext('({GameData,AI,SaveGame,GameLoop,RegionsDB,UnitsDB,DEVELOPMENT,POLICIES,Economy,RESOURCES,ECONOMY,Tech,TECH_TREE,MODERNIZATION,Diplomacy,DIPLOMACY,Missions,MISSION_KINDS,MISSION_RULES,Score,GOALS,Events,EVENTS})',context),{localStorage:context.localStorage});
 }
@@ -423,4 +423,36 @@ test('multiplayer: any treaty can be proposed to a human for free, the human dec
     e.act('diplomacyAction', 'PL', 'pact');
     e.withPlayer('PL', () => e.act('answerDecision', false));
     assert.equal(Diplomacy.pactLeft(e, 'DE', 'PL'), 0);
+});
+
+test('network campaigns: own save slots for host and guest, guest can become the server', () => {
+    const { GameData, SaveGame, localStorage } = engine();
+    const host = new GameData('DE', { humans: ['PL'] });
+    host.net = { id: 'camp1', code: 'AB12', clients: { kid42: 'PL' }, names: { DE: 'Папа', PL: 'Сын' } };
+    SaveGame.save(new GameData('UA'));                       // одиночная партия
+    SaveGame.campaignRole = 'host';
+    assert.equal(SaveGame.save(host), true);
+    assert.equal(SaveGame.load().game.player, 'UA', 'сетевая кампания не затирает одиночную');
+    // копия гостя — его глазами
+    const guest = GameData.restore(JSON.parse(JSON.stringify(host.serialize())));
+    guest.becomePlayer('PL');
+    guest.net.id = 'camp1';
+    const guestSave = JSON.parse(JSON.stringify(guest.serialize()));
+    assert.deepEqual([...guestSave.humans], ['PL', 'DE']);
+    const back = GameData.restore(guestSave);
+    assert.equal(back.playerCountry, 'PL');
+    assert.equal(back.seats.DE.missions.length, host.missions.length);
+    const list = SaveGame.campaigns();
+    assert.equal(list.length, 1);
+    assert.equal(list[0].meta.code, 'AB12');
+    assert.equal(SaveGame.loadCampaign('camp1').game.player, 'DE');
+    for (let i = 0; i < 8; i++) {
+        const g = new GameData('FR', { humans: ['ES'] });
+        g.net = { id: 'c' + i, code: 'X' + i, clients: {}, names: {} };
+        SaveGame.save(g);
+    }
+    assert.ok(SaveGame.campaigns().length <= SaveGame.CAMPAIGN_MAX, 'старые кампании вытесняются');
+    SaveGame.removeCampaign('c7');
+    assert.ok(!SaveGame.campaigns().some(c => c.meta.id === 'c7'));
+    assert.ok(localStorage.getItem('politics-game-save'));
 });

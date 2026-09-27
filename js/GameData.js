@@ -1532,7 +1532,8 @@ class GameData {
             diplomacy: Diplomacy.serialize(this),
             missions: this.missions.map(m => ({ ...m, reward: { ...m.reward } })),
             stats: { ...this.stats },
-            humans: [...this.humans],
+            // первым всегда тот, чьими глазами сохранена партия
+            humans: [this.playerCountry, ...this.humans.filter(cc => cc !== this.playerCountry)],
             seats: structuredClone(this.seats),
             winner: this.winner || null,
             goal: this.goal,
