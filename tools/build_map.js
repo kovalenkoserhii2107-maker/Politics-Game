@@ -120,13 +120,35 @@ function sharedCells(a, b) {
     return n;
 }
 
+// Карта склеена по линии перемены дат: кусок Чукотки у левого края
+// (долгота −170…−180) соседствует с Камчаткой у правого, а не с Петербургом.
+const WORLD_W = G.lonToX(180) - G.lonToX(-180);
+function wrapDist(a, b) {
+    const dx = Math.abs(a[0] - b[0]);
+    return Math.hypot(Math.min(dx, WORLD_W - dx), a[1] - b[1]);
+}
+
 // --- слияние мелких кусков -------------------------------------------
+// Расстояние между кусками — по ближайшим частям: у куска из частей по
+// обе стороны линии перемены дат общий центр оказался бы посреди карты.
+const partCentroids = mp => mp.map(poly => G.centroidOf([poly]));
+function nearDist(a, b) {
+    let best = Infinity;
+    for (const p of a) for (const q of b) best = Math.min(best, wrapDist(p, q));
+    return best;
+}
+
 function mergePieces(pieces, targetN, avgAreaPx) {
+    // страна по обе стороны линии перемены дат (Россия, Фиджи…): только
+    // для неё расстояние с учётом склейки — остальные карты не меняются
+    const xs = pieces.flatMap(mp => { const b = G.bboxOf(mp); return [b[0], b[2]]; });
+    const wraps = Math.max(...xs) - Math.min(...xs) > WORLD_W / 2;
     const items = pieces.map(mp => ({
         mp,
         area: G.areaKm2(mp, 48),
         cells: boundaryCells(mp),
         centroid: G.centroidOf(mp),
+        parts: wraps ? partCentroids(mp) : null,
     }));
 
     while (items.length > 1) {
@@ -149,7 +171,8 @@ function mergePieces(pieces, targetN, avgAreaPx) {
             let bestDist = Infinity;
             for (let i = 0; i < items.length; i++) {
                 if (i === smallest) continue;
-                const d = Math.hypot(src.centroid[0] - items[i].centroid[0], src.centroid[1] - items[i].centroid[1]);
+                const d = wraps ? nearDist(src.parts, items[i].parts)
+                    : Math.hypot(src.centroid[0] - items[i].centroid[0], src.centroid[1] - items[i].centroid[1]);
                 if (d < bestDist) { bestDist = d; best = i; }
             }
         }
@@ -162,6 +185,7 @@ function mergePieces(pieces, targetN, avgAreaPx) {
         dst.area = G.areaKm2(merged, 48);
         for (const k of src.cells) dst.cells.add(k);
         dst.centroid = G.centroidOf(merged);
+        if (wraps) dst.parts = partCentroids(merged);
         items.splice(smallest, 1);
     }
     return items;
@@ -319,6 +343,37 @@ function mainlandBox(mp) {
 const OIL = { RU: 4, KZ: 3, IQ: 5, IR: 5, SA: 6, KW: 5, QA: 5, AZ: 4, NO: 4, OM: 3, LY: 4, DZ: 3, TM: 3, VE: 5, NG: 4, US: 3, CA: 3, AE: 5, BR: 2, MX: 2, AO: 3, EC: 2, CO: 2 };
 const INDUSTRIAL = new Set(['DE', 'GB', 'RU', 'CN', 'JP', 'KR', 'IT', 'PL', 'CZ', 'SE', 'NL', 'BE', 'AT', 'US', 'FR', 'CH', 'TW', 'SG', 'UA', 'IN', 'TR', 'ES', 'CA', 'MX', 'BR', 'TH', 'MY', 'ID', 'VN']);
 
+// Прежняя нарезка (текущий js/data/RegionsDB.js): cc → [{id, x, y}].
+function loadPreviousRegions() {
+    const file = path.join(__dirname, '..', 'js', 'data', 'RegionsDB.js');
+    if (!fs.existsSync(file)) return {};
+    const ctx = {};
+    require('vm').createContext(ctx);
+    require('vm').runInContext(fs.readFileSync(file, 'utf8') + ';globalThis.R=RegionsDB;', ctx);
+    const out = {};
+    for (const [id, r] of Object.entries(ctx.R)) (out[r.cc] = out[r.cc] || []).push({ id, x: r.lx, y: r.ly });
+    return out;
+}
+
+// Номера областей: новой области — номер ближайшей прежней (по точке
+// подписи). Число областей изменилось — нумеруем заново по площади.
+function stableIds(cc, items, previous) {
+    const fresh = items.map((_, i) => `${cc}-${i + 1}`);
+    const old = previous[cc];
+    if (!old || old.length !== items.length) return fresh;
+    const poles = items.map(it => G.poleOfInaccessibility(it.mp));
+    const pairs = [];
+    poles.forEach((p, i) => old.forEach((o, j) => pairs.push([wrapDist(p, [o.x, o.y]), i, j])));
+    pairs.sort((a, b) => a[0] - b[0]);
+    const ids = new Array(items.length), usedOld = new Set();
+    for (const [, i, j] of pairs) {
+        if (ids[i] || usedOld.has(j)) continue;
+        ids[i] = old[j].id;
+        usedOld.add(j);
+    }
+    return ids;
+}
+
 function hash01(s) {
     let h = 2166136261;
     for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); }
@@ -336,6 +391,7 @@ function main() {
 
     const regions = [];      // {id, cc, name, mp, areaKm2, cx, cy, cells}
     const perCountry = {};
+    const previous = loadPreviousRegions();
 
     console.log('Делим страны на области…');
     for (const country of countries) {
@@ -344,8 +400,11 @@ function main() {
         const pieces = partition(country.mp, n, area);
         const items = mergePieces(pieces, n, area / n);
 
-        // крупные области первыми — стабильная и осмысленная нумерация
+        // крупные области первыми — осмысленная нумерация для новой карты;
+        // если страна уже была поделена так же, номера остаются прежними:
+        // по ним в сохранениях записаны владельцы и армии областей
         items.sort((a, b) => b.area - a.area);
+        const ids = stableIds(country.cc, items, previous);
 
         const list = [];
         items.forEach((it, idx) => {
@@ -355,7 +414,7 @@ function main() {
             // не менялись от смены способа подписи.
             const pole = G.poleOfInaccessibility(it.mp);
             list.push({
-                id: `${country.cc}-${idx + 1}`,
+                id: ids[idx],
                 cc: country.cc,
                 mp: it.mp,
                 areaPx: it.area,
@@ -370,6 +429,7 @@ function main() {
                 labelRadius: Math.sqrt(G.polyAreaPx(it.mp) / Math.PI),
             });
         });
+        list.sort((a, b) => Number(a.id.split('-')[1]) - Number(b.id.split('-')[1]));
         perCountry[country.cc] = list;
         regions.push(...list);
         process.stdout.write(`\r  ${country.cc}: ${list.length}/${n} обл.        `);

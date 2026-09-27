@@ -125,6 +125,16 @@ class GameCore {
         const cc = btn.dataset.country;
         const action = btn.dataset.action;
         if (action === 'stats') { this.ui.showStats(d); return; }
+        if (action === 'recall-garrison') {
+            const result = d.act('recallGarrison', btn.dataset.region);
+            if (!result.ok) { this.ui.toast(result.reason); return; }
+            this.ui.toast(result.to ? `↩ Войска вернулись в ${d.regions[result.to].name}` : 'Войскам некуда вернуться — они распущены');
+            this.map.drawArmyMarkers();
+            this.loop.updateTopBarUI();
+            SaveGame.save(d);
+            this.showRegion(btn.dataset.region);
+            return;
+        }
         if (action === 'open-country') {
             this.ui.hideModal('diplo-modal');
             this.map.focusCountry(cc);
@@ -232,9 +242,35 @@ class GameCore {
             return;
         }
 
+        // Война и мир — только после подтверждения: по кнопке легко промахнуться.
+        if ((btn.dataset.action === 'war' || btn.dataset.action === 'peace') && !btn.dataset.confirmed) {
+            const name = d.countries[cc].name;
+            const again = () => { btn.dataset.confirmed = '1'; try { this.runAction(btn); } finally { delete btn.dataset.confirmed; } };
+            if (btn.dataset.action === 'war') {
+                const check = d.canDeclareWar(player, cc);
+                if (!check.ok) { this.ui.toast(check.reason); return; }
+                const allies = Diplomacy.allies(d, cc).filter(x => x !== player && !d.isAtWar(x, player));
+                const lines = [`Стоит ${RULES.WAR_COST} влияния. Мир потом можно будет только предложить — противник может отказать.`];
+                if (allies.length) lines.push(`Её союзники тоже вступят в войну: ${allies.map(x => d.countries[x].name).join(', ')}.`);
+                if (d.isHuman(cc)) lines.push('Это живой игрок.');
+                this.ui.showDecision({
+                    title: `⚔️ Объявить войну: ${name}?`, text: lines.join('\n'),
+                    accept: 'Объявить войну', decline: 'Отмена', danger: true,
+                    onAccept: again, onDecline: () => {},
+                });
+            } else {
+                const info = d.warInfo(player, cc);
+                const lines = [info ? `Война идёт ${info.turns} ход. Вы заняли областей: ${info.taken}, потеряли: ${info.lost}.` : ''];
+                lines.push(d.isHuman(cc) ? 'Игрок решит после хода.' : `Стоит ${RULES.PEACE_COST} влияния, даже если откажут. Мир сохранит нынешние границы, перемирие — ${RULES.TRUCE_TURNS} ходов.`);
+                this.ui.showDecision({
+                    title: `🕊️ Предложить мир: ${name}?`, text: lines.filter(Boolean).join('\n'),
+                    accept: 'Предложить мир', decline: 'Отмена',
+                    onAccept: again, onDecline: () => {},
+                });
+            }
+            return;
+        }
         if (btn.dataset.action === 'war') {
-            const allies = Diplomacy.allies(d, cc).filter(x => x !== player && !d.isAtWar(x, player));
-            if (allies.length && !confirm(`У страны ${d.countries[cc].name} есть союзники: ${allies.map(x => d.countries[x].name).join(', ')}. Они тоже вступят в войну. Объявить?`)) return;
             const result = d.act('declareWar', player, cc);
             if (!result.ok) { this.ui.toast(result.reason); return; }
             this.ui.haptic(40);
@@ -812,16 +848,16 @@ class GameCore {
         const rows = ids.map(id => {
             const region = d.getRegion(id);
             const transport = give ? { cost: 0 } : d.expeditionQuote(isMove ? 'movements' : 'attacks', state.fromId, id, state.forces);
-            const odds = isMove ? null : this.attackOdds(id, state.forces);
+            const odds = isMove ? null : this.attackOdds(id, state.forces, state.fromId);
             return { id, region, transport, odds };
         }).sort((a, b) => (a.transport.cost ? 1 : 0) - (b.transport.cost ? 1 : 0)
             || (b.odds ? b.odds.ratio : 0) - (a.odds ? a.odds.ratio : 0)
             || a.region.name.localeCompare(b.region.name, 'ru'));
 
         const from = d.getRegion(state.fromId);
-        document.getElementById('target-title').textContent = give ? 'Кому передать войска' : isMove ? 'Куда перебросить войска' : 'Кого атаковать';
+        document.getElementById('target-title').textContent = give ? 'Куда отправить войска в помощь' : isMove ? 'Куда перебросить войска' : 'Кого атаковать';
         document.getElementById('target-hint').textContent = `Из области ${from.name}. `
-            + (give ? 'Войска станут войсками союзника.' : isMove ? 'Выберите свою область.' : 'Шансы считаются по отправленным войскам.');
+            + (give ? 'Войска останутся вашими и будут оборонять область союзника; вернуть — в её карточке.' : isMove ? 'Выберите свою область.' : 'Шансы — вместе с уже назначенными ударами по этой цели.');
         document.getElementById('target-list').innerHTML = rows.slice(0, LIMIT).map(({ id, region, transport, odds }) => {
             const owner = d.countries[region.owner];
             const sea = transport.cost ? ` · морем ${this.ui.money(transport.cost)}` : '';
@@ -1011,14 +1047,12 @@ class GameCore {
 
     // Оценка без тумана войны о составе: сила обороны игроку и так видна
     // на карточке области, когда идёт война.
-    attackOdds(targetId, forces) {
-        const d = this.data;
-        const target = d.getRegion(targetId);
-        const attack = d.sidePower(forces, d.playerCountry, 'baseAttack', target.army);
-        const needed = d.defensePower(target, forces) * RULES.ATTACK_ADVANTAGE;
-        const ratio = attack / needed;
+    // Вместе с уже назначенными ударами по этой цели из других областей.
+    attackOdds(targetId, forces, fromId = this.armyAction && this.armyAction.fromId) {
+        const est = this.data.strikeEstimate(targetId, forces, fromId);
+        const ratio = est.ratio;
         const label = ratio >= 1.5 ? 'высокие' : ratio >= 1 ? 'хорошие' : ratio >= 0.9 ? 'равные' : 'низкие';
-        return { ratio, label, attack: Math.round(attack), needed: Math.round(needed) };
+        return { ratio, label, attack: Math.round(est.attack), needed: Math.round(est.needed), directions: est.directions, flank: est.flank };
     }
 
     // --- клик по карте -----------------------------------------------------------------
@@ -1030,9 +1064,9 @@ class GameCore {
             this.cancelTargeting();
             if (!targets.includes(regionId)) return;
             if (state.type === 'give') {
-                const result = this.data.act('giveTroops', state.fromId, regionId, state.forces);
+                const result = this.data.act('sendGarrison', state.fromId, regionId, state.forces);
                 if (!result.ok) { this.ui.toast(result.reason); return; }
-                this.ui.toast(`Передано союзнику (${this.data.countries[this.data.regions[regionId].owner].name}): ${result.text}`);
+                this.ui.toast(`🛡️ Войска в помощь: ${this.data.regions[regionId].name} (${this.data.countries[this.data.regions[regionId].owner].name}). Вернуть — в карточке области`);
                 this.map.drawArmyMarkers();
                 this.loop.updateTopBarUI();
                 SaveGame.save(this.data);
@@ -1041,7 +1075,7 @@ class GameCore {
             }
             const transport = this.data.expeditionQuote(isMove ? 'movements' : 'attacks', state.fromId, regionId, state.forces);
             if (transport.cost) {
-                const odds = isMove ? null : this.attackOdds(regionId, state.forces);
+                const odds = isMove ? null : this.attackOdds(regionId, state.forces, state.fromId);
                 this.ui.showDecision({
                     title: isMove ? 'Межконтинентальная переброска' : 'Экспедиция',
                     text: `Перевозка за один ход: ${this.ui.money(transport.cost)} и ${transport.influence} влияния.${odds ? ` Шансы атаки: ${odds.label}. Сила ${odds.attack}, нужно ${odds.needed}.` : ''} При отмене приказа затраты возвращаются.`,
@@ -1063,11 +1097,11 @@ class GameCore {
             }
             // Перед атакой оцениваем шансы по той же формуле, что и бой:
             // заведомо проигрышную атаку лучше переспросить, чем молча отправить.
-            const odds = this.attackOdds(regionId, state.forces);
+            const odds = this.attackOdds(regionId, state.forces, state.fromId);
             const queue = () => {
                 const result = this.data.act('queueAttack', state.fromId, regionId, state.forces);
                 if (!result.ok) { this.ui.toast(result.reason); return; }
-                this.afterOrder(`Наступление запланировано · шансы ${odds.label}`);
+                this.afterOrder(`Наступление запланировано · шансы ${odds.label}${odds.flank ? ` · удар с ${odds.directions} направлений +${Math.round(odds.flank * 100)}%` : ''}`);
             };
             if (odds.ratio >= 0.9) { queue(); return; }
             const target = this.data.getRegion(regionId);

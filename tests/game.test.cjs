@@ -37,7 +37,7 @@ test('failed turns preserve the last complete save and cannot run again',()=>{
  Object.assign(loop,{data:d,endTurnBtn:{},ui:{toast(){}},ai:{planTurn(){calls++;d.countries.UA.money=0;throw new Error('Injected turn failure');}}});
  loop.processTurn();assert.equal(loop.failed,true);assert.equal(loop.endTurnBtn.disabled,true);assert.equal(SaveGame.save(d),false);assert.equal(JSON.stringify(SaveGame.load().game),before);loop.processTurn();assert.equal(calls,1);
 });
-test('map fingerprint changes with geometry; such saves migrate and keep a backup',()=>{const {GameData,SaveGame,RegionsDB,localStorage}=engine();const d=new GameData('UA');d.countries.UA.money=12345678;d.turn=7;SaveGame.save(d);const old=SaveGame.mapId();RegionsDB['CA-6'].path+='M0,0Z';SaveGame.signature=null;assert.notEqual(SaveGame.mapId(),old);const loaded=SaveGame.load();assert.ok(loaded,SaveGame.error);assert.equal(SaveGame.migrated,true);assert.equal(loaded.game.turn,7);assert.equal(loaded.game.countries.UA[0],12345678);assert.ok(localStorage.getItem(SaveGame.BACKUP_KEY));});
+test('map fingerprint changes with geometry; a save with the same regions loads as is, network campaigns keep their players',()=>{const {GameData,SaveGame,RegionsDB,localStorage}=engine();const d=new GameData('UA',{humans:['PL']});d.countries.UA.money=12345678;d.turn=7;d.net={id:'c1',code:'ABCD',clients:{},names:{}};SaveGame.campaignRole='host';assert.ok(SaveGame.save(d));const single=new GameData('UA');single.turn=4;SaveGame.save(single);const old=SaveGame.mapId();RegionsDB['CA-6'].path+='M0,0Z';SaveGame.signature=null;assert.notEqual(SaveGame.mapId(),old);const loaded=SaveGame.load();assert.ok(loaded,SaveGame.error);assert.equal(SaveGame.migrated,false,'форма границ — не повод для переноса');assert.equal(loaded.game.turn,4);assert.equal(loaded.map,SaveGame.mapId());const camp=SaveGame.loadCampaign('c1');assert.equal(camp.game.turn,7);assert.equal(camp.game.countries.UA[0],12345678);assert.equal(camp.game.humans.join(),'UA,PL','игроки кампании на месте');});
 test('saves from another map are rejected and retained',()=>{const {GameData,SaveGame,localStorage}=engine();const save=new GameData('UA').serialize();const regions={};for(const [id,r] of Object.entries(save.regions))regions['X'+id]=r;save.regions=regions;localStorage.setItem(SaveGame.KEY,JSON.stringify({map:'old',game:save}));assert.equal(SaveGame.load(),null);assert.ok(SaveGame.error);assert.ok(localStorage.getItem(SaveGame.KEY));});
 test('v2 saves from the previous version migrate with defaults for new fields',()=>{const {GameData,SaveGame,localStorage}=engine();const d=new GameData('DE',{scenario:'war2024'});d.startWar('DE','PL');d.setOwner('PL-1','DE');const v3=d.serialize();const v2={v:2,player:'DE',cheat:false,scenario:'war2024',date:v3.date,turn:5,regions:{},countries:{},wars:v3.wars,truces:[],orders:{recruitment:[],attacks:[],movements:[],recon:[]},decisions:[],history:[],gameOver:false};for(const [id,r] of Object.entries(v3.regions))v2.regions[id]=r.slice(0,4);for(const [id,c] of Object.entries(v3.countries))v2.countries[id]=c.slice(0,7);localStorage.setItem(SaveGame.KEY,JSON.stringify({map:'1996:AD-1:ZW-9',savedAt:1,game:v2}));const loaded=SaveGame.load();assert.ok(loaded,SaveGame.error);const r=GameData.restore(loaded.game);assert.equal(r.regions['PL-1'].owner,'DE');assert.equal(r.turn,5);assert.ok(r.isAtWar('DE','PL'));assert.equal(r.countries.DE.policy,'balanced');assert.equal(r.difficulty,'normal');});
 test('export produces a file that imports back identically',()=>{const {GameData,SaveGame}=engine();const d=new GameData('BR',{difficulty:'hard'});d.turn=3;const file=SaveGame.exportFile(d);assert.match(file.name,/br-turn3\.json$/);const back=GameData.restore(SaveGame.parse(file.text).game);assert.equal(SaveGame.migrated,false);assert.equal(JSON.stringify(back.serialize()),JSON.stringify(d.serialize()));assert.throws(()=>SaveGame.parse('{"nope":1}'));});
@@ -731,8 +731,8 @@ test('council: convenes on schedule, humans vote, sanctions cut trade and expire
     Council.convene(d, events);
     assert.equal(d.council.kind, 'sanctions');
     assert.equal(d.council.target, 'DE');
-    assert.ok(events[0].message.includes('Мировой совет'));
-    assert.equal(d.decisions[0].type, 'council');
+    assert.ok(events.some(e => e.message.includes('Мировой совет')));
+    assert.equal(d.decisions.length, 0, 'цель санкций не голосует');
     assert.equal(d.seatOf('PL').decisions[0].type, 'council');
     // Польша голосует «за» — командой, как в сетевой игре
     const guest = GameData.restore(JSON.parse(JSON.stringify(d.serialize())));
@@ -740,8 +740,7 @@ test('council: convenes on schedule, humans vote, sanctions cut trade and expire
     guest.act('answerDecision', true);
     d.replay('PL', guest.recorder);
     assert.equal(d.council.votes.PL, true);
-    d.act('answerDecision', false);
-    assert.equal(d.council.votes.DE, false);
+    assert.equal(d.council.votes.DE, false, 'голос цели — против сам');
     const back = GameData.restore(JSON.parse(JSON.stringify(d.serialize())));
     assert.equal(JSON.stringify(back.council), JSON.stringify(d.council));
     // соседи Германии не любят захватчиков: принимают
@@ -816,4 +815,105 @@ test('a country with debt that loses its last region keeps a finite treasury; br
     // что именно не так — видно в сообщении
     const bad = JSON.parse(JSON.stringify(d.serialize())); bad.countries.KG[1] = 5;
     assert.throws(() => GameData.restore(bad), /страна KG/);
+});
+
+test('council: the sanctioned human does not vote against themselves', () => {
+    const { GameData, Council, COUNCIL } = engine(), d = new GameData('FR', { humans: ['DE'] });
+    d.startWar('FR', 'ES');
+    for (const r of d.getCountryRegions('ES').filter(r => r.id !== d.countries.ES.capital).slice(0, 3)) d.setOwner(r.id, 'FR');
+    d.turn = COUNCIL.FIRST;
+    const events = [];
+    Council.convene(d, events);
+    assert.equal(d.council.target, 'FR');
+    assert.equal(d.decisions.filter(x => x.type === 'council').length, 0, 'Франции не предлагают голосовать против себя');
+    assert.equal(d.seatOf('DE').decisions.filter(x => x.type === 'council').length, 1, 'Германия голосует');
+    assert.equal(d.council.votes.FR, false, 'голос цели — против');
+    assert.ok(events.some(e => e.for === 'FR' && e.message.includes('против вас') && e.message.includes('3 области')));
+    assert.ok(events.some(e => e.exceptFor === 'FR' && e.message.includes('созван')));
+    assert.equal(Council.vote(d, 'FR', true), false, 'и командой «за» тоже нельзя');
+    assert.equal(d.council.votes.FR, false);
+    // старое сохранение, где решение уже лежит у цели, — отвечается «против» само
+    d.decisions.push({ type: 'council', from: 'FR', kind: 'sanctions' });
+    d.answerDecision(true);
+    assert.equal(d.council.votes.FR, false);
+    assert.equal(Council.regionsWord(1) + '|' + Council.regionsWord(21) + '|' + Council.regionsWord(12) + '|' + Council.regionsWord(5), '1 область|21 область|12 областей|5 областей');
+});
+
+test('battle: a strike from several regions gets a flank bonus; odds include strikes already queued', () => {
+    const { GameData, RULES } = engine();
+    const setup = () => {
+        const d = new GameData('UA');
+        d.startWar('UA', 'MD');
+        const target = d.getCountryRegions('MD').find(r => d.getNeighbors(r.id).filter(id => d.regions[id]?.owner === 'UA').length >= 1);
+        // две свои области рядом с целью
+        let sources = d.getNeighbors(target.id).filter(id => d.regions[id]?.owner === 'UA');
+        if (sources.length < 2) { const other = d.getNeighbors(target.id).find(id => d.regions[id] && d.regions[id].owner !== 'UA' && id !== target.id); d.setOwner(other, 'UA'); sources = d.getNeighbors(target.id).filter(id => d.regions[id]?.owner === 'UA'); }
+        for (const id of sources) d.regions[id].army = { ...d.emptyArmy(), infantry: 20 };
+        return { d, target, sources };
+    };
+    // один удар 20 пехоты из одной области
+    const a = setup();
+    a.d.queueAttack(a.sources[0], a.target.id, { infantry: 20 });
+    const one = a.d.processOrders().logs.find(l => l.for === 'UA');
+    // те же 20, но по 10 из двух областей
+    const b = setup();
+    b.d.queueAttack(b.sources[0], b.target.id, { infantry: 10 });
+    const est = b.d.strikeEstimate(b.target.id, { infantry: 10 }, b.sources[1]);
+    assert.equal(est.directions, 2);
+    assert.ok(Math.abs(est.flank - RULES.FLANK_BONUS) < 1e-9);
+    b.d.queueAttack(b.sources[1], b.target.id, { infantry: 10 });
+    const two = b.d.processOrders().logs.find(l => l.for === 'UA');
+    assert.ok(Math.abs(two.power.attack / one.power.attack - (1 + RULES.FLANK_BONUS)) < 0.02, `${two.power.attack} vs ${one.power.attack}`);
+    assert.ok(two.detail.includes('направлений'));
+    assert.equal(GameData.flankBonus(5), RULES.FLANK_MAX);
+});
+
+test('garrisons: troops sent to an ally stay mine, defend, cost upkeep, come home when the alliance ends', () => {
+    const { GameData, Diplomacy, RULES } = engine();
+    const d = new GameData('PL', { humans: ['DE'] });
+    Diplomacy.sign(d, 'PL', 'DE', 'alliance');
+    const from = d.getCountryRegions('PL').find(r => d.getNeighbors(r.id).some(id => d.regions[id]?.owner === 'DE'));
+    const to = d.getNeighbors(from.id).find(id => d.regions[id]?.owner === 'DE');
+    from.army = { ...d.emptyArmy(), infantry: 30, tanks: 5 };
+    const powerBefore = d.calculateMilitaryPower('PL'), upkeepBefore = d.countryBalance('PL').upkeep;
+    const defBefore = d.defensePower(d.regions[to], { infantry: 10 });
+    assert.equal(d.act('sendGarrison', from.id, to, { infantry: 20, tanks: 5 }).ok, true);
+    assert.equal(from.army.infantry, 10);
+    assert.equal(d.regions[to].army.infantry === undefined ? 0 : 1, 1, 'армия хозяина не тронута');
+    assert.equal(d.garrisonsIn(to)[0].cc, 'PL');
+    assert.equal(d.calculateMilitaryPower('PL'), powerBefore, 'войска по-прежнему в силе Польши');
+    assert.equal(d.countryBalance('PL').upkeep, upkeepBefore, 'и Польша за них платит');
+    assert.ok(d.defensePower(d.regions[to], { infantry: 10 }) > defBefore, 'оборона области сильнее');
+    assert.ok(d.seatOf('DE').diploEvents === undefined);
+    assert.ok(d.diploEvents.some(e => e.for === 'DE' && e.message.includes('в помощь')));
+    // сохранение
+    const back = GameData.restore(JSON.parse(JSON.stringify(d.serialize())));
+    assert.equal(back.garrisonsIn(to)[0].army.infantry, 20);
+    // бой: враг бьёт по области — контингент теряет долю и отходит домой при падении
+    d.startWar('CZ', 'DE');
+    const enemyFrom = d.getNeighbors(to).find(id => d.regions[id]?.owner === 'CZ');
+    if (enemyFrom) {
+        d.regions[enemyFrom].army = { ...d.emptyArmy(), tanks: 400 };
+        d.queueAttack(enemyFrom, to, { tanks: 400 }, 'CZ');
+        const { logs } = d.processOrders();
+        assert.ok(logs.some(l => l.for === 'DE' && l.detail.includes('помогали')));
+        if (d.regions[to].owner === 'CZ') assert.equal(d.garrisonsIn(to).length, 0, 'из павшей области отошли');
+    }
+    // возврат вручную
+    const g = d.garrisonsOf('PL')[0];
+    if (g) { const r = d.act('recallGarrison', g.region); assert.equal(r.ok, true); assert.equal(d.garrisonsOf('PL').length, 0); }
+    // союз распался — войска дома сами
+    const e = new GameData('PL', { humans: ['DE'] });
+    Diplomacy.sign(e, 'PL', 'DE', 'alliance');
+    const f2 = e.getCountryRegions('PL').find(r => e.getNeighbors(r.id).some(id => e.regions[id]?.owner === 'DE'));
+    const t2 = e.getNeighbors(f2.id).find(id => e.regions[id]?.owner === 'DE');
+    f2.army = { ...e.emptyArmy(), infantry: 10 };
+    e.act('sendGarrison', f2.id, t2, { infantry: 10 });
+    delete e.alliances[e.pairKey('PL', 'DE')];
+    const { events } = e.applyEndOfTurn();
+    assert.equal(e.garrisonsOf('PL').length, 0);
+    assert.ok(events.some(x => x.for === 'PL' && x.message.includes('вернулись домой')));
+    assert.ok(e.getCountryRegions('PL').reduce((a, r) => a + r.army.infantry, 0) >= 10 * 0.8, 'войска дома (с учётом дезертирства)');
+    const bad = d.serialize(); bad.garrisons = { 'XX-1': {} };
+    assert.throws(() => GameData.restore(bad), /войска союзников/);
 });

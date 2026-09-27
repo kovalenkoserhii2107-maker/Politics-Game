@@ -228,6 +228,8 @@ input[type=range] { width: 100%; cursor: pointer; accent-color: var(--ui-accent)
 .modal-header h2 { margin: 0; font-size: 1.3em; color: var(--ui-accent-country); }
 .modal-header .close-btn { position: static; border-radius: 50%; }
 .modal-body { overflow-y: auto; display: flex; flex-direction: column; gap: 10px; padding-right: 5px; }
+/* содержимое окна не сжимается под высоту экрана — окно прокручивается */
+.modal-body > * { flex-shrink: 0; }
 .gov-section {
     background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.05);
     padding: 14px; border-radius: 8px; margin-bottom: 14px;
@@ -531,7 +533,7 @@ body { overscroll-behavior: none; }
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Exo+2:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;700&display=swap">
 <link rel="stylesheet" href="css/campaign.css?v=fe17f3ba7c">
-<link rel="stylesheet" href="css/theme.css?v=299d4af6da">
+<link rel="stylesheet" href="css/theme.css?v=7af3dc52d4">
 <link rel="stylesheet" href="css/map.css?v=067de1c831">
 <link rel="stylesheet" href="css/start.css?v=5288a0c5d1">
 </head>
@@ -921,7 +923,7 @@ body { overscroll-behavior: none; }
             <button id="recruit-btn" class="action-btn">🏭 Набрать войска</button>
             <button id="init-move-btn" class="action-btn">🚚 Перебросить войска</button>
             <button id="init-attack-btn" class="action-btn">⚔️ Наступление</button>
-            <button id="init-give-btn" class="action-btn">🤝 Войска союзнику</button>
+            <button id="init-give-btn" class="action-btn">🛡️ В помощь союзнику</button>
             <button id="init-disband-btn" class="action-btn">🏳️ Распустить войска</button>
             <div id="action-hint" class="hint"></div>
         </div>
@@ -977,8 +979,8 @@ body { overscroll-behavior: none; }
 
 <!-- Данные карты (сгенерированы tools/build_map.js) -->
 <script src="js/data/CountriesDB.js?v=a41feb45b1"></script>
-<script src="js/data/RegionsDB.js?v=f24b0480e8"></script>
-<script src="js/data/NeighborsDB.js?v=66afe4c16b"></script>
+<script src="js/data/RegionsDB.js?v=fe89cece7a"></script>
+<script src="js/data/NeighborsDB.js?v=9a9fb6f581"></script>
 <script src="js/data/CitiesDB.js?v=ecb769b990"></script>
 
 <!-- Движок -->
@@ -992,14 +994,14 @@ body { overscroll-behavior: none; }
 <script src="js/Events.js?v=b551e27a37"></script>
 <script src="js/Unrest.js?v=5bc401cc94"></script>
 <script src="js/Trade.js?v=8f3185be41"></script>
-<script src="js/Council.js?v=c9882d1710"></script>
+<script src="js/Council.js?v=6a939382d4"></script>
 <script src="js/Charts.js?v=01f1ed532c"></script>
-<script src="js/GameData.js?v=cb8b1ce900"></script>
+<script src="js/GameData.js?v=8104ac941a"></script>
 <script src="js/AI.js?v=f95e3d88a4"></script>
-<script src="js/MapEngine.js?v=080c105e91"></script>
-<script src="js/UIManager.js?v=842559921f"></script>
-<script src="js/GameLoop.js?v=5150897914"></script>
+<script src="js/MapEngine.js?v=661ad5d9d1"></script>
+<script src="js/UIManager.js?v=d2b799207e"></script>
+<script src="js/GameLoop.js?v=7fe1aacc86"></script>
 <script src="js/Tutorial.js?v=53ff18fd7f"></script>
-<script src="js/main.js?v=9210b5657a"></script>
+<script src="js/main.js?v=9c850221ac"></script>
 </body>
 </html>

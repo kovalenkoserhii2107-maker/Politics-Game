@@ -1084,6 +1084,28 @@ class MapEngine {
             this.badges.push({ x: region.lx, y: region.ly, w });
             this.cullBadges.push({ el: outer, x: region.lx, y: region.ly, w: 0, h: 0, vis: true });
         }
+        // рядом — войска союзников в области: свои зелёные, чужие синие, со щитом
+        for (const [regionId] of Object.entries(this.data.garrisons || {})) {
+            const region = this.data.regions[regionId];
+            const list = this.data.garrisonsIn(regionId);
+            const seen = region.owner === player || list.some(g => g.cc === player) || Diplomacy.isAllied(this.data, player, region.owner);
+            if (!seen) continue;
+            // сдвиг — в единицах значка: значки масштабируются вокруг своей точки
+            const main = this.badges.find(b => b.x === region.lx && b.y === region.ly);
+            let x = main ? main.w / 2 + 2 : 0;
+            for (const g of list) {
+                const label = '🛡' + this.formatPower(this.data.armyPower(g.army, g.cc));
+                const w = 14 + label.length * 6;
+                const outer = document.createElementNS(ns, 'g');
+                outer.setAttribute('class', `army-badge garrison ${g.cc === player ? 'mine' : 'ally'}`);
+                outer.setAttribute('transform', `translate(${region.lx},${region.ly})`);
+                outer.innerHTML = `<g class="badge-inner"><rect x="${x}" y="-8" width="${w}" height="16" rx="2"/>`
+                    + `<text x="${x + 4}" y="0.5">${label}</text></g>`;
+                fragment.appendChild(outer);
+                this.cullBadges.push({ el: outer, x: region.lx, y: region.ly, w: 0, h: 0, vis: true });
+                x += w + 2;
+            }
+        }
         this.armyLayer.appendChild(fragment);
         this.cull();
         this.scheduleDeclutter();

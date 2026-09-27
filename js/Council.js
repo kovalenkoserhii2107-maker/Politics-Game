@@ -24,7 +24,7 @@ const COUNCIL_KINDS = {
     sanctions: {
         icon: '🚫',
         title: (d, c) => `санкции — ${d.countries[c.target].name}`,
-        text: (d, c) => `${d.countries[c.target].name} удерживает ${Council.taken(d, c.target)} областей других стран. Если совет согласится, ${COUNCIL.SANCTION_TURNS} ходов её торговля на мировом рынке упадёт до ${Math.round(COUNCIL.SANCTION_TRADE * 100)}%, а отношения с голосовавшими «за» ухудшатся.`,
+        text: (d, c) => `${d.countries[c.target].name} удерживает ${Council.regionsWord(Council.taken(d, c.target))} других стран. Если совет согласится, ${COUNCIL.SANCTION_TURNS} ходов её торговля на мировом рынке упадёт до ${Math.round(COUNCIL.SANCTION_TRADE * 100)}%, а отношения с голосовавшими «за» ухудшатся.`,
     },
     truce: {
         icon: '🕊️',
@@ -34,6 +34,13 @@ const COUNCIL_KINDS = {
 };
 
 class Council {
+    // 1 область, 3 области, 5 областей
+    static regionsWord(n) {
+        const m10 = n % 10, m100 = n % 100;
+        const word = m10 === 1 && m100 !== 11 ? 'область' : m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14) ? 'области' : 'областей';
+        return `${n} ${word}`;
+    }
+
     static init(d) {
         d.council = null;       // { kind, target, turn, votes: { cc: true|false } }
         d.sanctions = {};       // cc -> ход, до которого действуют санкции
@@ -105,14 +112,20 @@ class Council {
         for (const cc of d.humans) {
             const seat = d.seatOf(cc);
             if (!seat || !d.countries[cc].alive || !d.regionsByCountry[cc].length) continue;
+            // против себя не голосуют: голос цели — «против», без вопроса
+            if (cc === council.target) {
+                council.votes[cc] = false;
+                events.push({ type: 'council', for: cc, message: `🏛️ Мировой совет голосует за санкции против вас: вы удерживаете ${Council.regionsWord(Council.taken(d, cc))} других стран. Ваш голос — «против». Итог — в следующем отчёте; склонить соседей на свою сторону помогут подарки и договоры.` });
+                continue;
+            }
             seat.decisions.push({ type: 'council', from: council.target || cc, kind: council.kind });
         }
-        events.push({ type: 'council', message: `🏛️ Мировой совет созван: ${kind.title(d, council)}. Голосование — этот ход, итог — в следующем отчёте.` });
+        events.push({ type: 'council', ...(council.target && d.isHuman(council.target) ? { exceptFor: council.target } : {}), message: `🏛️ Мировой совет созван: ${kind.title(d, council)}. Голосование — этот ход, итог — в следующем отчёте.` });
     }
 
     static vote(d, cc, yes) {
         const c = d.council;
-        if (!c || !d.isHuman(cc) || d.turn >= c.turn) return false;
+        if (!c || !d.isHuman(cc) || d.turn >= c.turn || cc === c.target) return false;
         c.votes[cc] = !!yes;
         return true;
     }
@@ -161,7 +174,7 @@ class Council {
             title: `🏛️ Мировой совет: ${kind.title(d, { target: decision.from })}`,
             text: `${kind.text(d, { target: decision.from })} Ваш голос весит ${Council.weight(d, d.playerCountry)} (по населению). Итог — в отчёте следующего хода.`,
             accept: 'Голосовать «за»', decline: 'Голосовать «против»',
-            open: !!c && c.kind === decision.kind,
+            open: !!c && c.kind === decision.kind && c.target !== d.playerCountry,
         };
     }
 
