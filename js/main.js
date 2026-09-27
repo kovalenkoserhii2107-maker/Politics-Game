@@ -438,7 +438,7 @@ class GameCore {
         try {
             const host = new NetHost(this.myNetName());
             this.data.recorder = null;
-            await host.start(this.data);
+            await host.start(this.data, { any: true });
             guest.callbacks = {};
             guest.leave();
             SaveGame.campaignRole = 'host';
@@ -1409,27 +1409,37 @@ class GameCore {
         // свободна — мы сервер. Занята — значит, её уже открыл другой игрок:
         // подключаемся к нему. Не вышло (брокер ещё помнит прежний сервер) —
         // пробуем снова, пока не получится.
+        // «Продолжить» кампанию — одинаково для всех:
+        // 1) основная комната свободна (или её держит наш же «призрак») — мы сервер;
+        // 2) занята — подключаемся к тому, кто в любой из комнат кампании;
+        // 3) никто не ответил — основную держит чужой «призрак»: занимаем
+        //    запасную, второй игрок найдёт нас там сам.
         const resumeCampaign = async data => {
             $('net-box').scrollIntoView({ block: 'nearest' });
             const names = (data.net && data.net.names) || {};
+            const name = names[data.playerCountry] || playerName();
             const id = data.net && data.net.id;
             const until = Date.now() + 90000;
+            const opened = session => {
+                netView = 'idle'; netNote = '';
+                launch(data, false, session);
+                SaveGame.save(data);
+                window.game.ui.toast('Кампания открыта. Второй игрок — «▶ Продолжить» у себя, подключится сам.');
+            };
             netNote = 'Открываем сетевую кампанию…'; netView = 'busy'; renderNet();
             for (let attempt = 0; Date.now() < until && netView === 'busy'; attempt++) {
-                const session = new NetHost(names[data.playerCountry] || playerName());
-                try {
-                    await session.start(data);
-                    netView = 'idle'; netNote = '';
-                    launch(data, false, session);
-                    SaveGame.save(data);
-                    window.game.ui.toast('Кампания открыта. Второй игрок — «▶ Продолжить» у себя, подключится сам.');
-                    return;
-                } catch (err) {
-                    if (!err.taken || !id) { netView = 'idle'; netNote = err.message; renderNet(); return; }
-                }
-                netNote = 'Кампанию уже открыл другой игрок — подключаемся к нему…'; renderNet();
+                let session = new NetHost(name);
+                try { await session.start(data); opened(session); return; }
+                catch (err) { if (!err.taken || !id) { netView = 'idle'; netNote = err.message; renderNet(); return; } }
+                if (netView !== 'busy') return;
+                netNote = 'Кампания уже открыта у другого игрока — подключаемся к нему…'; renderNet();
                 if (await joinGame('', { id, cc: data.playerCountry, data })) return;
-                netNote = `Ждём, пока освободится связь (попытка ${attempt + 2})…`; renderNet();
+                if (netView !== 'busy') return;
+                netNote = 'Никто не ответил — открываем кампанию в запасной комнате…'; renderNet();
+                session = new NetHost(name);
+                try { await session.start(data, { any: true }); opened(session); return; }
+                catch (err) { if (!err.taken) { netView = 'idle'; netNote = err.message; renderNet(); return; } }
+                netNote = `Связь ещё занята — пробуем снова (попытка ${attempt + 2})…`; renderNet();
                 await Net.sleep(2500);
             }
             if (netView === 'busy') { netView = 'idle'; netNote = 'Не удалось открыть кампанию. Проверьте интернет и попробуйте ещё раз.'; renderNet(); }
