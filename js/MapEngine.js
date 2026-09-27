@@ -82,6 +82,7 @@ class MapEngine {
             return el;
         };
         this.regionLayer = g('layer-regions');
+        this.borderLayer = g('layer-borders');
         this.cityLayer = g('layer-cities');
         this.regionLabelLayer = g('layer-region-labels');
         this.labelLayer = g('layer-labels');
@@ -111,6 +112,22 @@ class MapEngine {
             this.cullRegions.push({ el: path, x: info.bx, y: info.by, w: info.bw, h: info.bh, vis: true });
         }
         this.regionLayer.appendChild(fragment);
+
+        // Границы государств: общий участок соседних областей виден, когда
+        // у них разные хозяева (refreshColors). Заливка стран без обводки
+        // иначе сливается на общем плане.
+        this.borders = [];
+        if (typeof BordersDB !== 'undefined') {
+            const lines = document.createDocumentFragment();
+            for (const [a, b, d] of BordersDB) {
+                if (!this.paths.has(a) || !this.paths.has(b)) continue;
+                const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+                path.setAttribute('d', d);
+                lines.appendChild(path);
+                this.borders.push({ el: path, a, b, on: false });
+            }
+            this.borderLayer.appendChild(lines);
+        }
     }
 
     // --- выделение ---------------------------------------------------
@@ -181,6 +198,10 @@ class MapEngine {
             path.classList.toggle('own', region.owner === player);
             path.classList.toggle('revolt', !!(this.data.revolts && this.data.revolts[id]));
             path.classList.toggle('operation', targets.has(id));
+        }
+        for (const line of this.borders || []) {
+            const on = this.data.getRegion(line.a).owner !== this.data.getRegion(line.b).owner;
+            if (on !== line.on) { line.on = on; line.el.classList.toggle('on', on); }
         }
         this.drawArmyMarkers();
     }
@@ -723,14 +744,21 @@ class MapEngine {
             const component = this.largestComponent(regions, countryId);
             if (!component.length) continue;
 
-            let sumX = 0, sumY = 0;
+            // центр — по площади на экране (px карты): крупные области
+            // весомее, иначе подпись России тянуло бы к мелким субъектам
+            let sumX = 0, sumY = 0, sumW = 0;
             let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
             for (const region of component) {
-                sumX += region.lx; sumY += region.ly;
-                minX = Math.min(minX, region.lx); maxX = Math.max(maxX, region.lx);
-                minY = Math.min(minY, region.ly); maxY = Math.max(maxY, region.ly);
+                const w = Math.sqrt(this.screenArea(region.id));
+                sumX += region.lx * w; sumY += region.ly * w; sumW += w;
+                // вписанный круг области: рамка могла бы захватить далёкий остров
+                const r = RegionsDB[region.id].lr || 0;
+                minX = Math.min(minX, region.lx - r); maxX = Math.max(maxX, region.lx + r);
+                minY = Math.min(minY, region.ly - r); maxY = Math.max(maxY, region.ly + r);
             }
             const name = this.data.getCountry(countryId).name;
+            // размах — по центрам и вписанным кругам областей: страна из
+            // нескольких крупных областей не получает подпись меньше заслуженной
             const width = Math.max(maxX - minX, 4);
             const height = Math.max(maxY - minY, 4);
             // Размер подписи по размеру страны, но не больше 40 экранных
@@ -740,8 +768,8 @@ class MapEngine {
             fit = Math.min(fit, height * 0.7);
 
             const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-            text.setAttribute('x', (sumX / component.length).toFixed(2));
-            text.setAttribute('y', (sumY / component.length).toFixed(2));
+            text.setAttribute('x', (sumX / sumW).toFixed(2));
+            text.setAttribute('y', (sumY / sumW).toFixed(2));
             text.setAttribute('class', 'country-label');
             text.style.fontSize = `min(${fit.toFixed(3)}px, calc(var(--sw) * 40))`;
             text.textContent = name;
@@ -752,25 +780,39 @@ class MapEngine {
         this.updateLabelVisibility();
     }
 
-    // Крупнейший связный кусок владений — чтобы подпись не улетала в океан
-    // между материковой частью и далёкими островами.
+    screenArea(id) {
+        const r = RegionsDB[id].r || 0.5;
+        return Math.PI * r * r;
+    }
+
+    // Крупнейший (по площади) связный кусок владений — чтобы подпись не
+    // улетала в океан. Связь через далёкую переправу не считается: Французская
+    // Гвиана, Аляска или Гавайи — отдельные куски, а не часть «материка».
     largestComponent(regions, countryId) {
         const own = new Set(regions.map(r => r.id));
+        const gap = (a, b) => {
+            const p = RegionsDB[a], q = RegionsDB[b];
+            const dx = Math.max(0, p.bx - (q.bx + q.bw), q.bx - (p.bx + p.bw));
+            const dy = Math.max(0, p.by - (q.by + q.bh), q.by - (p.by + p.bh));
+            return Math.hypot(dx, dy);
+        };
         const seen = new Set();
-        let best = [];
+        let best = [], bestArea = -1;
         for (const region of regions) {
             if (seen.has(region.id)) continue;
             const component = [];
+            let area = 0;
             const queue = [region.id];
             seen.add(region.id);
             while (queue.length) {
                 const id = queue.pop();
                 component.push(this.data.regions[id]);
+                area += this.screenArea(id);
                 for (const nextId of this.data.getNeighbors(id)) {
-                    if (own.has(nextId) && !seen.has(nextId)) { seen.add(nextId); queue.push(nextId); }
+                    if (own.has(nextId) && !seen.has(nextId) && gap(id, nextId) <= MapEngine.LABEL_LINK_GAP) { seen.add(nextId); queue.push(nextId); }
                 }
             }
-            if (component.length > best.length) best = component;
+            if (area > bestArea) { best = component; bestArea = area; }
         }
         return best;
     }
@@ -1111,3 +1153,7 @@ class MapEngine {
         this.scheduleDeclutter();
     }
 }
+
+// Области дальше этого (px карты, ~200 км у экватора) — отдельный кусок
+// страны для подписи: заморские владения её не сдвигают.
+MapEngine.LABEL_LINK_GAP = 6;

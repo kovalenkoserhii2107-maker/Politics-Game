@@ -641,6 +641,7 @@ function main() {
 
     console.log('Записываем js/data/…');
     writeOutput(countries, regions, perCountry, neighbors, cityIndex);
+    writeBorders(buildBorders(regions));
     writeRemap(previousMap, regions);
 
     console.log(`Готово за ${((Date.now() - started) / 1000).toFixed(1)} с.`);
@@ -894,6 +895,66 @@ function buildNeighbors(regions, perCountry) {
     return out;
 }
 
+// Общие участки границы соседних областей: по ним игра рисует линию между
+// государствами — там, где у соседних областей разные владельцы. Иначе на
+// общем плане страны разделяет только разница цветов, и граница сливается.
+const BORDER_EPS = 0.15;    // px: вершина ближе к контуру соседа — на общей границе
+const BORDER_CELL = 0.5;
+
+function buildBorders(regions) {
+    const grid = new Map();
+    const cellKey = (x, y) => `${Math.floor(x / BORDER_CELL)},${Math.floor(y / BORDER_CELL)}`;
+    regions.forEach((r, i) => {
+        for (const poly of r.mp) for (const ring of poly) {
+            for (let k = 0; k < ring.length - 1; k++) {
+                const [ax, ay] = ring[k], [bx, by] = ring[k + 1];
+                const x1 = Math.floor((Math.min(ax, bx) - BORDER_EPS) / BORDER_CELL), x2 = Math.floor((Math.max(ax, bx) + BORDER_EPS) / BORDER_CELL);
+                const y1 = Math.floor((Math.min(ay, by) - BORDER_EPS) / BORDER_CELL), y2 = Math.floor((Math.max(ay, by) + BORDER_EPS) / BORDER_CELL);
+                for (let x = x1; x <= x2; x++) for (let y = y1; y <= y2; y++) {
+                    const key = `${x},${y}`;
+                    let bucket = grid.get(key);
+                    if (!bucket) grid.set(key, bucket = []);
+                    bucket.push([ax, ay, bx, by, i]);
+                }
+            }
+        }
+    });
+    const eps2 = BORDER_EPS * BORDER_EPS;
+    const near = (i, [x, y]) => {
+        const out = new Set();
+        for (const [ax, ay, bx, by, j] of grid.get(cellKey(x, y)) || []) {
+            if (j > i && !out.has(j) && G.segDist2(x, y, ax, ay, bx, by) < eps2) out.add(j);
+        }
+        return out;
+    };
+
+    const borders = [];
+    regions.forEach((r, i) => {
+        for (const poly of r.mp) for (const ring of poly) {
+            const n = ring.length - 1;
+            const sets = [];
+            const all = new Set();
+            for (let k = 0; k < n; k++) { sets.push(near(i, ring[k])); for (const j of sets[k]) all.add(j); }
+            for (const j of all) {
+                // участки подряд идущих вершин рядом с соседом j; кольцо замкнуто
+                const on = sets.map(s => s.has(j));
+                if (on.every(Boolean)) { borders.push([r.id, regions[j].id, ring.slice()]); continue; }
+                const start = on.findIndex(v => !v);
+                let run = [];
+                for (let s = 1; s <= n; s++) {
+                    const k = (start + s) % n;
+                    if (on[k]) run.push(ring[k]);
+                    if (!on[k] || s === n) {
+                        if (run.length >= 2) borders.push([r.id, regions[j].id, run]);
+                        run = [];
+                    }
+                }
+            }
+        }
+    });
+    return borders;
+}
+
 function seaPoints(region, step = 0.25) {
     const pts = [];
     for (const poly of region.mp) {
@@ -1136,6 +1197,28 @@ function writeOutput(countries, regions, perCountry, neighbors, cityIndex) {
         + 'if (typeof module !== \'undefined\' && module.exports) module.exports = { CitiesDB };\n');
 
     report(countries, regions, perCountry, neighbors, cityRows.length);
+}
+
+// Линии границ: [область, соседняя, путь] — путь в относительных
+// координатах (короче абсолютных почти вдвое).
+function writeBorders(borders) {
+    const rel = pts => {
+        let d = `M${pts[0][0].toFixed(2)},${pts[0][1].toFixed(2)}l`;
+        let px = Math.round(pts[0][0] * 100), py = Math.round(pts[0][1] * 100);
+        const steps = [];
+        for (let k = 1; k < pts.length; k++) {
+            const x = Math.round(pts[k][0] * 100), y = Math.round(pts[k][1] * 100);
+            if (x === px && y === py) continue;
+            steps.push(`${((x - px) / 100)},${((y - py) / 100)}`.replace(/(^|,)(-?)0\./g, '$1$2.'));
+            px = x; py = y;
+        }
+        return d + steps.join(' ').replace(/ -/g, '-');
+    };
+    const rows = borders.map(([a, b, pts]) => `['${a}','${b}','${rel(pts)}']`);
+    fs.writeFileSync(path.join(OUT_DIR, 'BordersDB.js'),
+        HEADER + 'const BordersDB = [\n' + rows.join(',\n') + '\n];\n\n'
+        + 'if (typeof module !== \'undefined\' && module.exports) module.exports = { BordersDB };\n');
+    console.log(`  линий границ: ${rows.length}`);
 }
 
 function q(s) { return "'" + String(s).replace(/\\/g, '\\\\').replace(/'/g, "\\'") + "'"; }
