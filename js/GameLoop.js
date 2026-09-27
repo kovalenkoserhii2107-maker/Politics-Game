@@ -66,13 +66,14 @@ const SaveGame = {
         this.migrated = false;
         const payload = typeof text === 'string' ? JSON.parse(text) : text;
         if (!payload || typeof payload !== 'object' || !payload.game) throw new Error('В файле нет партии');
-        if (payload.map === this.mapId()) {
-            try {
-                GameData.repairSave(payload.game);
-                GameData.validateSave(payload.game);
-                return payload;
-            } catch (e) { /* пробуем перенести */ }
-        }
+        // Карта могла поменяться только формой границ (исправили кусок
+        // области) — области и страны те же, партия подходит как есть:
+        // переносить её незачем, а перенос потерял бы игроков сетевой кампании.
+        try {
+            GameData.repairSave(payload.game);
+            GameData.validateSave(payload.game);
+            return payload.map === this.mapId() ? payload : { ...payload, map: this.mapId() };
+        } catch (e) { /* пробуем перенести */ }
         const game = GameData.migrateSave(payload.game);
         this.migrated = true;
         return { map: this.mapId(), savedAt: payload.savedAt || Date.now(), game };
