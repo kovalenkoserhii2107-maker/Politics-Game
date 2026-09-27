@@ -327,6 +327,17 @@ class UIManager {
         block.classList.toggle('top', top);
     }
 
+    // Совместная операция: объявить удар по вражеской области или увидеть,
+    // что союзник её уже наметил.
+    operationBlock(data, region) {
+        const player = data.playerCountry;
+        const ops = data.visibleOperations().filter(o => o.target === region.id);
+        const info = ops.map(o => `<div class="operation-line">🎯 Операция: ${this.escape(data.countries[o.by].name)}${o.by === player ? ' (вы)' : ''} — удар на ${o.turn === data.turn ? 'этом' : 'следующем'} ходу, +${Math.round(RULES.OPERATION_BONUS * 100)}% к удару союзников</div>`).join('');
+        const canPlan = data.isAtWar(player, region.owner) && Diplomacy.allies(data, player).length > 0 && !ops.some(o => o.by === player);
+        const plan = canPlan ? `<button class="mini-btn operation-btn" data-action="operation" data-region="${region.id}">🎯 Совместная операция на следующий ход</button>` : '';
+        return info || plan ? `<div class="operation-box">${info}${plan}</div>` : '';
+    }
+
     // Недовольство и восстание в области — видно всем, действовать может хозяин.
     unrestBlock(data, region) {
         const revolt = data.revolts[region.id];
@@ -407,7 +418,8 @@ class UIManager {
         this.fillEconomy(data, { countryId: country.id });
 
         const container = document.getElementById('region-army-container');
-        const seeArmy = isPlayer || data.isAtWar(data.playerCountry, country.id);
+        // союзники делятся разведкой: их армии видны как свои
+        const seeArmy = isPlayer || data.isAtWar(data.playerCountry, country.id) || Diplomacy.isAllied(data, data.playerCountry, country.id);
         container.innerHTML = this.powerBlock('Военная мощь', data.calculateMilitaryPower(country.id))
             + (seeArmy ? this.armyList(stats.army, 'Вооружённые силы', false)
                 : '<div class="hint">Точный состав армии известен только своих войск и противников.</div>');
@@ -446,8 +458,9 @@ class UIManager {
         const isNeighbor = data.isNeighborToPlayer(region.id);
         const reconActive = region.reconActiveUntil && region.reconActiveUntil >= data.currentDate;
         const atWar = data.isAtWar(player, region.owner);
-        const canSeePower = isOwner || isNeighbor || reconActive || atWar;
-        const canSeeGarrison = isOwner || reconActive;
+        const allied = Diplomacy.isAllied(data, player, region.owner);
+        const canSeePower = isOwner || isNeighbor || reconActive || atWar || allied;
+        const canSeeGarrison = isOwner || reconActive || allied;
 
         let html = canSeePower ? this.powerBlock('Военная мощь области', data.calculateRegionMilitaryPower(region.id)) : '';
         if (canSeeGarrison) {
@@ -467,7 +480,7 @@ class UIManager {
                     </button>
                 </div>`;
         }
-        html = this.unrestBlock(data, region) + html;
+        html = this.unrestBlock(data, region) + this.operationBlock(data, region) + html;
         if (data.multiplayer) html += `<button class="mini-btn ping-btn" data-action="ping" data-region="${region.id}">📍 Показать игрокам</button>`;
         document.getElementById('region-army-container').innerHTML = html;
         this.placeDiplomacy(false);

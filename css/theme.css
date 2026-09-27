@@ -561,3 +561,12 @@ body.net-waiting #end-turn-btn { background: var(--s3); }
 .trade-btn { display: block; background: var(--s3) !important; border: 1px solid var(--line-2) !important; color: var(--text) !important; margin-bottom: 10px; }
 .decision-alt { width: 100%; margin-top: 10px; }
 #decision-text.multiline { white-space: pre-line; }
+
+/* ---------- союзники ---------- */
+.army-badge.ally rect:first-child { stroke: #6aa8ff; }
+.army-badge.ally .badge-tick { fill: #6aa8ff; }
+#world-map .region.operation { stroke: var(--warn) !important; stroke-width: calc(var(--sw) * 3) !important; stroke-dasharray: calc(var(--sw) * 6) calc(var(--sw) * 3); }
+.operation-box { margin: 0 0 12px; display: flex; flex-direction: column; gap: 6px; }
+.operation-line { padding: 8px 10px; background: var(--warn-soft); border: 1px solid rgba(255, 176, 32, 0.45); border-radius: var(--r); color: var(--warn); font-size: 0.86rem; }
+.operation-btn { min-height: 44px; }
+#init-give-btn { background: var(--s3); color: var(--text); border: 1px solid #6aa8ff; }

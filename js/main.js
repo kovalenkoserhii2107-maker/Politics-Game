@@ -120,6 +120,16 @@ class GameCore {
             SaveGame.save(d);
             return;
         }
+        if (action === 'operation') {
+            const result = d.act('planOperation', btn.dataset.region);
+            if (!result.ok) { this.ui.toast(result.reason); return; }
+            if (this.net) this.net.ping(btn.dataset.region);
+            this.ui.toast(`🎯 Операция объявлена, цель — ${d.regions[btn.dataset.region].name}, удар на следующем ходу. Союзники увидят цель.`);
+            this.map.refreshColors();
+            this.showRegion(btn.dataset.region);
+            SaveGame.save(d);
+            return;
+        }
         if (action === 'trade-open') {
             this.ui.showTradeEditor(d, cc, null, offer => {
                 const result = d.act('proposeTrade', cc, offer);
@@ -439,7 +449,7 @@ class GameCore {
         const hint = document.getElementById('action-hint');
         hint.textContent = '';
         if (!region || region.owner !== d.playerCountry) {
-            ['recruit-btn', 'init-move-btn', 'init-attack-btn', 'init-disband-btn'].forEach(id => show(id, false));
+            ['recruit-btn', 'init-move-btn', 'init-attack-btn', 'init-give-btn', 'init-disband-btn'].forEach(id => show(id, false));
             return;
         }
         const capacity = d.recruitCapacityLeft(regionId);
@@ -452,6 +462,7 @@ class GameCore {
         const attackTargets = d.getValidAttackTargets(regionId);
         show('init-move-btn', hasTroops && d.getValidMoveTargets(regionId).length > 0);
         show('init-attack-btn', hasTroops && attackTargets.length > 0);
+        show('init-give-btn', hasTroops && d.allyTargets(regionId).length > 0);
         show('init-disband-btn', hasTroops);
 
         if (hasTroops && !attackTargets.length) {
@@ -489,11 +500,11 @@ class GameCore {
             panel.style.display = 'block';
             this.renderForceInputs(this.panelRegion);
             this.armyAction.type = type;
-            const titles = { attack: 'Силы для наступления', move: 'Силы для марша', disband: 'Какие войска распустить' };
-            const buttons = { attack: 'Выбрать цель атаки', move: 'Выбрать область для марша', disband: 'Распустить' };
+            const titles = { attack: 'Силы для наступления', move: 'Силы для марша', disband: 'Какие войска распустить', give: 'Какие войска передать союзнику' };
+            const buttons = { attack: 'Выбрать цель атаки', move: 'Выбрать область для марша', disband: 'Распустить', give: 'Выбрать область союзника' };
             document.getElementById('action-panel-title').textContent = titles[type];
             confirmBtn.textContent = buttons[type];
-            confirmBtn.classList.toggle('danger', type !== 'move');
+            confirmBtn.classList.toggle('danger', type === 'attack' || type === 'disband');
             // для роспуска по умолчанию ничего не выбрано — чтобы не распустить всё случайно
             if (type === 'disband') {
                 for (const row of document.querySelectorAll('#action-army-inputs .stepper-row')) this.ui.setStepper(row, 0);
@@ -503,6 +514,7 @@ class GameCore {
         document.getElementById('init-move-btn').addEventListener('click', () => openPanel('move'));
         document.getElementById('init-attack-btn').addEventListener('click', () => openPanel('attack'));
         document.getElementById('init-disband-btn').addEventListener('click', () => openPanel('disband'));
+        document.getElementById('init-give-btn').addEventListener('click', () => openPanel('give'));
 
         document.getElementById('cancel-action-btn').addEventListener('click', () => {
             panel.style.display = 'none';
@@ -527,14 +539,14 @@ class GameCore {
                 SaveGame.save(this.data);
                 return;
             }
-            const isMove = this.armyAction.type === 'move';
-            const targets = isMove ? this.data.getValidMoveTargets(regionId) : this.data.getValidAttackTargets(regionId);
+            const type = this.armyAction.type;
+            const targets = this.actionTargets(type, regionId);
             if (!targets.length) { this.ui.toast('Нет доступных целей'); return; }
 
-            this.armyAction = { active: true, type: this.armyAction.type, fromId: regionId, forces };
-            this.map.enableTargetSelection(targets, isMove ? 'move-target' : 'attack-target');
+            this.armyAction = { active: true, type, fromId: regionId, forces };
+            this.map.enableTargetSelection(targets, type === 'attack' ? 'attack-target' : 'move-target');
             this.ui.closePanelKeepTargeting();
-            this.ui.showTargetBanner(isMove ? 'Коснитесь области для марша' : 'Коснитесь цели атаки');
+            this.ui.showTargetBanner(type === 'move' ? 'Коснитесь области для марша' : type === 'give' ? 'Коснитесь области союзника' : 'Коснитесь цели атаки');
         });
 
         document.getElementById('target-cancel').addEventListener('click', () => this.cancelTargeting());
@@ -548,18 +560,25 @@ class GameCore {
         });
     }
 
+    actionTargets(type, fromId) {
+        const d = this.data;
+        if (type === 'give') return d.allyTargets(fromId);
+        return type === 'move' ? d.getValidMoveTargets(fromId) : d.getValidAttackTargets(fromId);
+    }
+
     // Те же цели, что подсвечены на карте, но списком: в маленькую область
     // на телефоне пальцем не попасть. Атаки — от лучших шансов к худшим.
     showTargetList() {
         const state = this.armyAction;
         if (!state.active) return;
         const d = this.data;
-        const isMove = state.type === 'move';
-        const ids = isMove ? d.getValidMoveTargets(state.fromId) : d.getValidAttackTargets(state.fromId);
+        const isMove = state.type !== 'attack';
+        const give = state.type === 'give';
+        const ids = this.actionTargets(state.type, state.fromId);
         const LIMIT = 60;
         const rows = ids.map(id => {
             const region = d.getRegion(id);
-            const transport = d.expeditionQuote(isMove ? 'movements' : 'attacks', state.fromId, id, state.forces);
+            const transport = give ? { cost: 0 } : d.expeditionQuote(isMove ? 'movements' : 'attacks', state.fromId, id, state.forces);
             const odds = isMove ? null : this.attackOdds(id, state.forces);
             return { id, region, transport, odds };
         }).sort((a, b) => (a.transport.cost ? 1 : 0) - (b.transport.cost ? 1 : 0)
@@ -567,15 +586,15 @@ class GameCore {
             || a.region.name.localeCompare(b.region.name, 'ru'));
 
         const from = d.getRegion(state.fromId);
-        document.getElementById('target-title').textContent = isMove ? 'Куда перебросить войска' : 'Кого атаковать';
+        document.getElementById('target-title').textContent = give ? 'Кому передать войска' : isMove ? 'Куда перебросить войска' : 'Кого атаковать';
         document.getElementById('target-hint').textContent = `Из области ${from.name}. `
-            + (isMove ? 'Выберите свою область.' : 'Шансы считаются по отправленным войскам.');
+            + (give ? 'Войска станут войсками союзника.' : isMove ? 'Выберите свою область.' : 'Шансы считаются по отправленным войскам.');
         document.getElementById('target-list').innerHTML = rows.slice(0, LIMIT).map(({ id, region, transport, odds }) => {
             const owner = d.countries[region.owner];
             const sea = transport.cost ? ` · морем ${this.ui.money(transport.cost)}` : '';
             const chip = odds
                 ? `<span class="odds ${odds.ratio >= 1 ? 'high' : odds.ratio >= 0.9 ? 'even' : 'low'}">${odds.label}</span>`
-                : `<span class="odds move">марш</span>`;
+                : `<span class="odds move">${give ? 'союзник' : 'марш'}</span>`;
             return `<button class="target-row" type="button" data-target="${id}">
                 <span class="swatch" style="background:${owner.color}"></span>
                 <span><b>${this.ui.escape(region.name)}</b><small>${this.ui.escape(owner.name)}${sea}</small></span>
@@ -773,9 +792,19 @@ class GameCore {
         if (this.armyAction.active) {
             const state = this.armyAction;
             const isMove = state.type === 'move';
-            const targets = isMove ? this.data.getValidMoveTargets(state.fromId) : this.data.getValidAttackTargets(state.fromId);
+            const targets = this.actionTargets(state.type, state.fromId);
             this.cancelTargeting();
             if (!targets.includes(regionId)) return;
+            if (state.type === 'give') {
+                const result = this.data.act('giveTroops', state.fromId, regionId, state.forces);
+                if (!result.ok) { this.ui.toast(result.reason); return; }
+                this.ui.toast(`Передано союзнику (${this.data.countries[this.data.regions[regionId].owner].name}): ${result.text}`);
+                this.map.drawArmyMarkers();
+                this.loop.updateTopBarUI();
+                SaveGame.save(this.data);
+                this.showRegion(state.fromId);
+                return;
+            }
             const transport = this.data.expeditionQuote(isMove ? 'movements' : 'attacks', state.fromId, regionId, state.forces);
             if (transport.cost) {
                 const odds = isMove ? null : this.attackOdds(regionId, state.forces);

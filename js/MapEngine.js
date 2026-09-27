@@ -165,6 +165,7 @@ class MapEngine {
     refreshColors() {
         const player = this.data.playerCountry;
         const enemies = new Set(this.data.enemiesOf(player));
+        const targets = new Set(this.data.visibleOperations ? this.data.visibleOperations().map(o => o.target) : []);
         for (const [id, path] of this.paths) {
             const region = this.data.getRegion(id);
             if (!region) continue;
@@ -179,6 +180,7 @@ class MapEngine {
             path.classList.toggle('enemy', enemies.has(region.owner));
             path.classList.toggle('own', region.owner === player);
             path.classList.toggle('revolt', !!(this.data.revolts && this.data.revolts[id]));
+            path.classList.toggle('operation', targets.has(id));
         }
         this.drawArmyMarkers();
     }
@@ -1031,6 +1033,9 @@ class MapEngine {
             if (isOwner) {
                 if (power <= 0) continue;
                 kind = 'own'; label = this.formatPower(power);
+            } else if (Diplomacy.isAllied(this.data, player, region.owner)) {
+                if (power <= 0) continue;
+                kind = 'ally'; label = this.formatPower(power);
             } else if (reconActive) {
                 kind = 'enemy'; label = this.formatPower(power);
             } else if (this.data.isNeighborToPlayer(region.id)) {
