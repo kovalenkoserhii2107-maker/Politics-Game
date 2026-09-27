@@ -7,13 +7,13 @@ function engine(){
  return Object.assign(vm.runInContext('({GameData,AI,SaveGame,GameLoop,RegionsDB,UnitsDB,DEVELOPMENT,POLICIES,Economy,RESOURCES,ECONOMY,Tech,TECH_TREE,MODERNIZATION,Diplomacy,DIPLOMACY,Missions,MISSION_KINDS,MISSION_RULES,Score,GOALS,Events,EVENTS,DEBT,CYCLES,INFRA,Unrest,REVOLT,Trade,Council,COUNCIL,RULES})',context),{localStorage:context.localStorage});
 }
 test('casualties are invariant under splitting an attack into orders',()=>{
- const {GameData}=engine();const fight=split=>{const d=new GameData('UA',{scenario:'war2024'});for(const id of ['UA-1','RU-19']){d.regions[id].army=d.emptyArmy();d.regions[id].army.infantry=10;}
- for(let i=0;i<(split?10:1);i++)assert.equal(d.queueAttack('UA-1','RU-19',{infantry:split?1:10}).ok,true);
+ const {GameData}=engine();const fight=split=>{const d=new GameData('UA',{scenario:'war2024'});for(const id of ['UA-2','RU-62']){d.regions[id].army=d.emptyArmy();d.regions[id].army.infantry=10;}
+ for(let i=0;i<(split?10:1);i++)assert.equal(d.queueAttack('UA-2','RU-62',{infantry:split?1:10}).ok,true);
  const log=d.processOrders().logs.find(l=>l.losses);return JSON.stringify(log.losses);};assert.equal(fight(true),fight(false));assert.ok(JSON.parse(fight(true)).attacker.infantry>0);
 });
 test('orders validate ownership, adjacency, funds, finite integer counts and reservations',()=>{
  const {GameData}=engine(),d=new GameData('UA');for(const n of [NaN,Infinity,-1,0,0.5])assert.equal(d.queueRecruitment('UA-1','infantry',n).ok,false);
- assert.ok(Number.isFinite(d.countries.UA.money));assert.equal(d.queueMovement('UA-1','US-1',{infantry:1}).ok,false);assert.equal(d.queueAttack('UA-1','RU-19',{infantry:1}).ok,false);
+ assert.ok(Number.isFinite(d.countries.UA.money));assert.equal(d.queueMovement('UA-1','US-1',{infantry:1}).ok,false);assert.equal(d.queueAttack('UA-2','RU-62',{infantry:1}).ok,false);
  const n=d.regions['UA-1'].army.infantry,to=d.getValidMoveTargets('UA-1')[0];assert.equal(d.queueMovement('UA-1',to,{infantry:n}).ok,true);assert.equal(d.queueMovement('UA-1',to,{infantry:1}).ok,false);
  const money=d.countries.UA.money;assert.equal(d.queueRecruitment('UA-1','tanks',1).ok,true);d.cancelOrder('recruitment',0);assert.equal(d.countries.UA.money,money);assert.equal(d.cancelOrder('movements',NaN),null);
 });
@@ -916,4 +916,34 @@ test('garrisons: troops sent to an ally stay mine, defend, cost upkeep, come hom
     assert.ok(e.getCountryRegions('PL').reduce((a, r) => a + r.army.infantry, 0) >= 10 * 0.8, 'войска дома (с учётом дезертирства)');
     const bad = d.serialize(); bad.garrisons = { 'XX-1': {} };
     assert.throws(() => GameData.restore(bad), /войска союзников/);
+});
+
+test('a campaign from the previous map is laid onto the re-cut regions and keeps its players', () => {
+    const { GameData, SaveGame, RegionsDB } = engine();
+    const d = new GameData('UA', { humans: ['PL'] });
+    d.net = { id: 'c1', code: 'ABCD', clients: {}, names: {} };
+    const [a, b] = Object.keys(RegionsDB).filter(id => RegionsDB[id].cc === 'UA' && d.regions[id].owner === 'UA' && id !== d.countries.UA.capital);
+    // на прежней карте: область a захвачена Польшей, в b стоят войска
+    d.setOwner(a, 'PL');
+    d.regions[b].army = { ...d.emptyArmy(), infantry: 40 };
+    d.regions[a].army = { ...d.emptyArmy(), infantry: 5 };
+    const money = d.countries.UA.money;
+    assert.equal(d.queueRecruitment(b, 'infantry', 1).ok, true);
+    const game = d.serialize();
+    // новая карта: b влилась в a, а новая b вышла из прежней a
+    const saved = SaveGame.remap;
+    SaveGame.remap = { from: 'map-old', sources: { [b]: a }, heirs: { [b]: a } };
+    try {
+        const p = SaveGame.parse(JSON.stringify({ map: 'map-old', savedAt: 1, game }));
+        assert.equal(SaveGame.migrated, true);
+        assert.equal(p.map, SaveGame.mapId());
+        assert.equal(p.game.humans.join(), 'UA,PL', 'игроки кампании на месте');
+        assert.ok(p.game.net, 'сеть кампании на месте');
+        assert.equal(p.game.regions[b][0], 'PL', 'новая b — от прежней a');
+        assert.equal(p.game.regions[a][1][game.units.indexOf('infantry')], 45, 'войска b ушли в a');
+        assert.equal(p.game.regions[b][1].reduce((s, n) => s + n, 0), 0);
+        assert.equal(p.game.countries.UA[0], money, 'приказ хода отменён с возвратом денег');
+        assert.equal(p.game.orders.recruitment.length, 0);
+        GameData.restore(p.game);
+    } finally { SaveGame.remap = saved; }
 });
