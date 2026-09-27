@@ -796,16 +796,3 @@ test('hot seat: queue survives save in the main slot, looking through another se
     const bad = d.serialize(); bad.hotseat.done = ['FR'];
     assert.throws(() => GameData.restore(bad));
 });
-
-test('autopilot: an absent player country is defended by the AI for one turn only', () => {
-    const { GameData, AI } = engine(), d = new GameData('DE', { humans: ['PL'], scenario: 'war2024' });
-    d.startWar('PL', 'BY');
-    const ai = new AI(d);
-    ai.planTurn();
-    const mine = () => ['attacks', 'movements', 'recruitment'].reduce((n, k) => n + d.orders[k].filter(o => o.country === 'PL').length, 0);
-    assert.equal(mine(), 0, 'страну человека ИИ не трогает');
-    d.autopilot = ['PL'];
-    ai.planTurn();
-    assert.ok(mine() > 0, 'без связи — бережёт');
-    assert.equal(d.serialize().autopilot, undefined, 'не сохраняется');
-});

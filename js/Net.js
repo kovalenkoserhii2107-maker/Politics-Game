@@ -424,6 +424,9 @@ class NetHost {
                 this.changed();
             });
             player.link = link;
+            // вернулся посреди хода с таймером — время на ход у всех заново,
+            // иначе его ход ушёл бы сразу по истёкшим часам
+            if (this.data && this.deadline && !player.ready) this.deadline = Math.max(this.deadline, Date.now() + this.timer * 1000);
             this.changed();
         });
     }
@@ -671,23 +674,15 @@ class NetHost {
         return this.players.filter(p => p.cc && d.countries[p.cc].alive && !p.ready);
     }
 
-    // Кто без связи — того можно не ждать: ход без него, страну на этот ход
-    // бережёт компьютер.
-    absent() { return this.waitingFor().filter(p => !p.host && !p.connected); }
-
-    skipAbsent() {
-        if (!this.absent().length) return false;
-        this.maybeResolve(true);
-        return true;
-    }
-
     maybeResolve(force) {
         const d = this.data;
         if (!d || !this.game || d.gameOver || this.game.loop.busy) return;
         const late = this.waitingFor();
         if (late.length && !force) return;
+        // без отключившегося ход не считаем даже по таймеру: ждём, пока он
+        // вернётся и сходит сам
+        if (late.some(p => !p.host && !p.connected)) return;
         const lateCc = new Set(late.map(p => p.cc));
-        d.autopilot = late.filter(p => !p.host && !p.connected).map(p => p.cc);
         const guests = this.players.filter(p => !p.host);
         const failed = {};
         const reports = this.game.loop.runTurn(() => {
@@ -696,14 +691,11 @@ class NetHost {
             }
         });
         for (const p of this.players) { p.ready = false; p.commands = null; }
-        delete d.autopilot;
         if (!reports) { this.changed(); return; }
         this.startClock();
         for (const p of this.players) {
             const report = reports[p.cc];
-            if (report && lateCc.has(p.cc)) report.turnData.events.unshift(p.connected || p.host
-                ? '⏱ Время хода вышло — ход посчитан без ваших приказов.'
-                : '📵 Вас не было на связи — ход посчитан без ваших приказов, страну берёг компьютер.');
+            if (report && lateCc.has(p.cc)) report.turnData.events.unshift('⏱ Время хода вышло — ход посчитан без ваших приказов.');
         }
         for (const p of guests) {
             const report = reports[p.cc];

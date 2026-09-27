@@ -404,9 +404,6 @@ class GameCore {
             if (this.net.nudge()) { this.ui.toast('🔔 Напомнили остальным'); this.ui.haptic(20); }
             this.renderNudge();
         });
-        document.getElementById('net-wait-skip').addEventListener('click', () => {
-            if (this.net.role === 'host' && this.net.skipAbsent()) this.ui.toast('⏭ Ход без отключившихся');
-        });
         clearInterval(this.clockId);
         this.clockId = setInterval(() => this.tickClock(), 1000);
         document.getElementById('net-status').addEventListener('click', () => this.openChat());
@@ -594,12 +591,10 @@ class GameCore {
                 : others.length ? `Ждём: ${others.map(p => p.name + (p.connected && p.loaded === false ? ' (загружает карту)' : !p.connected ? ' (нет связи)' : '')).join(', ')}` : 'Все готовы — считаем ход…';
             document.getElementById('net-wait-list').innerHTML = players.map(row).join('');
             document.getElementById('net-wait-nudge').hidden = offline || !others.length;
-            const absent = net.role === 'host' ? net.absent() : [];
-            const skip = document.getElementById('net-wait-skip');
-            skip.hidden = !absent.length;
-            if (absent.length) skip.textContent = `⏭ Сыграть ход без: ${absent.map(p => p.name).join(', ')}`;
-            document.getElementById('net-wait-hint').textContent = left !== null
-                ? 'Ход посчитается, когда все нажмут «Конец хода» или выйдет время.' : 'Ход посчитается, когда все нажмут «Конец хода».';
+            const away = others.filter(p => !p.connected);
+            document.getElementById('net-wait-hint').textContent = away.length
+                ? `Нет связи: ${away.map(p => p.name).join(', ')}. Ход посчитается, когда вернётся и нажмёт «Конец хода».`
+                : left !== null ? 'Ход посчитается, когда все нажмут «Конец хода» или выйдет время.' : 'Ход посчитается, когда все нажмут «Конец хода».';
             this.renderNudge();
         }
         this.tickClock();

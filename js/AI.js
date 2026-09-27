@@ -57,15 +57,6 @@ class AI {
                 if ((d.turn + slot) % 8 === 0 && country.money > 3000000) this.invest(country);
             }
         }
-        // игрок без связи: на этот ход его страну бережёт компьютер — воюет и
-        // гасит восстания, но не тратит казну на стройки, науку и договоры
-        for (const cc of d.autopilot || []) {
-            const country = d.countries[cc];
-            if (!country || !country.alive || !d.regionsByCountry[cc].length) continue;
-            this.handleRevolts(country);
-            const enemies = d.enemiesOf(cc);
-            if (enemies.length) this.planWar(country, enemies);
-        }
     }
 
     // Строим то, что по текущим ценам окупается быстрее: дешёвые товары —
