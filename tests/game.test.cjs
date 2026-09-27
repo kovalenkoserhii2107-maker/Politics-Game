@@ -796,3 +796,24 @@ test('hot seat: queue survives save in the main slot, looking through another se
     const bad = d.serialize(); bad.hotseat.done = ['FR'];
     assert.throws(() => GameData.restore(bad));
 });
+
+test('a country with debt that loses its last region keeps a finite treasury; broken saves are repaired', () => {
+    const { GameData } = engine(), d = new GameData('KZ', { humans: ['CN'] });
+    const kg = d.countries.KG;
+    kg.debt = 45900000;
+    for (const r of [...d.getCountryRegions('KG')]) d.setOwner(r.id, 'KZ');
+    d.onCapitalLost('KG');   // как при захвате столицы в бою
+    d.applyEndOfTurn();
+    assert.ok(Number.isFinite(kg.money), 'казна не NaN');
+    assert.ok(Number.isFinite(kg.lastNetIncome));
+    assert.ok(Number.isFinite(GameData.restore(JSON.parse(JSON.stringify(d.serialize()))).countries.KG.money));
+    // сохранение, испорченное прежней ошибкой: казна null
+    const broken = JSON.parse(JSON.stringify(d.serialize()));
+    broken.countries.KG[0] = null; broken.countries.KG[4] = null;
+    const fixed = GameData.restore(broken);
+    assert.equal(fixed.countries.KG.money, 0);
+    assert.equal(fixed.humans.join(), 'KZ,CN', 'люди и места на месте');
+    // что именно не так — видно в сообщении
+    const bad = JSON.parse(JSON.stringify(d.serialize())); bad.countries.KG[1] = 5;
+    assert.throws(() => GameData.restore(bad), /страна KG/);
+});

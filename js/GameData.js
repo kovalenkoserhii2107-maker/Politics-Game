@@ -1387,7 +1387,8 @@ class GameData {
         const country = this.getCountry(countryId);
         let tax = 0, upkeep = 0, social = 0;
         if (!country || !this.regionsByCountry[countryId]?.length) {
-            return { income: 0, expense: 0, tax, sales: 0, purchases: 0, upkeep, social, trade: { lines: {} } };
+            // interest обязателен: без него расходы страны с долгами — NaN
+            return { income: 0, expense: 0, tax, sales: 0, purchases: 0, upkeep, social, interest: 0, trade: { lines: {} } };
         }
         const policy = POLICIES[country.policy] || POLICIES.balanced;
         for (const region of this.getCountryRegions(countryId)) {
@@ -1471,8 +1472,10 @@ class GameData {
             balance.income = balance.tax + balance.sales;
             balance.expense = balance.upkeep + balance.social + balance.purchases + balance.interest;
             balances[country.id] = balance;
-            country.lastNetIncome = Math.round(balance.income - balance.expense);
+            const net = Math.round(balance.income - balance.expense);
+            country.lastNetIncome = Number.isFinite(net) ? net : 0;
             country.money += country.lastNetIncome;
+            if (!Number.isFinite(country.money)) country.money = 0;   // мир, испорченный прежней ошибкой
             if (economy) this.applyShortages(country, economy, events);
             country.influence = Math.min(RULES.INFLUENCE_MAX, country.influence + RULES.INFLUENCE_PER_TURN);
 
@@ -1694,8 +1697,23 @@ class GameData {
         };
     }
 
+    // Поломки, которые чинятся без потерь: казна «не число» (была ошибка в
+    // расчёте для страны с долгами без областей) — в сохранении это null.
+    static repairSave(save) {
+        if (!save || typeof save !== 'object' || !save.countries || typeof save.countries !== 'object') return save;
+        for (const c of Object.values(save.countries)) {
+            if (!Array.isArray(c)) continue;
+            if (c[0] === null) c[0] = 0;
+            if (c[4] === null) c[4] = 0;
+            if (c[14] === null) c[14] = 0;
+        }
+        return save;
+    }
+
     static validateSave(save) {
-        const fail = () => { throw new Error('Сохранение несовместимо или повреждено'); };
+        // what — какая проверка не прошла: пишем в сообщение, чтобы по снимку
+        // экрана было видно причину
+        const fail = what => { throw new Error(`Сохранение несовместимо или повреждено${what ? ` (${what})` : ''}`); };
         const finite = n => typeof n === 'number' && Number.isFinite(n);
         const count = n => Number.isSafeInteger(n) && n >= 0;
         if (!save || save.v !== 3 || !CountriesDB[save.player]?.playable || !count(save.turn) || !finite(save.date) || !Number.isFinite(+new Date(save.date))) fail();
@@ -1708,7 +1726,7 @@ class GameData {
         if (Object.keys(save.regions).length !== Object.keys(RegionsDB).length || Object.keys(save.countries).length !== Object.keys(CountriesDB).length) fail();
         for (const id of Object.keys(RegionsDB)) {
             const r = save.regions[id];
-            if (!Array.isArray(r) || !CountriesDB[r[0]] || !Array.isArray(r[1]) || r[1].length !== save.units.length || !r[1].every(count) || !finite(r[2]) || r[2] < 0 || r[2] > 1 || !finite(r[3])) fail();
+            if (!Array.isArray(r) || !CountriesDB[r[0]] || !Array.isArray(r[1]) || r[1].length !== save.units.length || !r[1].every(count) || !finite(r[2]) || r[2] < 0 || r[2] > 1 || !finite(r[3])) fail(`область ${id}`);
             for (const key of ['industry', 'agro', 'oil']) if (!count(r[4]?.[key]) || !count(r[5]?.[key]) || r[5][key] > 5) fail();
             if (r[5].infra !== undefined && (!count(r[5].infra) || r[5].infra > 5)) fail();
             if (r[6] !== undefined && !count(r[6])) fail();
@@ -1716,7 +1734,7 @@ class GameData {
         }
         for (const id of Object.keys(CountriesDB)) {
             const c = save.countries[id];
-            if (!Array.isArray(c) || !finite(c[0]) || !finite(c[1]) || c[1] < 0.01 || c[1] > 0.3 || !finite(c[2]) || c[2] < 0 || c[2] > 100 || !finite(c[4]) || typeof c[5] !== 'boolean' || (c[6] !== null && (!RegionsDB[c[6]] || save.regions[c[6]][0] !== id)) || !POLICIES[c[7]] || !Number.isInteger(c[8])) fail();
+            if (!Array.isArray(c) || !finite(c[0]) || !finite(c[1]) || c[1] < 0.01 || c[1] > 0.3 || !finite(c[2]) || c[2] < 0 || c[2] > 100 || !finite(c[4]) || typeof c[5] !== 'boolean' || (c[6] !== null && (!RegionsDB[c[6]] || save.regions[c[6]][0] !== id)) || !POLICIES[c[7]] || !Number.isInteger(c[8])) fail(`страна ${id}`);
             for (const key of [...save.units, 'marchSpeed']) if (!count(c[3]?.[key]) || c[3][key] < 1 || c[3][key] > (key === 'marchSpeed' ? 3 : MODERNIZATION.MAX)) fail();
             if (c[12] !== undefined && !GameData.validTechs(c[12], c[13])) fail();
             if (c[14] !== undefined && (!finite(c[14]) || c[14] < 0)) fail();
@@ -1726,13 +1744,13 @@ class GameData {
         if (!Array.isArray(save.wars) || save.wars.some(x => !Array.isArray(x) || !pair(x[0]) || !count(x[1]?.start) || !CountriesDB[x[1]?.attacker])) fail();
         if (!Array.isArray(save.truces) || save.truces.some(x => !Array.isArray(x) || !pair(x[0]) || !count(x[1]))) fail();
         const decisionsOk = list => Array.isArray(list) && list.every(x => x && GameData.DECISIONS.includes(x.type) && CountriesDB[x.from] && (x.type !== 'event' || Events.validDecision(x)) && (x.type !== 'rebels' || !!RegionsDB[x.region]) && (x.type !== 'trade' || Trade.validDecision(x)) && (x.type !== 'council' || !!COUNCIL_KINDS[x.kind]));
-        if (!decisionsOk(save.decisions)) fail();
+        if (!decisionsOk(save.decisions)) fail('предложения');
         if (save.goal !== undefined && !GOALS[save.goal]) fail();
         if (save.hotseat !== undefined && (!save.hotseat || !Array.isArray(save.hotseat.done) || !Array.isArray(save.humans) || save.humans.length < 2
             || !save.hotseat.done.every(cc => save.humans.includes(cc)))) fail();
         if (save.revolts !== undefined && !Unrest.valid(save.revolts)) fail();
-        if (save.chronicle !== undefined && !Score.validChronicle(save.chronicle)) fail();
-        if (save.council !== undefined && !Council.valid(save.council)) fail();
+        if (save.chronicle !== undefined && !Score.validChronicle(save.chronicle)) fail('хроника');
+        if (save.council !== undefined && !Council.valid(save.council)) fail('совет');
         if (save.operations !== undefined && (!Array.isArray(save.operations) || save.operations.some(o => !o || !CountriesDB[o.by] || !RegionsDB[o.target] || !Number.isInteger(o.turn)))) fail();
         if (save.cycle !== undefined && (!save.cycle || !CYCLES[save.cycle.phase] || !Number.isInteger(save.cycle.until))) fail();
         if (save.scoreStart !== undefined && !Score.valid(save.scoreStart)) fail();
@@ -1742,7 +1760,7 @@ class GameData {
             const seats = save.seats;
             if (!seats || typeof seats !== 'object' || Object.keys(seats).sort().join() !== save.humans.slice(1).sort().join()) fail();
             for (const seat of Object.values(seats)) {
-                if (!seat || !Missions.valid(seat.missions, seat.stats) || !decisionsOk(seat.decisions) || !Array.isArray(seat.history) || !seat.campaign) fail();
+                if (!seat || !Missions.valid(seat.missions, seat.stats) || !decisionsOk(seat.decisions) || !Array.isArray(seat.history) || !seat.campaign) fail('места игроков');
             }
         }
         if (!Array.isArray(save.history) || save.history.some(t => typeof t.date !== 'string' || !Array.isArray(t.logs) || !t.financial || !['income','expense','net'].every(k => finite(t.financial[k])))) fail();
@@ -1787,6 +1805,7 @@ class GameData {
     }
 
     static restore(save) {
+        GameData.repairSave(save);
         GameData.validateSave(save);
         const data = new GameData(save.player, { cheat: save.cheat, scenario: save.scenario, difficulty: save.difficulty, humans: save.humans, goal: save.goal, restoring: true });
         const units = Object.keys(UnitsDB);

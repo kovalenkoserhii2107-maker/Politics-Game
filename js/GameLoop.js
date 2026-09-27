@@ -68,6 +68,7 @@ const SaveGame = {
         if (!payload || typeof payload !== 'object' || !payload.game) throw new Error('В файле нет партии');
         if (payload.map === this.mapId()) {
             try {
+                GameData.repairSave(payload.game);
                 GameData.validateSave(payload.game);
                 return payload;
             } catch (e) { /* пробуем перенести */ }
