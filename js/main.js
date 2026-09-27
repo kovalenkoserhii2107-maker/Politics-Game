@@ -199,6 +199,35 @@ class GameCore {
             SaveGame.save(d);
             return;
         }
+        if (action === 'nuke') {
+            const id = btn.dataset.region, kind = btn.dataset.kind;
+            const region = d.regions[id], k = NUCLEAR.KINDS[kind];
+            const check = Nuclear.canStrike(d, player, id, kind);
+            if (!check.ok) { this.ui.toast(check.reason); return; }
+            const p = Nuclear.preview(d, id, kind);
+            const owner = d.countries[region.owner].name;
+            const lines = [
+                `Погибнет около ${Nuclear.people(p.people)} жителей, армия области потеряет ${Math.round(k.kill * 100)}% (мощь ${p.army}), постройки разрушены, заражение на ${Nuclear.turns(k.fallout)} — без налогов.`,
+                k.splash ? `Задеты соседние области (${p.neighbours}): −${Math.round(k.splash.kill * 100)}% войск, −${Math.round(k.splash.people * 100)}% жителей — и ваши, если граничат.` : '',
+                `Санкции на ${Nuclear.turns(NUCLEAR.SANCTION_TURNS)} без голосования, отношения со всеми −${-k.relation}, с пострадавшей страной (${owner}) и её союзниками — ещё хуже. Стоит ${k.influence} влияния.`,
+                Nuclear.isPower(d, region.owner) ? `${owner}: у противника есть ядерное оружие.${d.isHuman(region.owner) ? ' Это живой игрок.' : ' Ответный удар почти неизбежен.'}` : '',
+            ];
+            this.ui.showDecision({
+                title: `${k.icon} Ядерный удар: ${region.name}?`, text: lines.filter(Boolean).join('\n'),
+                accept: 'Нанести удар', decline: 'Отмена', danger: true,
+                onAccept: () => {
+                    const result = d.act('nuclearStrike', id, kind);
+                    if (!result.ok) { this.ui.toast(result.reason); return; }
+                    this.ui.haptic(80);
+                    this.ui.toast(`${k.icon} Удар нанесён: ${region.name}. Погибло около ${Nuclear.people(result.dead)} человек.`);
+                    this.map.refreshColors();
+                    this.showRegion(id);
+                    this.afterStateChange();
+                },
+                onDecline: () => {},
+            });
+            return;
+        }
         if (action === 'operation') {
             const result = d.act('planOperation', btn.dataset.region);
             if (!result.ok) { this.ui.toast(result.reason); return; }
@@ -312,6 +341,17 @@ class GameCore {
             this.ui.haptic(20);
             const tech = TECH_TREE[btn.dataset.key];
             this.ui.toast(`Исследование начато: ${tech.name}. Готово через ${tech.turns} ход.`);
+            this.afterScience();
+        } else if (btn.dataset.action === 'nuke-build') {
+            const result = d.act('nuclearBuild', btn.dataset.key);
+            if (!result.ok) { this.ui.toast(result.reason); return; }
+            this.ui.haptic(20);
+            this.ui.toast(`Сборка начата: ${NUCLEAR.KINDS[btn.dataset.key].name.toLowerCase()}. Готово через ${result.turns} ход.`);
+            this.afterScience();
+        } else if (btn.dataset.action === 'nuke-cancel') {
+            const result = d.act('nuclearCancel');
+            if (!result.ok) { this.ui.toast(result.reason); return; }
+            this.ui.toast(`Сборка отменена, возвращено ${this.ui.money(result.refund)}`);
             this.afterScience();
         } else if (btn.dataset.action === 'tech-cancel') {
             const refund = d.act('cancelResearch', player);

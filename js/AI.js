@@ -47,6 +47,7 @@ class AI {
             this.handleRevolts(country);
             this.manageDebt(country);
             this.planScience(country);
+            this.planNuclear(country);
             const enemies = d.enemiesOf(country.id);
             this.disbandIfBroke(country, enemies);
             if (enemies.length) this.planWar(country, enemies);
@@ -104,7 +105,9 @@ class AI {
         if (!country.research) {
             const atWar = d.enemiesOf(country.id).length > 0;
             const order = atWar ? AI.WAR_SCIENCE : AI.PEACE_SCIENCE;
-            const next = order.find(id => !Tech.has(country, id) && TECH_TREE[id].requires.every(r => Tech.has(country, r)));
+            // ядерную программу заводят не все — только крупные страны рядом с ядерной угрозой
+            const next = order.find(id => !Tech.has(country, id) && TECH_TREE[id].requires.every(r => Tech.has(country, r))
+                && (TECH_TREE[id].branch !== 'nuclear' || Nuclear.aiWantsBomb(d, country.id)));
             if (next && country.money - TECH_TREE[next].cost >= reserve) d.startResearch(country.id, next);
         }
         for (let i = 0; i < 3 && country.money > reserve * AI_RULES.MODERNIZE_RESERVE; i++) {
@@ -117,6 +120,12 @@ class AI {
                 .sort((a, b) => b.weight / b.cost - a.weight / a.cost);
             if (!options.length || !d.research(country.id, options[0].id).ok) break;
         }
+    }
+
+    // Ядерный арсенал: ответ на удар, удар в отчаянии, сборка боеголовок.
+    planNuclear(country) {
+        const reserve = this.data.countryBalance(country.id).upkeep * AI_RULES.RESERVE_TURNS + 3e6;
+        Nuclear.aiPlan(this.data, country.id, reserve);
     }
 
     // Налог подстраивается под расходы: ИИ не должен банкротиться.
@@ -376,9 +385,12 @@ class AI {
                 if (Diplomacy.pactLeft(d, cc, player) || Diplomacy.isAllied(d, cc, player)) continue;
                 const ratio = d.calculateMilitaryPower(cc) / playerPower;
                 if (ratio < this.rule('WAR_ON_PLAYER_RATIO')) continue;
+                // на ядерную державу без своей бомбы не нападают, с бомбой — редко
+                const fear = Nuclear.deterrence(d, cc, player);
+                if (!fear) continue;
                 // хорошие отношения удерживают от войны, плохие — подталкивают
                 const mood = Math.max(0, 1 - Diplomacy.relation(d, cc, player) / 100);
-                if (Math.random() > this.rule('WAR_ON_PLAYER_CHANCE') * ratio * mood) continue;
+                if (Math.random() > this.rule('WAR_ON_PLAYER_CHANCE') * ratio * mood * fear) continue;
                 if (!d.declareWar(cc, player).ok) continue;
                 events.push({ type: 'war', for: player, by: cc, target: player, message: `⚔️ ${country.name} объявила вам войну!` });
                 break;
@@ -495,6 +507,7 @@ class AI {
                 const other = d.countries[cc];
                 if (!other.alive || !other.playable || d.enemiesOf(cc).length || d.truceLeft(country.id, cc)) continue;
                 if (d.regionsByCountry[cc].length < 3) continue;
+                if (Nuclear.deterrence(d, country.id, cc) < 1) continue;   // ядерные державы ИИ не трогает
                 const ratio = power / Math.max(1, d.calculateMilitaryPower(cc));
                 const [lo, hi] = AI_RULES.AI_WAR_RATIO;
                 if (ratio >= lo && ratio <= hi) candidates.push({ attacker: country.id, target: cc });
@@ -515,6 +528,8 @@ class AI {
         if (!info) return false;
         const ratio = d.calculateMilitaryPower(ai) / Math.max(1, d.calculateMilitaryPower(other));
         const score = info.taken - info.lost;
+        // воевать с ядерной державой без своей бомбы — страшно
+        if (Nuclear.isPower(d, other) && !Nuclear.isPower(d, ai) && info.turns >= 3) return true;
         return (score < 0 && ratio < 1) || (info.turns >= 20 && score <= 0);
     }
 
@@ -525,6 +540,7 @@ class AI {
         if (!info) return true;
         const ratio = d.calculateMilitaryPower(ai) / Math.max(1, d.calculateMilitaryPower(other));
         const score = info.taken - info.lost;
+        if (Nuclear.isPower(d, other) && !Nuclear.isPower(d, ai)) return true;
         return score < 0 || ratio < 0.9 || (info.turns >= 12 && score <= 0) || (info.turns >= 6 && Diplomacy.relation(d, ai, other) > -30);
     }
 
@@ -555,6 +571,6 @@ class AI {
 
 // Порядок исследований ИИ: в мире сначала экономика, на войне — оружие.
 AI.PEACE_SCIENCE = ['agrotech', 'powergrid', 'medicine', 'logistics1', 'drones', 'motorized', 'automation', 'fortify',
-    'ewar', 'specops', 'digital', 'missiles', 'stealth', 'fusion', 'logistics2'];
-AI.WAR_SCIENCE = ['drones', 'medicine', 'motorized', 'fortify', 'ewar', 'specops', 'missiles', 'stealth',
+    'ewar', 'specops', 'digital', 'missiles', 'stealth', 'fusion', 'logistics2', 'nuclear', 'hydrogen'];
+AI.WAR_SCIENCE = ['drones', 'medicine', 'motorized', 'fortify', 'ewar', 'specops', 'missiles', 'nuclear', 'stealth', 'hydrogen',
     'agrotech', 'powergrid', 'logistics1', 'automation', 'digital', 'fusion', 'logistics2'];

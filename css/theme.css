@@ -696,3 +696,12 @@ body.hotseat-handoff #ui-layer > :not(#hotseat-screen) { visibility: hidden; }
 .army-badge.garrison.ally text { fill: #9cc4ff; }
 .army-badge.garrison.mine rect:first-child { stroke: var(--good); stroke-dasharray: 3 2; }
 .army-badge.garrison.mine text { fill: var(--good); }
+
+/* Ядерное оружие */
+.nuke-panel { margin: 10px 0; border: 1px solid rgba(255, 59, 47, 0.45); border-radius: 10px; padding: 8px 10px; background: rgba(255, 59, 47, 0.06); }
+.nuke-panel summary { color: var(--accent); font-weight: 700; cursor: pointer; }
+.nuke-actions { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
+.nuke-btn { min-height: 44px; background: var(--accent) !important; color: #fff !important; border-color: var(--accent) !important; }
+.nuke-btn:disabled { opacity: 0.45; }
+.sci-card.arsenal { border-color: rgba(255, 196, 0, 0.45); }
+#world-map .region.fallout { stroke: #facc15 !important; stroke-width: calc(var(--sw) * 2.5) !important; stroke-dasharray: calc(var(--sw) * 2) calc(var(--sw) * 2); filter: saturate(0.35) brightness(0.8); }

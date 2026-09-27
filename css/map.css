@@ -78,3 +78,12 @@
 #world-map.lod-2 .country-label { display: none; }
 /* Значки войск привязаны к уровню взаимодействия, а не к подписям. */
 #world-map.global-view #layer-armies { display: none; }
+
+/* Государственные границы поверх заливки: линия между областями разных хозяев */
+#layer-borders path {
+    display: none; fill: none; pointer-events: none;
+    stroke: rgba(8, 9, 11, 0.78); stroke-width: calc(var(--sw) * 1.4);
+    stroke-linejoin: round; stroke-linecap: round;
+}
+#layer-borders path.on { display: inline; }
+#world-map.regional-view #layer-borders path { stroke-width: calc(var(--sw) * 2); }

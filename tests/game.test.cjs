@@ -3,8 +3,8 @@ const assert=require('node:assert/strict');
 const fs=require('node:fs'),path=require('node:path'),vm=require('node:vm');
 function engine(){
  const values=new Map();let seed=123456;const math=Object.create(Math);math.random=()=>{seed=(Math.imul(seed,1664525)+1013904223)>>>0;return seed/4294967296;};const context=vm.createContext({console,Date,Math:math,structuredClone,localStorage:{setItem:(k,v)=>values.set(k,v),getItem:k=>values.get(k)||null,removeItem:k=>values.delete(k),key:i=>[...values.keys()][i]??null,get length(){return values.size;}}});
- for(const file of ['data/CountriesDB','data/RegionsDB','data/NeighborsDB','data/CitiesDB','UnitsDB','Tech','Economy','Diplomacy','Missions','Score','Events','Unrest','Trade','Council','GameData','AI','GameLoop'])vm.runInContext(fs.readFileSync(path.join(__dirname,'../js',file+'.js'),'utf8'),context);
- return Object.assign(vm.runInContext('({GameData,AI,SaveGame,GameLoop,RegionsDB,UnitsDB,DEVELOPMENT,POLICIES,Economy,RESOURCES,ECONOMY,Tech,TECH_TREE,MODERNIZATION,Diplomacy,DIPLOMACY,Missions,MISSION_KINDS,MISSION_RULES,Score,GOALS,Events,EVENTS,DEBT,CYCLES,INFRA,Unrest,REVOLT,Trade,Council,COUNCIL,RULES})',context),{localStorage:context.localStorage});
+ for(const file of ['data/CountriesDB','data/RegionsDB','data/NeighborsDB','data/CitiesDB','UnitsDB','Tech','Economy','Diplomacy','Missions','Score','Events','Unrest','Trade','Council','Nuclear','GameData','AI','GameLoop'])vm.runInContext(fs.readFileSync(path.join(__dirname,'../js',file+'.js'),'utf8'),context);
+ return Object.assign(vm.runInContext('({GameData,AI,SaveGame,GameLoop,RegionsDB,UnitsDB,DEVELOPMENT,POLICIES,Economy,RESOURCES,ECONOMY,Tech,TECH_TREE,MODERNIZATION,Diplomacy,DIPLOMACY,Missions,MISSION_KINDS,MISSION_RULES,Score,GOALS,Events,EVENTS,DEBT,CYCLES,INFRA,Unrest,REVOLT,Trade,Council,COUNCIL,RULES,Nuclear,NUCLEAR})',context),{localStorage:context.localStorage});
 }
 test('casualties are invariant under splitting an attack into orders',()=>{
  const {GameData}=engine();const fight=split=>{const d=new GameData('UA',{scenario:'war2024'});for(const id of ['UA-2','RU-62']){d.regions[id].army=d.emptyArmy();d.regions[id].army.infantry=10;}
@@ -946,4 +946,95 @@ test('a campaign from the previous map is laid onto the re-cut regions and keeps
         assert.equal(p.game.orders.recruitment.length, 0);
         GameData.restore(p.game);
     } finally { SaveGame.remap = saved; }
+});
+
+test('nuclear: real powers start armed; research, build, first test alarms the world and the council', () => {
+    const { GameData, Nuclear, NUCLEAR, Council, Diplomacy, Tech } = engine();
+    const d = new GameData('UA', { scenario: 'war2024' });
+    assert.ok(Nuclear.isPower(d, 'RU') && Nuclear.isPower(d, 'US') && !Nuclear.isPower(d, 'UA'));
+    assert.ok(Tech.has(d.countries.RU, 'hydrogen') && !Tech.has(d.countries.UA, 'nuclear'));
+    const ua = d.countries.UA;
+    assert.equal(d.act('nuclearBuild', 'atom').ok, false, 'без технологии нельзя');
+    Tech.grant(ua, 'nuclear');
+    ua.money = 100e6;
+    const upkeep0 = d.countryBalance('UA').upkeep;
+    assert.equal(d.act('nuclearBuild', 'hydrogen').ok, false, 'водородная — отдельная технология');
+    assert.equal(d.act('nuclearBuild', 'atom').ok, true);
+    assert.equal(ua.money, 100e6 - NUCLEAR.KINDS.atom.cost);
+    assert.equal(d.act('nuclearBuild', 'atom').ok, false, 'одна сборка за раз');
+    const relPL = Diplomacy.relation(d, 'UA', 'PL'), relUS = Diplomacy.relation(d, 'UA', 'US'), relJP = Diplomacy.relation(d, 'UA', 'JP');
+    for (let i = 0; i < NUCLEAR.KINDS.atom.turns; i++) { d.turn++; d.applyEndOfTurn(); }
+    assert.equal(Nuclear.stock(d, 'UA').atom, 1);
+    assert.ok(d.nuclear.powers.includes('UA'));
+    assert.ok(Diplomacy.relation(d, 'UA', 'PL') < relPL, 'соседи встревожены');
+    assert.ok(Diplomacy.relation(d, 'UA', 'US') - relUS < Diplomacy.relation(d, 'UA', 'JP') - relJP, 'ядерные державы — сильнее прочих');
+    assert.ok(d.countryBalance('UA').upkeep >= upkeep0 + NUCLEAR.KINDS.atom.upkeep - 1, 'арсенал стоит содержания');
+    // совет ставит на голосование санкции за программу
+    d.turn = 8; const events = []; Council.convene(d, events);
+    assert.equal(d.council.kind, 'nuclear');
+    assert.equal(d.council.target, 'UA');
+    assert.equal(d.council.votes.UA, false, 'против себя не голосуют');
+    assert.equal(Council.aiVote(d, 'US', d.council), true, 'прежние ядерные державы — за');
+    // отмена сборки возвращает деньги
+    Tech.grant(ua, 'hydrogen');
+    const m = ua.money = 100e6;
+    d.act('nuclearBuild', 'hydrogen');
+    assert.equal(d.act('nuclearCancel').refund, NUCLEAR.KINDS.hydrogen.cost);
+    assert.equal(ua.money, m);
+});
+
+test('nuclear: a strike needs war and influence, devastates the region, brings sanctions; the AI answers in kind', () => {
+    const { GameData, Nuclear, NUCLEAR, AI, Diplomacy, Council } = engine();
+    const d = new GameData('UA', { scenario: 'war2024' });
+    d.nuclear.arsenal.UA = { atom: 1, hydrogen: 1 };
+    const target = d.getNeighbors(d.getCountryRegions('UA').find(r => d.getNeighbors(r.id).some(id => d.regions[id]?.owner === 'RU')).id).find(id => d.regions[id]?.owner === 'RU');
+    const pl = d.getCountryRegions('PL')[0].id;
+    assert.equal(d.act('nuclearStrike', pl, 'atom').ok, false, 'только по стране, с которой война');
+    d.countries.UA.influence = 10;
+    assert.equal(d.act('nuclearStrike', target, 'atom').ok, false, 'нужно влияние');
+    d.countries.UA.influence = 100;
+    const r = d.regions[target];
+    r.army = { ...d.emptyArmy(), infantry: 100, tanks: 20 };
+    r.development.industry = 2; r.resources.industry += 40;
+    const pop = r.population, rel = Diplomacy.relation(d, 'UA', 'DE');
+    const res = d.act('nuclearStrike', target, 'hydrogen');
+    assert.equal(res.ok, true);
+    assert.ok(r.army.infantry <= 5 && r.army.tanks <= 1, 'армия стёрта');
+    assert.equal(r.population, pop - Math.round(pop * NUCLEAR.KINDS.hydrogen.people));
+    assert.equal(r.development.industry, 0, 'постройки разрушены');
+    assert.ok(Nuclear.fallout(d, target));
+    assert.equal(d.countries.UA.influence, 100 - NUCLEAR.KINDS.hydrogen.influence);
+    assert.ok(Council.sanctioned(d, 'UA'), 'санкции без голосования');
+    assert.ok(Diplomacy.relation(d, 'UA', 'DE') <= rel + NUCLEAR.KINDS.hydrogen.relation);
+    assert.equal(Nuclear.stock(d, 'UA').hydrogen, 0);
+    // заражённая область налогов не платит
+    const tax = d.countryBalance('RU').tax;
+    d.nuclear.fallout[target] = d.turn - 1;
+    assert.ok(d.countryBalance('RU').tax > tax);
+    d.nuclear.fallout[target] = d.turn + 3;
+    // ответ ИИ: по самой населённой области обидчика
+    const biggest = d.getCountryRegions('UA').reduce((a, b) => (b.population > a.population ? b : a)).id;
+    new AI(d).planNuclear(d.countries.RU);
+    const answer = d.nuclear.strikes.find(s => s.by === 'RU');
+    assert.ok(answer && answer.retaliation && answer.target === 'UA');
+    assert.equal(answer.region, biggest);
+    assert.ok(d.diploEvents.some(e => e.for === 'UA' && e.message.includes('Россия нанесла ядерный удар')));
+    // сохранение и загрузка
+    const back = GameData.restore(structuredClone(d.serialize()));
+    assert.equal(JSON.stringify(back.nuclear), JSON.stringify(d.nuclear));
+});
+
+test('nuclear: deterrence — the AI does not start wars on nuclear powers and seeks peace with them; old saves get the 2024 arsenals', () => {
+    const { GameData, Nuclear, AI } = engine();
+    const d = new GameData('PL');
+    assert.equal(Nuclear.deterrence(d, 'DE', 'FR'), 0, 'без бомбы на ядерную державу не нападают');
+    assert.equal(Nuclear.deterrence(d, 'US', 'RU'), 0.3);
+    assert.equal(Nuclear.deterrence(d, 'FR', 'DE'), 1);
+    d.startWar('DE', 'FR');
+    assert.equal(new AI(d).acceptsPeace('DE', 'FR'), true);
+    const old = d.serialize(); delete old.nuclear;
+    for (const c of Object.values(old.countries)) c[12] = c[12].filter(t => t !== 'nuclear' && t !== 'hydrogen');
+    const e = GameData.restore(old);
+    assert.equal(Nuclear.describe(e, 'RU'), Nuclear.describe(d, 'RU'));
+    assert.ok(e.countries.FR.techs.includes('hydrogen'));
 });

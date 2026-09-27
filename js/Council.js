@@ -22,9 +22,16 @@ const COUNCIL = {
 
 const COUNCIL_KINDS = {
     sanctions: {
-        icon: '🚫',
+        icon: '🚫', targeted: true,
         title: (d, c) => `санкции — ${d.countries[c.target].name}`,
+        why: (d, cc) => `вы удерживаете ${Council.regionsWord(Council.taken(d, cc))} других стран`,
         text: (d, c) => `${d.countries[c.target].name} удерживает ${Council.regionsWord(Council.taken(d, c.target))} других стран. Если совет согласится, ${COUNCIL.SANCTION_TURNS} ходов её торговля на мировом рынке упадёт до ${Math.round(COUNCIL.SANCTION_TRADE * 100)}%, а отношения с голосовавшими «за» ухудшатся.`,
+    },
+    nuclear: {
+        icon: '☢️', targeted: true,
+        title: (d, c) => `санкции за ядерную программу — ${d.countries[c.target].name}`,
+        text: (d, c) => `${d.countries[c.target].name} провела ядерное испытание. Если совет согласится, ${COUNCIL.SANCTION_TURNS} ходов её торговля на мировом рынке упадёт до ${Math.round(COUNCIL.SANCTION_TRADE * 100)}%, а отношения с голосовавшими «за» ухудшатся.`,
+        why: (d, cc) => 'вы провели ядерное испытание',
     },
     truce: {
         icon: '🕊️',
@@ -80,10 +87,12 @@ class Council {
 
     // Голос компьютера: true — за, false — против, null — воздержался.
     static aiVote(d, cc, c = d.council) {
-        if (c.kind === 'sanctions') {
+        if (COUNCIL_KINDS[c.kind].targeted) {
             const t = c.target;
             if (cc === t || Diplomacy.isAllied(d, cc, t) || Diplomacy.hasDeal(d, cc, t)) return false;
             if (d.isAtWar(cc, t)) return true;
+            // прежние ядерные державы берегут свою монополию
+            if (c.kind === 'nuclear' && d.nuclear.founders.includes(cc)) return true;
             // соседи боятся захватчика, недруги рады случаю, друзья против,
             // остальным всё равно
             const rel = Diplomacy.relation(d, cc, t);
@@ -102,9 +111,11 @@ class Council {
     // Созыв: после смены хода. Людям — решение, всем — весть.
     static convene(d, events) {
         if (d.gameOver || d.council || d.turn < COUNCIL.FIRST || (d.turn - COUNCIL.FIRST) % COUNCIL.EVERY) return;
-        const target = Council.aggressor(d);
+        // новая ядерная держава — важнее захватчика
+        const rogue = Nuclear.councilTarget(d);
+        const target = rogue || Council.aggressor(d);
         let council = null;
-        if (target) council = { kind: 'sanctions', target, turn: d.turn + 1, votes: {} };
+        if (target) council = { kind: rogue ? 'nuclear' : 'sanctions', target, turn: d.turn + 1, votes: {} };
         else if (d.wars.size >= COUNCIL.MIN_WARS) council = { kind: 'truce', target: null, turn: d.turn + 1, votes: {} };
         if (!council) return;
         d.council = council;
@@ -115,7 +126,7 @@ class Council {
             // против себя не голосуют: голос цели — «против», без вопроса
             if (cc === council.target) {
                 council.votes[cc] = false;
-                events.push({ type: 'council', for: cc, message: `🏛️ Мировой совет голосует за санкции против вас: вы удерживаете ${Council.regionsWord(Council.taken(d, cc))} других стран. Ваш голос — «против». Итог — в следующем отчёте; склонить соседей на свою сторону помогут подарки и договоры.` });
+                events.push({ type: 'council', for: cc, message: `🏛️ Мировой совет голосует за санкции против вас: ${kind.why(d, cc)}. Ваш голос — «против». Итог — в следующем отчёте; склонить соседей на свою сторону помогут подарки и договоры.` });
                 continue;
             }
             seat.decisions.push({ type: 'council', from: council.target || cc, kind: council.kind });
@@ -140,7 +151,7 @@ class Council {
         const c = d.council;
         if (!c || d.turn < c.turn) return null;
         d.council = null;
-        if (c.kind === 'sanctions' && !d.countries[c.target].alive) return null;
+        if (COUNCIL_KINDS[c.kind].targeted && !d.countries[c.target].alive) return null;
         let yes = 0, no = 0;
         const ayes = [];
         for (const cc of Council.voters(d)) {
@@ -155,8 +166,8 @@ class Council {
         const humanVotes = d.humans.filter(cc => cc in c.votes).map(cc => `${d.countries[cc].name} — ${c.votes[cc] ? 'за' : 'против'}`);
         events.push({ type: 'council', message: `🏛️ Совет ${passed ? 'принял' : 'отклонил'}: ${title}. За — ${share}% голосов${humanVotes.length ? ` (${humanVotes.join(', ')})` : ''}.` });
         if (!passed) return { passed, share, ...c };
-        if (c.kind === 'sanctions') {
-            d.sanctions[c.target] = d.turn + COUNCIL.SANCTION_TURNS;
+        if (COUNCIL_KINDS[c.kind].targeted) {
+            d.sanctions[c.target] = Math.max(d.sanctions[c.target] || 0, d.turn + COUNCIL.SANCTION_TURNS);
             for (const cc of ayes) if (cc !== c.target) Diplomacy.changeRelation(d, cc, c.target, COUNCIL.YES_RELATION);
         } else {
             for (const key of [...d.wars.keys()]) {
@@ -186,7 +197,7 @@ class Council {
         if (!x || typeof x !== 'object') return false;
         const c = x.council;
         if (c !== null && (typeof c !== 'object' || !COUNCIL_KINDS[c.kind] || !Number.isInteger(c.turn)
-            || (c.kind === 'sanctions' && !CountriesDB[c.target]) || !c.votes || typeof c.votes !== 'object'
+            || (COUNCIL_KINDS[c.kind].targeted && !CountriesDB[c.target]) || !c.votes || typeof c.votes !== 'object'
             || !Object.entries(c.votes).every(([cc, v]) => CountriesDB[cc] && typeof v === 'boolean'))) return false;
         return !!x.sanctions && typeof x.sanctions === 'object' && Object.entries(x.sanctions).every(([cc, t]) => CountriesDB[cc] && Number.isInteger(t));
     }

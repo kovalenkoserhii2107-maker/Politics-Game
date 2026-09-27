@@ -271,5 +271,5 @@ module.exports = {
     K, X0, Y0, R_EARTH,
     xToLon, yToLat, lonToX, latToY,
     parsePath, ringArea, polyAreaPx, bboxOf, areaKm2, centroidOf,
-    pointInRing, pointInMulti, pointOnSurface, poleOfInaccessibility,
+    pointInRing, pointInMulti, pointOnSurface, poleOfInaccessibility, segDist2,
 };
