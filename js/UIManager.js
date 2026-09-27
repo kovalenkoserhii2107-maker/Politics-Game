@@ -18,13 +18,14 @@ class UIManager {
         bind('close-panel-btn', () => this.closePanel());
         bind('close-campaign-btn', () => this.hideModal('campaign-modal'));
         bind('close-stats-btn', () => this.hideModal('stats-modal'));
+        bind('close-regions-btn', () => this.hideModal('regions-modal'));
         bind('close-gov-btn', () => this.hideModal('gov-modal'));
         bind('close-history-btn', () => this.hideModal('history-modal'));
         bind('close-diplo-btn', () => this.hideModal('diplo-modal'));
         bind('close-science-btn', () => this.hideModal('science-modal'));
         bind('close-summary-btn', () => this.closeSummary());
 
-        for (const id of ['history-modal', 'gov-modal', 'diplo-modal', 'campaign-modal', 'science-modal', 'chat-modal', 'stats-modal']) {
+        for (const id of ['history-modal', 'gov-modal', 'diplo-modal', 'campaign-modal', 'science-modal', 'chat-modal', 'stats-modal', 'regions-modal']) {
             const modal = document.getElementById(id);
             if (modal) modal.addEventListener('click', e => { if (e.target === modal) this.hideModal(id); });
         }
@@ -776,6 +777,184 @@ class UIManager {
             }
         }
         container.innerHTML = html;
+    }
+
+    // --- все области списком -------------------------------------------------
+    // Одно окно вместо поиска по карте: где строится, где свободно, что
+    // выгоднее построить, где набрать войска. Массовые действия — по
+    // показанным фильтром областям и не трогая запас на ход расходов.
+    regionsState() {
+        if (!this.rg) this.rg = { filter: 'all', sort: 'income', kind: 'best', unit: 'infantry', reserve: true };
+        return this.rg;
+    }
+
+    // Что показать и в каком порядке.
+    regionRows(data) {
+        const p = data.playerCountry, st = this.regionsState();
+        const enemies = new Set(data.enemiesOf(p));
+        const rows = data.getCountryRegions(p).map(region => {
+            const project = data.projects.find(x => x.regionId === region.id);
+            const front = data.getNeighbors(region.id).some(id => data.regions[id] && enemies.has(data.regions[id].owner));
+            const recruiting = data.orders.recruitment.filter(o => o.regionId === region.id && o.country === p);
+            const army = Object.values(region.army).reduce((a, n) => a + n, 0);
+            return { region, project, front, recruiting, army, income: Unrest.regionTax(data, region),
+                restless: !!data.revolts[region.id] || region.loyalty < 0.45, best: this.bestProject(data, region) };
+        });
+        const pass = {
+            all: () => true, free: r => !r.project, building: r => !!r.project, front: r => r.front, restless: r => r.restless,
+        };
+        const counts = Object.fromEntries(Object.keys(pass).map(k => [k, rows.filter(pass[k]).length]));
+        const order = {
+            income: (a, b) => b.income - a.income,
+            people: (a, b) => b.region.population - a.region.population,
+            loyalty: (a, b) => a.region.loyalty - b.region.loyalty,
+            army: (a, b) => b.army - a.army,
+            payback: (a, b) => (a.best ? a.best.payback : 1e9) - (b.best ? b.best.payback : 1e9),
+            name: (a, b) => a.region.name.localeCompare(b.region.name, 'ru'),
+        }[st.sort] || (() => 0);
+        return { rows: rows.filter(pass[st.filter] || pass.all).sort(order), counts, total: rows.length };
+    }
+
+    // Самый быстро окупаемый проект области (или null, если всё на максимуме).
+    bestProject(data, region) {
+        let best = null;
+        for (const kind of Object.keys(DEVELOPMENT)) {
+            if ((region.development[kind] || 0) >= 5) continue;
+            const cost = data.developmentCost(region.id, kind), value = Economy.projectValue(data, region.id, kind);
+            const payback = value > 0 ? cost / value : 1e9;
+            if (!best || payback < best.payback) best = { kind, cost, payback };
+        }
+        return best;
+    }
+
+    // Запас: деньги на один ход расходов остаются нетронутыми.
+    regionsBudget(data) {
+        const me = data.countries[data.playerCountry];
+        const reserve = this.regionsState().reserve ? Math.max(0, data.countryBalance(data.playerCountry).expense) : 0;
+        return { reserve, free: Math.max(0, me.money - reserve) };
+    }
+
+    // План массовой стройки: по показанным свободным областям, пока хватает денег.
+    bulkBuildPlan(data) {
+        const st = this.regionsState();
+        let budget = this.regionsBudget(data).free;
+        const plan = [];
+        for (const r of this.regionRows(data).rows) {
+            if (r.project) continue;
+            const kind = st.kind === 'best' ? (r.best && r.best.kind) : st.kind;
+            if (!kind || (r.region.development[kind] || 0) >= 5) continue;
+            const cost = data.developmentCost(r.region.id, kind);
+            if (cost > budget) continue;
+            budget -= cost;
+            plan.push({ region: r.region.id, kind, cost });
+        }
+        return plan;
+    }
+
+    // План массового набора: в показанных областях — на всю свободную мощность.
+    bulkRecruitPlan(data) {
+        const st = this.regionsState(), unit = UnitsDB[st.unit];
+        if (!unit || !Tech.unitUnlocked(data.countries[data.playerCountry], st.unit)) return [];
+        let budget = this.regionsBudget(data).free;
+        const plan = [];
+        for (const r of this.regionRows(data).rows) {
+            const n = Math.min(Math.floor(data.recruitCapacityLeft(r.region.id) / unit.industryCost), Math.floor(budget / unit.buildCost));
+            if (n <= 0) continue;
+            budget -= n * unit.buildCost;
+            plan.push({ region: r.region.id, unit: st.unit, amount: n, cost: n * unit.buildCost });
+        }
+        return plan;
+    }
+
+    showRegions(data) {
+        const st = this.regionsState();
+        const me = data.countries[data.playerCountry];
+        const { rows, counts, total } = this.regionRows(data);
+        const esc = t => this.escape(t);
+        const icons = { industry: '🏭', agro: '🌾', oil: '⚡', infra: '🛣️' };
+        const short = { industry: 'Пром', agro: 'Агро', oil: 'Энерго', infra: 'Дороги' };
+        const units = Object.keys(UnitsDB).filter(u => Tech.unitUnlocked(me, u));
+        if (!units.includes(st.unit)) st.unit = units[0];
+        const budget = this.regionsBudget(data);
+        const build = this.bulkBuildPlan(data), recruit = this.bulkRecruitPlan(data);
+        const sum = list => list.reduce((a, x) => a + x.cost, 0);
+        const chip = (key, label) => `<button class="chip ${st.filter === key ? 'on' : ''}" type="button" data-rg-filter="${key}" aria-pressed="${st.filter === key}">${label} · ${counts[key]}</button>`;
+        const opt = (value, label, current) => `<option value="${value}" ${value === current ? 'selected' : ''}>${label}</option>`;
+        const unitRow = unitId => UnitsDB[unitId];
+        const list = rows.map(r => {
+            const region = r.region;
+            const marks = [me.capital === region.id ? '⭐' : '', data.revolts[region.id] ? '🔥' : '', r.front ? '⚔️' : ''].join('');
+            const dev = Object.keys(DEVELOPMENT).map(k => `<span title="${DEVELOPMENT[k].name}">${icons[k]}${region.development[k] || 0}</span>`).join('');
+            let works;
+            if (r.project) {
+                const plan = DEVELOPMENT[r.project.kind];
+                works = `<div class="rg-project">🏗️ ${plan.name} → ур. ${(region.development[r.project.kind] || 0) + 1} · ${r.project.remaining} ход.
+                    <button class="mini-btn" type="button" data-action="rg-cancel" data-region="${region.id}">✕ Отменить</button></div>`;
+            } else {
+                works = `<div class="rg-builds">${Object.keys(DEVELOPMENT).map(k => {
+                    const level = region.development[k] || 0;
+                    if (level >= 5) return `<button class="rg-build" type="button" disabled>${icons[k]} макс.</button>`;
+                    const cost = data.developmentCost(region.id, k);
+                    const best = r.best && r.best.kind === k;
+                    const pay = r.best && best && r.best.payback < 1e8 ? ` · окупится за ~${Math.ceil(r.best.payback)} ход.` : '';
+                    return `<button class="rg-build ${best ? 'best' : ''}" type="button" data-action="rg-invest" data-region="${region.id}" data-kind="${k}" ${me.money < cost ? 'disabled' : ''}
+                        title="${DEVELOPMENT[k].name} · ${this.money(cost)}${pay}">${best ? '★ ' : ''}${icons[k]} ${short[k]} ${this.money(cost)}</button>`;
+                }).join('')}</div>`;
+            }
+            const unit = unitRow(st.unit);
+            const can = unit ? Math.min(Math.floor(data.recruitCapacityLeft(region.id) / unit.industryCost), Math.floor(me.money / unit.buildCost)) : 0;
+            const queued = r.recruiting.map(o => `+${o.amount} ${UnitsDB[o.unitId].icon}`).join(' ');
+            return `<div class="rg-row ${r.front ? 'front' : ''} ${r.restless ? 'restless' : ''}">
+                <div class="rg-head">
+                    <button class="rg-name" type="button" data-action="rg-go" data-region="${region.id}"><b>${esc(region.name)}</b> ${marks}</button>
+                    <span class="rg-meta">👥 ${this.formatNumber(region.population)} · 💰 ${this.money(r.income)}/ход · ❤️ ${Math.round(region.loyalty * 100)}% · 🪖 ${r.army}</span>
+                </div>
+                <div class="rg-dev">${dev}${queued ? `<span class="rg-queued">в наборе: ${queued}</span>` : ''}</div>
+                ${works}
+                <div class="rg-recruit">${unit && can > 0
+                    ? `<button class="mini-btn" type="button" data-action="rg-recruit" data-region="${region.id}" data-amount="${can}">🪖 +${can} ${unit.icon} ${esc(unit.name)} · ${this.money(can * unit.buildCost)}</button>`
+                    : `<span class="muted">🪖 ${unit && data.recruitCapacityLeft(region.id) < unit.industryCost ? 'мощность набора исчерпана' : 'не хватает денег'}</span>`}</div>
+            </div>`;
+        }).join('');
+        const building = counts.building, free = counts.free;
+        document.getElementById('regions-body').innerHTML = `
+            <div class="rg-summary">Областей: <b>${total}</b> · 🏗️ строится: <b>${building}</b> · свободно: <b>${free}</b> · казна <b>${this.money(me.money)}</b></div>
+            <div class="rg-filters" role="group" aria-label="Какие области показать">
+                ${chip('all', 'Все')}${chip('free', 'Без стройки')}${chip('building', 'Строится')}${chip('front', '⚔️ Граница')}${chip('restless', '🔥 Неспокойные')}
+            </div>
+            <label class="rg-sort">Порядок
+                <select data-rg-sort>${opt('income', 'по налогам', st.sort)}${opt('payback', 'по окупаемости стройки', st.sort)}${opt('people', 'по населению', st.sort)}${opt('loyalty', 'сначала нелояльные', st.sort)}${opt('army', 'по армии', st.sort)}${opt('name', 'по названию', st.sort)}</select>
+            </label>
+            <div class="rg-bulk">
+                <div class="rg-bulk-row"><span>🏗️ Построить в показанных без стройки:</span>
+                    <select data-rg-kind>${opt('best', '★ самое выгодное', st.kind)}${Object.keys(DEVELOPMENT).map(k => opt(k, `${icons[k]} ${DEVELOPMENT[k].name}`, st.kind)).join('')}</select>
+                    <button class="mini-btn" type="button" data-action="rg-build-all" ${build.length ? '' : 'disabled'}>${build.length ? `Построить в ${build.length} обл. · ${this.money(sum(build))}` : 'Нечего или не хватает денег'}</button></div>
+                <div class="rg-bulk-row"><span>🪖 Набрать в показанных на всю мощность:</span>
+                    <select data-rg-unit>${units.map(u => opt(u, `${UnitsDB[u].icon} ${UnitsDB[u].name} · ${this.money(UnitsDB[u].buildCost)}`, st.unit)).join('')}</select>
+                    <button class="mini-btn" type="button" data-action="rg-recruit-all" ${recruit.length ? '' : 'disabled'}>${recruit.length ? `+${recruit.reduce((a, x) => a + x.amount, 0)} в ${recruit.length} обл. · ${this.money(sum(recruit))}` : 'Нет мощности или денег'}</button></div>
+                <label class="rg-reserve"><input type="checkbox" data-rg-reserve ${st.reserve ? 'checked' : ''}> Не трогать запас на ход расходов (${this.money(budget.reserve)})</label>
+            </div>
+            <div class="rg-list">${list || '<p class="muted">Таких областей нет.</p>'}</div>
+            <p class="hint">★ — стройка, которая окупится быстрее всех по нынешним ценам. Нажмите название — область откроется на карте. Стройку и набор можно отменить до конца хода, деньги вернутся.</p>`;
+        const body = document.getElementById('regions-body');
+        if (!body.dataset.bound) {
+            body.dataset.bound = '1';
+            body.addEventListener('click', e => {
+                const f = e.target.closest('[data-rg-filter]');
+                if (f) { this.regionsState().filter = f.dataset.rgFilter; this.showRegions(this.rgData); }
+            });
+            body.addEventListener('change', e => {
+                const st = this.regionsState(), t = e.target;
+                if (t.matches('[data-rg-sort]')) st.sort = t.value;
+                else if (t.matches('[data-rg-kind]')) st.kind = t.value;
+                else if (t.matches('[data-rg-unit]')) st.unit = t.value;
+                else if (t.matches('[data-rg-reserve]')) st.reserve = t.checked;
+                else return;
+                this.showRegions(this.rgData);
+            });
+        }
+        this.rgData = data;
+        if (!document.getElementById('regions-modal').classList.contains('active')) this.showModal('regions-modal');
     }
 
     // Задания: три цели с наградой. Выполнил — забрал деньги и влияние,

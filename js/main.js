@@ -140,6 +140,7 @@ class GameCore {
             return;
         }
         if (d.gameOver) return;
+        if (action.startsWith('rg-')) { this.regionsAction(action, btn); return; }
         if (['invest', 'cancel-project', 'integrate'].includes(action)) {
             const id = btn.dataset.region;
             const result = action === 'invest' ? d.act('invest', id, btn.dataset.kind)
@@ -326,6 +327,44 @@ class GameCore {
             this.openGovernment();
             if (m.kind === 'surplus') document.getElementById('gov-economy-section').scrollIntoView({ block: 'start' });
         }
+    }
+
+    // Окно «Области»: каждое действие — обычная команда (в сетевой игре её
+    // повторит сервер), потом окно перерисовывается.
+    regionsAction(action, btn) {
+        const d = this.data, id = btn.dataset.region;
+        if (action === 'rg-go') {
+            this.ui.hideModal('regions-modal');
+            this.map.showRegion(id);
+            this.showRegion(id);
+            return;
+        }
+        let text = null;
+        if (action === 'rg-invest') {
+            const r = d.act('invest', id, btn.dataset.kind);
+            text = r.ok ? `🏗️ ${d.regions[id].name}: ${DEVELOPMENT[btn.dataset.kind].name}` : r.reason;
+        } else if (action === 'rg-cancel') {
+            text = d.act('cancelProject', id) ? 'Стройка отменена, деньги вернулись' : 'Нечего отменять';
+        } else if (action === 'rg-recruit') {
+            const unit = this.ui.regionsState().unit;
+            const r = d.act('queueRecruitment', id, unit, parseInt(btn.dataset.amount, 10));
+            text = r.ok ? `🪖 ${d.regions[id].name}: +${btn.dataset.amount} ${UnitsDB[unit].name}` : r.reason;
+        } else if (action === 'rg-build-all') {
+            let done = 0, spent = 0;
+            for (const p of this.ui.bulkBuildPlan(d)) if (d.act('invest', p.region, p.kind).ok) { done++; spent += p.cost; }
+            text = done ? `🏗️ Стройка начата в ${done} обл. · ${this.ui.money(spent)}` : 'Ничего не построено';
+        } else if (action === 'rg-recruit-all') {
+            let done = 0, units = 0;
+            for (const p of this.ui.bulkRecruitPlan(d)) if (d.act('queueRecruitment', p.region, p.unit, p.amount).ok) { done++; units += p.amount; }
+            text = done ? `🪖 Набор: +${units} в ${done} обл.` : 'Никого не набрали';
+        }
+        if (text) this.ui.toast(text);
+        this.ui.haptic(15);
+        this.loop.updateTopBarUI();
+        this.ui.updateOrdersPanel(d);
+        this.map.refreshColors();
+        SaveGame.save(d);
+        this.ui.showRegions(d);
     }
 
     afterMissions() {
@@ -572,7 +611,7 @@ class GameCore {
     onNewWorld(report) {
         this.cancelTargeting();
         this.ui.closePanel();
-        for (const id of ['diplo-modal', 'campaign-modal', 'gov-modal', 'science-modal', 'decision-modal', 'trade-modal']) this.ui.hideModal(id);
+        for (const id of ['diplo-modal', 'campaign-modal', 'gov-modal', 'science-modal', 'decision-modal', 'trade-modal', 'regions-modal']) this.ui.hideModal(id);
         this.loop.failed = false;
         this.loop.awaitingSummary = false;
         if (report) this.loop.showReport(report);
@@ -952,6 +991,7 @@ class GameCore {
             document.getElementById('gov-economy-section').scrollIntoView({ block: 'start' });
         });
         document.getElementById('diplo-btn').addEventListener('click', () => this.openDiplomacy());
+        document.getElementById('regions-btn').addEventListener('click', () => { this.cancelTargeting(); this.ui.closePanel(); this.ui.showRegions(this.data); });
         document.getElementById('campaign-btn').addEventListener('click', () => this.ui.showCampaign(this.data));
         document.getElementById('log-btn').addEventListener('click', () => this.ui.showHistory(this.data.history));
         document.getElementById('gameover-new-btn').addEventListener('click', () => { SaveGame.discard(); location.reload(); });
