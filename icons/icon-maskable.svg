@@ -1,0 +1,143 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#34373c"/><stop offset="1" stop-color="#1f2125"/></linearGradient>
+    <radialGradient id="vig" cx="50%" cy="45%" r="65%"><stop offset="0.6" stop-color="#000" stop-opacity="0"/><stop offset="1" stop-color="#000" stop-opacity="0.35"/></radialGradient>
+    <linearGradient id="gt" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#a3a5aa"/><stop offset="1" stop-color="#8a8c91"/></linearGradient>
+    <linearGradient id="gl" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#76787d"/><stop offset="1" stop-color="#606267"/></linearGradient>
+    <linearGradient id="gr" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#5d5f64"/><stop offset="1" stop-color="#47494e"/></linearGradient>
+    <linearGradient id="rt" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#e0405a"/><stop offset="1" stop-color="#c52a44"/></linearGradient>
+    <linearGradient id="rl" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#b52038"/><stop offset="1" stop-color="#94172c"/></linearGradient>
+    <linearGradient id="rr" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#8c1428"/><stop offset="1" stop-color="#6e0f1f"/></linearGradient>
+    <filter id="sh" x="-20%" y="-20%" width="140%" height="140%"><feDropShadow dx="0" dy="6.1" stdDeviation="7.2" flood-color="#000" flood-opacity="0.45"/></filter>
+  </defs>
+  <rect width="512" height="512" rx="0.0" fill="url(#bg)"/>
+  <rect width="512" height="512" rx="0.0" fill="url(#vig)"/>
+  <g filter="url(#sh)">
+    <polygon points="256.0,238.4 290.2,258.2 256.0,277.9 221.8,258.2" fill="url(#gt)"/>
+    <polygon points="290.2,258.2 256.0,277.9 256.0,317.4 290.2,297.7" fill="url(#gr)"/>
+    <polygon points="221.8,258.2 256.0,277.9 256.0,317.4 221.8,297.7" fill="url(#gl)"/>
+    <polyline points="221.8,258.2 256.0,238.4 290.2,258.2" fill="none" stroke="#b9bbc0" stroke-opacity="0.55" stroke-width="1.10" stroke-linejoin="round"/>
+    <polyline points="221.8,258.2 256.0,277.9 290.2,258.2" fill="none" stroke="#ffffff" stroke-opacity="0.16" stroke-width="0.88" stroke-linejoin="round"/>
+    <line x1="256.0" y1="277.9" x2="256.0" y2="317.4" stroke="#ffffff" stroke-opacity="0.1" stroke-width="0.88"/>
+    <polygon points="294.0,260.4 328.2,280.1 294.0,299.9 259.8,280.1" fill="url(#gt)"/>
+    <polygon points="328.2,280.1 294.0,299.9 294.0,339.4 328.2,319.6" fill="url(#gr)"/>
+    <polygon points="259.8,280.1 294.0,299.9 294.0,339.4 259.8,319.6" fill="url(#gl)"/>
+    <polyline points="259.8,280.1 294.0,260.4 328.2,280.1" fill="none" stroke="#b9bbc0" stroke-opacity="0.55" stroke-width="1.10" stroke-linejoin="round"/>
+    <polyline points="259.8,280.1 294.0,299.9 328.2,280.1" fill="none" stroke="#ffffff" stroke-opacity="0.16" stroke-width="0.88" stroke-linejoin="round"/>
+    <line x1="294.0" y1="299.9" x2="294.0" y2="339.4" stroke="#ffffff" stroke-opacity="0.1" stroke-width="0.88"/>
+    <polygon points="218.0,260.4 252.2,280.1 218.0,299.9 183.8,280.1" fill="url(#gt)"/>
+    <polygon points="252.2,280.1 218.0,299.9 218.0,339.4 252.2,319.6" fill="url(#gr)"/>
+    <polygon points="183.8,280.1 218.0,299.9 218.0,339.4 183.8,319.6" fill="url(#gl)"/>
+    <polyline points="183.8,280.1 218.0,260.4 252.2,280.1" fill="none" stroke="#b9bbc0" stroke-opacity="0.55" stroke-width="1.10" stroke-linejoin="round"/>
+    <polyline points="183.8,280.1 218.0,299.9 252.2,280.1" fill="none" stroke="#ffffff" stroke-opacity="0.16" stroke-width="0.88" stroke-linejoin="round"/>
+    <line x1="218.0" y1="299.9" x2="218.0" y2="339.4" stroke="#ffffff" stroke-opacity="0.1" stroke-width="0.88"/>
+    <polygon points="256.0,194.6 290.2,214.3 256.0,234.1 221.8,214.3" fill="url(#gt)"/>
+    <polygon points="290.2,214.3 256.0,234.1 256.0,273.6 290.2,253.8" fill="url(#gr)"/>
+    <polygon points="221.8,214.3 256.0,234.1 256.0,273.6 221.8,253.8" fill="url(#gl)"/>
+    <polyline points="221.8,214.3 256.0,194.6 290.2,214.3" fill="none" stroke="#b9bbc0" stroke-opacity="0.55" stroke-width="1.10" stroke-linejoin="round"/>
+    <polyline points="221.8,214.3 256.0,234.1 290.2,214.3" fill="none" stroke="#ffffff" stroke-opacity="0.16" stroke-width="0.88" stroke-linejoin="round"/>
+    <line x1="256.0" y1="234.1" x2="256.0" y2="273.6" stroke="#ffffff" stroke-opacity="0.1" stroke-width="0.88"/>
+    <polygon points="332.0,282.3 366.2,302.1 332.0,321.8 297.8,302.1" fill="url(#gt)"/>
+    <polygon points="366.2,302.1 332.0,321.8 332.0,361.3 366.2,341.6" fill="url(#gr)"/>
+    <polygon points="297.8,302.1 332.0,321.8 332.0,361.3 297.8,341.6" fill="url(#gl)"/>
+    <polyline points="297.8,302.1 332.0,282.3 366.2,302.1" fill="none" stroke="#b9bbc0" stroke-opacity="0.55" stroke-width="1.10" stroke-linejoin="round"/>
+    <polyline points="297.8,302.1 332.0,321.8 366.2,302.1" fill="none" stroke="#ffffff" stroke-opacity="0.16" stroke-width="0.88" stroke-linejoin="round"/>
+    <line x1="332.0" y1="321.8" x2="332.0" y2="361.3" stroke="#ffffff" stroke-opacity="0.1" stroke-width="0.88"/>
+    <polygon points="256.0,282.3 290.2,302.1 256.0,321.8 221.8,302.1" fill="url(#gt)"/>
+    <polygon points="290.2,302.1 256.0,321.8 256.0,361.3 290.2,341.6" fill="url(#gr)"/>
+    <polygon points="221.8,302.1 256.0,321.8 256.0,361.3 221.8,341.6" fill="url(#gl)"/>
+    <polyline points="221.8,302.1 256.0,282.3 290.2,302.1" fill="none" stroke="#b9bbc0" stroke-opacity="0.55" stroke-width="1.10" stroke-linejoin="round"/>
+    <polyline points="221.8,302.1 256.0,321.8 290.2,302.1" fill="none" stroke="#ffffff" stroke-opacity="0.16" stroke-width="0.88" stroke-linejoin="round"/>
+    <line x1="256.0" y1="321.8" x2="256.0" y2="361.3" stroke="#ffffff" stroke-opacity="0.1" stroke-width="0.88"/>
+    <polygon points="180.0,282.3 214.2,302.1 180.0,321.8 145.8,302.1" fill="url(#gt)"/>
+    <polygon points="214.2,302.1 180.0,321.8 180.0,361.3 214.2,341.6" fill="url(#gr)"/>
+    <polygon points="145.8,302.1 180.0,321.8 180.0,361.3 145.8,341.6" fill="url(#gl)"/>
+    <polyline points="145.8,302.1 180.0,282.3 214.2,302.1" fill="none" stroke="#b9bbc0" stroke-opacity="0.55" stroke-width="1.10" stroke-linejoin="round"/>
+    <polyline points="145.8,302.1 180.0,321.8 214.2,302.1" fill="none" stroke="#ffffff" stroke-opacity="0.16" stroke-width="0.88" stroke-linejoin="round"/>
+    <line x1="180.0" y1="321.8" x2="180.0" y2="361.3" stroke="#ffffff" stroke-opacity="0.1" stroke-width="0.88"/>
+    <polygon points="294.0,216.5 328.2,236.3 294.0,256.0 259.8,236.3" fill="url(#gt)"/>
+    <polygon points="328.2,236.3 294.0,256.0 294.0,295.5 328.2,275.7" fill="url(#gr)"/>
+    <polygon points="259.8,236.3 294.0,256.0 294.0,295.5 259.8,275.7" fill="url(#gl)"/>
+    <polyline points="259.8,236.3 294.0,216.5 328.2,236.3" fill="none" stroke="#b9bbc0" stroke-opacity="0.55" stroke-width="1.10" stroke-linejoin="round"/>
+    <polyline points="259.8,236.3 294.0,256.0 328.2,236.3" fill="none" stroke="#ffffff" stroke-opacity="0.16" stroke-width="0.88" stroke-linejoin="round"/>
+    <line x1="294.0" y1="256.0" x2="294.0" y2="295.5" stroke="#ffffff" stroke-opacity="0.1" stroke-width="0.88"/>
+    <polygon points="218.0,216.5 252.2,236.3 218.0,256.0 183.8,236.3" fill="url(#gt)"/>
+    <polygon points="252.2,236.3 218.0,256.0 218.0,295.5 252.2,275.7" fill="url(#gr)"/>
+    <polygon points="183.8,236.3 218.0,256.0 218.0,295.5 183.8,275.7" fill="url(#gl)"/>
+    <polyline points="183.8,236.3 218.0,216.5 252.2,236.3" fill="none" stroke="#b9bbc0" stroke-opacity="0.55" stroke-width="1.10" stroke-linejoin="round"/>
+    <polyline points="183.8,236.3 218.0,256.0 252.2,236.3" fill="none" stroke="#ffffff" stroke-opacity="0.16" stroke-width="0.88" stroke-linejoin="round"/>
+    <line x1="218.0" y1="256.0" x2="218.0" y2="295.5" stroke="#ffffff" stroke-opacity="0.1" stroke-width="0.88"/>
+    <polygon points="256.0,150.7 290.2,170.4 256.0,190.2 221.8,170.4" fill="url(#gt)"/>
+    <polygon points="290.2,170.4 256.0,190.2 256.0,229.7 290.2,209.9" fill="url(#gr)"/>
+    <polygon points="221.8,170.4 256.0,190.2 256.0,229.7 221.8,209.9" fill="url(#gl)"/>
+    <polyline points="221.8,170.4 256.0,150.7 290.2,170.4" fill="none" stroke="#b9bbc0" stroke-opacity="0.55" stroke-width="1.10" stroke-linejoin="round"/>
+    <polyline points="221.8,170.4 256.0,190.2 290.2,170.4" fill="none" stroke="#ffffff" stroke-opacity="0.16" stroke-width="0.88" stroke-linejoin="round"/>
+    <line x1="256.0" y1="190.2" x2="256.0" y2="229.7" stroke="#ffffff" stroke-opacity="0.1" stroke-width="0.88"/>
+    <polygon points="294.0,304.3 328.2,324.0 294.0,343.8 259.8,324.0" fill="url(#gt)"/>
+    <polygon points="328.2,324.0 294.0,343.8 294.0,383.3 328.2,363.5" fill="url(#gr)"/>
+    <polygon points="259.8,324.0 294.0,343.8 294.0,383.3 259.8,363.5" fill="url(#gl)"/>
+    <polyline points="259.8,324.0 294.0,304.3 328.2,324.0" fill="none" stroke="#b9bbc0" stroke-opacity="0.55" stroke-width="1.10" stroke-linejoin="round"/>
+    <polyline points="259.8,324.0 294.0,343.8 328.2,324.0" fill="none" stroke="#ffffff" stroke-opacity="0.16" stroke-width="0.88" stroke-linejoin="round"/>
+    <line x1="294.0" y1="343.8" x2="294.0" y2="383.3" stroke="#ffffff" stroke-opacity="0.1" stroke-width="0.88"/>
+    <polygon points="218.0,304.3 252.2,324.0 218.0,343.8 183.8,324.0" fill="url(#gt)"/>
+    <polygon points="252.2,324.0 218.0,343.8 218.0,383.3 252.2,363.5" fill="url(#gr)"/>
+    <polygon points="183.8,324.0 218.0,343.8 218.0,383.3 183.8,363.5" fill="url(#gl)"/>
+    <polyline points="183.8,324.0 218.0,304.3 252.2,324.0" fill="none" stroke="#b9bbc0" stroke-opacity="0.55" stroke-width="1.10" stroke-linejoin="round"/>
+    <polyline points="183.8,324.0 218.0,343.8 252.2,324.0" fill="none" stroke="#ffffff" stroke-opacity="0.16" stroke-width="0.88" stroke-linejoin="round"/>
+    <line x1="218.0" y1="343.8" x2="218.0" y2="383.3" stroke="#ffffff" stroke-opacity="0.1" stroke-width="0.88"/>
+    <polygon points="332.0,238.4 366.2,258.2 332.0,277.9 297.8,258.2" fill="url(#gt)"/>
+    <polygon points="366.2,258.2 332.0,277.9 332.0,317.4 366.2,297.7" fill="url(#gr)"/>
+    <polygon points="297.8,258.2 332.0,277.9 332.0,317.4 297.8,297.7" fill="url(#gl)"/>
+    <polyline points="297.8,258.2 332.0,238.4 366.2,258.2" fill="none" stroke="#b9bbc0" stroke-opacity="0.55" stroke-width="1.10" stroke-linejoin="round"/>
+    <polyline points="297.8,258.2 332.0,277.9 366.2,258.2" fill="none" stroke="#ffffff" stroke-opacity="0.16" stroke-width="0.88" stroke-linejoin="round"/>
+    <line x1="332.0" y1="277.9" x2="332.0" y2="317.4" stroke="#ffffff" stroke-opacity="0.1" stroke-width="0.88"/>
+    <polygon points="256.0,238.4 290.2,258.2 256.0,277.9 221.8,258.2" fill="url(#rt)"/>
+    <polygon points="290.2,258.2 256.0,277.9 256.0,317.4 290.2,297.7" fill="url(#rr)"/>
+    <polygon points="221.8,258.2 256.0,277.9 256.0,317.4 221.8,297.7" fill="url(#rl)"/>
+    <polyline points="221.8,258.2 256.0,238.4 290.2,258.2" fill="none" stroke="#f06a7e" stroke-opacity="0.55" stroke-width="1.10" stroke-linejoin="round"/>
+    <polyline points="221.8,258.2 256.0,277.9 290.2,258.2" fill="none" stroke="#ffffff" stroke-opacity="0.22" stroke-width="0.88" stroke-linejoin="round"/>
+    <line x1="256.0" y1="277.9" x2="256.0" y2="317.4" stroke="#ffffff" stroke-opacity="0.1" stroke-width="0.88"/>
+    <polygon points="180.0,238.4 214.2,258.2 180.0,277.9 145.8,258.2" fill="url(#gt)"/>
+    <polygon points="214.2,258.2 180.0,277.9 180.0,317.4 214.2,297.7" fill="url(#gr)"/>
+    <polygon points="145.8,258.2 180.0,277.9 180.0,317.4 145.8,297.7" fill="url(#gl)"/>
+    <polyline points="145.8,258.2 180.0,238.4 214.2,258.2" fill="none" stroke="#b9bbc0" stroke-opacity="0.55" stroke-width="1.10" stroke-linejoin="round"/>
+    <polyline points="145.8,258.2 180.0,277.9 214.2,258.2" fill="none" stroke="#ffffff" stroke-opacity="0.16" stroke-width="0.88" stroke-linejoin="round"/>
+    <line x1="180.0" y1="277.9" x2="180.0" y2="317.4" stroke="#ffffff" stroke-opacity="0.1" stroke-width="0.88"/>
+    <polygon points="294.0,172.6 328.2,192.4 294.0,212.1 259.8,192.4" fill="url(#gt)"/>
+    <polygon points="328.2,192.4 294.0,212.1 294.0,251.6 328.2,231.9" fill="url(#gr)"/>
+    <polygon points="259.8,192.4 294.0,212.1 294.0,251.6 259.8,231.9" fill="url(#gl)"/>
+    <polyline points="259.8,192.4 294.0,172.6 328.2,192.4" fill="none" stroke="#b9bbc0" stroke-opacity="0.55" stroke-width="1.10" stroke-linejoin="round"/>
+    <polyline points="259.8,192.4 294.0,212.1 328.2,192.4" fill="none" stroke="#ffffff" stroke-opacity="0.16" stroke-width="0.88" stroke-linejoin="round"/>
+    <line x1="294.0" y1="212.1" x2="294.0" y2="251.6" stroke="#ffffff" stroke-opacity="0.1" stroke-width="0.88"/>
+    <polygon points="218.0,172.6 252.2,192.4 218.0,212.1 183.8,192.4" fill="url(#gt)"/>
+    <polygon points="252.2,192.4 218.0,212.1 218.0,251.6 252.2,231.9" fill="url(#gr)"/>
+    <polygon points="183.8,192.4 218.0,212.1 218.0,251.6 183.8,231.9" fill="url(#gl)"/>
+    <polyline points="183.8,192.4 218.0,172.6 252.2,192.4" fill="none" stroke="#b9bbc0" stroke-opacity="0.55" stroke-width="1.10" stroke-linejoin="round"/>
+    <polyline points="183.8,192.4 218.0,212.1 252.2,192.4" fill="none" stroke="#ffffff" stroke-opacity="0.16" stroke-width="0.88" stroke-linejoin="round"/>
+    <line x1="218.0" y1="212.1" x2="218.0" y2="251.6" stroke="#ffffff" stroke-opacity="0.1" stroke-width="0.88"/>
+    <polygon points="256.0,106.8 290.2,126.5 256.0,146.3 221.8,126.5" fill="url(#gt)"/>
+    <polygon points="290.2,126.5 256.0,146.3 256.0,185.8 290.2,166.0" fill="url(#gr)"/>
+    <polygon points="221.8,126.5 256.0,146.3 256.0,185.8 221.8,166.0" fill="url(#gl)"/>
+    <polyline points="221.8,126.5 256.0,106.8 290.2,126.5" fill="none" stroke="#b9bbc0" stroke-opacity="0.55" stroke-width="1.10" stroke-linejoin="round"/>
+    <polyline points="221.8,126.5 256.0,146.3 290.2,126.5" fill="none" stroke="#ffffff" stroke-opacity="0.16" stroke-width="0.88" stroke-linejoin="round"/>
+    <line x1="256.0" y1="146.3" x2="256.0" y2="185.8" stroke="#ffffff" stroke-opacity="0.1" stroke-width="0.88"/>
+    <polygon points="256.0,326.2 290.2,346.0 256.0,365.7 221.8,346.0" fill="url(#gt)"/>
+    <polygon points="290.2,346.0 256.0,365.7 256.0,405.2 290.2,385.5" fill="url(#gr)"/>
+    <polygon points="221.8,346.0 256.0,365.7 256.0,405.2 221.8,385.5" fill="url(#gl)"/>
+    <polyline points="221.8,346.0 256.0,326.2 290.2,346.0" fill="none" stroke="#b9bbc0" stroke-opacity="0.55" stroke-width="1.10" stroke-linejoin="round"/>
+    <polyline points="221.8,346.0 256.0,365.7 290.2,346.0" fill="none" stroke="#ffffff" stroke-opacity="0.16" stroke-width="0.88" stroke-linejoin="round"/>
+    <line x1="256.0" y1="365.7" x2="256.0" y2="405.2" stroke="#ffffff" stroke-opacity="0.1" stroke-width="0.88"/>
+    <polygon points="332.0,194.6 366.2,214.3 332.0,234.1 297.8,214.3" fill="url(#gt)"/>
+    <polygon points="366.2,214.3 332.0,234.1 332.0,273.6 366.2,253.8" fill="url(#gr)"/>
+    <polygon points="297.8,214.3 332.0,234.1 332.0,273.6 297.8,253.8" fill="url(#gl)"/>
+    <polyline points="297.8,214.3 332.0,194.6 366.2,214.3" fill="none" stroke="#b9bbc0" stroke-opacity="0.55" stroke-width="1.10" stroke-linejoin="round"/>
+    <polyline points="297.8,214.3 332.0,234.1 366.2,214.3" fill="none" stroke="#ffffff" stroke-opacity="0.16" stroke-width="0.88" stroke-linejoin="round"/>
+    <line x1="332.0" y1="234.1" x2="332.0" y2="273.6" stroke="#ffffff" stroke-opacity="0.1" stroke-width="0.88"/>
+    <polygon points="180.0,194.6 214.2,214.3 180.0,234.1 145.8,214.3" fill="url(#gt)"/>
+    <polygon points="214.2,214.3 180.0,234.1 180.0,273.6 214.2,253.8" fill="url(#gr)"/>
+    <polygon points="145.8,214.3 180.0,234.1 180.0,273.6 145.8,253.8" fill="url(#gl)"/>
+    <polyline points="145.8,214.3 180.0,194.6 214.2,214.3" fill="none" stroke="#b9bbc0" stroke-opacity="0.55" stroke-width="1.10" stroke-linejoin="round"/>
+    <polyline points="145.8,214.3 180.0,234.1 214.2,214.3" fill="none" stroke="#ffffff" stroke-opacity="0.16" stroke-width="0.88" stroke-linejoin="round"/>
+    <line x1="180.0" y1="234.1" x2="180.0" y2="273.6" stroke="#ffffff" stroke-opacity="0.1" stroke-width="0.88"/>
+  </g>
+</svg>
