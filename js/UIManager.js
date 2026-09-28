@@ -1289,8 +1289,15 @@ class UIManager {
         const cards = ids.map(id => {
             const s = STRAITS[id];
             const keepers = Shipping.keepers(data, id);
-            const state = k => { const p = Shipping.policy(data, id, k); return `${STRAIT_MODES[p.mode].icon} ${p.mode === 'fee' ? `плата ${Math.round(p.fee * 100)}%` : STRAIT_MODES[p.mode].name.toLowerCase()}`; };
-            let body = keepers.map(k => `<div class="budget-row"><span>${k === cc ? '<b>Вы</b>' : name(k)}</span><b>${state(k)}</b></div>`).join('');
+            const state = k => {
+                const p = Shipping.policy(data, id, k);
+                const extra = [p.hostile ? 'врагам закрыт' : '', p.deny.length ? `закрыт: ${p.deny.length} стр.` : '', p.allow.length ? `бесплатно: ${p.allow.length} стр.` : ''].filter(Boolean).join(', ');
+                return [`${STRAIT_MODES[p.mode].icon} ${p.mode === 'fee' ? `плата ${Math.round(p.fee * 100)}%` : STRAIT_MODES[p.mode].name.toLowerCase()}`, extra];
+            };
+            let body = keepers.map(k => {
+                const [mode, extra] = state(k);
+                return `<div class="budget-row"><span>${k === cc ? '<b>Вы</b>' : name(k)}</span><b>${mode}</b></div>${extra ? `<p class="st-extra">${extra}</p>` : ''}`;
+            }).join('');
             const dep = Shipping.dep(id, cc);
             if (dep && !mine(id)) {
                 const pass = Shipping.passage(data, id, cc);
@@ -1305,9 +1312,24 @@ class UIManager {
                     return `<button class="chip help-chip ${on ? 'on' : ''}" type="button" data-action="strait-mode" data-strait="${id}" data-mode="${mode}" data-fee="${fee}" ${data.gameOver ? 'disabled' : ''}>${label}</button>`;
                 };
                 const users = Object.entries(s.users).filter(([x]) => x !== cc && data.countries[x]?.alive).sort((a, b2) => b2[1] - a[1]);
-                body += `<div class="help-chips">${chip('open', 0, '🟢 Открыт')}${SHIPPING.FEES.map(f => chip('fee', f, `💰 ${Math.round(f * 100)}%`)).join('')}
-                    ${chip('hostile', 0, '🛑 Врагам — нет')}${chip('closed', 0, '⛔ Закрыт')}</div>
-                    <p class="hint">Зависят: ${users.slice(0, 6).map(([x, v]) => `${name(x)} ${Math.round(v * 100)}%`).join(', ')}${users.length > 6 ? ` и ещё ${users.length - 6}` : ''}. Плата — доход с их торговли; закрытие режет им торговлю. И то и другое портит с ними отношения. «Врагам — нет»: закрыт для тех, с кем война, отношения от −50 или кто под санкциями ООН.</p>`;
+                const off = data.gameOver ? 'disabled' : '';
+                // исключения: кому закрыто и кого пропускать бесплатно — чипы со ✕
+                const rule = (x, kind) => `<button class="chip help-chip rule-${kind}" type="button" data-action="strait-unrule" data-strait="${id}" data-target="${x}" ${off} title="Убрать исключение">${kind === 'deny' ? '⛔' : '🟢'} ${name(x)} ✕</button>`;
+                const rules = [...p.deny.map(x => rule(x, 'deny')), ...p.allow.map(x => rule(x, 'allow'))].join('');
+                // в списке — сначала зависящие от пролива, потом все по алфавиту
+                const picked = new Set([...p.deny, ...p.allow, cc]);
+                const first = users.map(([x]) => x).filter(x => !picked.has(x));
+                const rest = Object.values(data.countries).filter(c => c.alive && c.playable && !picked.has(c.id) && !first.includes(c.id))
+                    .sort((a, b2) => a.name.localeCompare(b2.name, 'ru')).map(c => c.id);
+                const options = [...first, ...rest].map(x => `<option value="${x}">${name(x)}${s.users[x] ? ` · ${Math.round(s.users[x] * 100)}%` : ''}</option>`).join('');
+                body += `<div class="st-row"><span class="st-label">Для всех</span><div class="help-chips">${chip('open', 0, '🟢 Открыт')}${SHIPPING.FEES.map(f => chip('fee', f, `💰 ${Math.round(f * 100)}%`)).join('')}${chip('closed', 0, '⛔ Закрыт')}</div></div>
+                    <div class="st-row"><span class="st-label">Врагам</span><div class="help-chips">
+                        <button class="chip help-chip ${p.hostile ? 'on' : ''}" type="button" data-action="strait-hostile" data-strait="${id}" data-on="${p.hostile ? 0 : 1}" ${off}>🛑 ${p.hostile ? 'Закрыт для врагов — вкл.' : 'Закрывать врагам — выкл.'}</button></div></div>
+                    <div class="st-row"><span class="st-label">Исключения</span>${rules ? `<div class="help-chips">${rules}</div>` : '<span class="muted">нет</span>'}</div>
+                    <div class="st-pick"><select data-strait-pick="${id}" aria-label="Страна">${options}</select>
+                        <button class="chip help-chip" type="button" data-action="strait-rule" data-strait="${id}" data-rule="deny" ${off}>⛔ Закрыть</button>
+                        <button class="chip help-chip" type="button" data-action="strait-rule" data-strait="${id}" data-rule="allow" ${off}>🟢 Бесплатно</button></div>
+                    <p class="hint">Зависят: ${users.slice(0, 6).map(([x, v]) => `${name(x)} ${Math.round(v * 100)}%`).join(', ')}${users.length > 6 ? ` и ещё ${users.length - 6}` : ''}. Закрытый пролив не пропускает ни торговлю, ни флот этой страны; плата — доход с её торговли. И то и другое портит отношения. «Враги» — с кем война, отношения от −50 или кто под санкциями ООН. Исключения сильнее общего режима.</p>`;
             }
             return `<div class="fin-block loan strait-card ${mine(id) ? 'mine' : ''}" id="strait-${id}"><div class="loan-head"><b>${s.name}</b><small>${mine(id) ? 'ваш пролив' : dep ? `ваша торговля: ${Math.round(dep * 100)}%` : ''}</small></div>${body}</div>`;
         }).join('');

@@ -81,16 +81,21 @@ class MapEngine {
             this.svg.appendChild(el);
             return el;
         };
+        // море — под сушей: суша прячет стыки клеток у берега, видна только вода
+        this.seaZoneLayer = g('layer-sea-zones');
         this.regionLayer = g('layer-regions');
         this.borderLayer = g('layer-borders');
         this.cityLayer = g('layer-cities');
         this.regionLabelLayer = g('layer-region-labels');
         this.labelLayer = g('layer-labels');
         this.orderLayer = g('layer-orders');
-        this.armyLayer = g('layer-armies');
         this.seaLayer = g('layer-seas');
+        this.portLayer = g('layer-ports');
+        this.armyLayer = g('layer-armies');
         this.fleetLayer = g('layer-fleets');
         this.straitLayer = g('layer-straits');
+        this.seaZones = new Map();
+        this.fleetTargets = null;
 
         // Наконечники стрел приказов. markerUnits=strokeWidth — наконечник
         // масштабируется вместе с линией, толщина которой постоянна на экране.
@@ -266,6 +271,20 @@ class MapEngine {
         const width = Math.max(bounds.bw * 1.4, bounds.bh * 1.4 * this.rect.width / this.rect.height, this.minView);
         const scale = this.clampScale(this.rect.width / (Math.min(width, this.interactiveView * 0.9) * this.baseScale));
         this.flyTo({ x: region.lx, y: region.ly }, scale);
+    }
+
+    // Несколько морей на экране: откуда идёт эскадра и куда может дойти.
+    focusSeas(ids) {
+        const pts = [...ids].map(id => SeasDB.zones[id]).filter(Boolean);
+        if (!pts.length) return;
+        const xs = pts.map(z => z.x), ys = pts.map(z => z.y);
+        const minX = Math.min(...xs), maxX = Math.max(...xs), minY = Math.min(...ys), maxY = Math.max(...ys);
+        // через линию перемены дат центры разбегаются на весь мир — тогда только к исходному морю
+        if (maxX - minX > 300) { this.flyTo({ x: pts[0].x, y: pts[0].y }, this.scale); return; }
+        this.measure();
+        const width = Math.max((maxX - minX) * 1.6, (maxY - minY) * 1.8 * this.rect.width / this.rect.height, this.minView * 2);
+        const scale = this.clampScale(this.rect.width / (Math.min(width, this.interactiveView * 0.9) * this.baseScale));
+        this.flyTo({ x: (minX + maxX) / 2, y: (minY + maxY) / 2 }, scale);
     }
 
     // Вся страна на экране, но не дальше уровня, где кликаются области.
@@ -487,13 +506,40 @@ class MapEngine {
             this.onRegionClick(path.dataset.region);
         });
 
-        // значок флота — окно «Флот» на этом море
+        // море: выбор цели похода или окно «Флот» на этом море
+        this.seaZoneLayer.addEventListener('click', e => {
+            if (this.wasDragging) return;
+            const zone = e.target.closest('.sea-zone');
+            if (!zone) return;
+            e.stopPropagation();
+            const id = zone.dataset.zone;
+            if (this.fleetTargets) {
+                if (this.fleetTargets.has(id)) document.dispatchEvent(new CustomEvent('fleetTarget', { detail: id }));
+                return;
+            }
+            document.dispatchEvent(new CustomEvent('seaClick', { detail: id }));
+        });
+
+        // значок флота — окно «Флот» на этом море (при выборе цели — как море)
         this.fleetLayer.addEventListener('click', e => {
             if (this.wasDragging) return;
             const mark = e.target.closest('.fleet-mark');
             if (!mark) return;
             e.stopPropagation();
+            if (this.fleetTargets) {
+                if (this.fleetTargets.has(mark.dataset.zone)) document.dispatchEvent(new CustomEvent('fleetTarget', { detail: mark.dataset.zone }));
+                return;
+            }
             document.dispatchEvent(new CustomEvent('fleetClick', { detail: mark.dataset.zone }));
+        });
+
+        // значок порта — карточка его области
+        this.portLayer.addEventListener('click', e => {
+            if (this.wasDragging) return;
+            const mark = e.target.closest('.port-mark');
+            if (!mark) return;
+            e.stopPropagation();
+            this.onRegionClick(mark.dataset.region);
         });
 
         // значок пролива — открыть окно проливов на нём
@@ -1184,32 +1230,81 @@ class MapEngine {
         }
         this.armyLayer.appendChild(fragment);
         this.drawSeas();
+        this.drawPorts();
         this.drawFleets();
         this.drawStraits();
         this.cull();
         this.scheduleDeclutter();
     }
 
-    // --- моря и флоты ----------------------------------------------------------
-    // Названия морей — один раз; видны при приближении (см. map.css).
+    // --- моря, порты, флоты -------------------------------------------------------
+    // Морские зоны рисуются один раз: контуры под сушей, границы между ними
+    // по воде, подписи морей — по одной на море (его главная зона).
     drawSeas() {
-        if (!this.seaLayer || this.seaLayer.childElementCount || typeof SeasDB === 'undefined') return;
+        if (!this.seaZoneLayer || this.seaZoneLayer.childElementCount || typeof SeasDB === 'undefined') return;
         const ns = 'http://www.w3.org/2000/svg';
+        const frag = document.createDocumentFragment();
+        for (const [id, z] of Object.entries(SeasDB.zones)) {
+            if (!z.path) continue;
+            const p = document.createElementNS(ns, 'path');
+            p.setAttribute('class', 'sea-zone');
+            p.setAttribute('d', z.path);
+            p.setAttribute('fill-rule', 'evenodd');
+            p.dataset.zone = id;
+            const title = document.createElementNS(ns, 'title');
+            title.textContent = z.name;
+            p.appendChild(title);
+            frag.appendChild(p);
+            this.seaZones.set(id, p);
+        }
+        const borders = document.createElementNS(ns, 'path');
+        borders.setAttribute('class', 'sea-borders');
+        borders.setAttribute('d', SeasDB.borders || '');
+        frag.appendChild(borders);
+        this.seaZoneLayer.appendChild(frag);
         for (const z of Object.values(SeasDB.zones)) {
+            if (!z.head) continue;
             const g = document.createElementNS(ns, 'g');
             g.setAttribute('class', 'sea-label');
             g.setAttribute('transform', `translate(${z.x},${z.y})`);
-            g.innerHTML = `<g class="badge-inner"><text y="-16">${z.name}</text></g>`;
+            g.innerHTML = `<g class="badge-inner"><text y="-15">${z.sea}</text></g>`;
             this.seaLayer.appendChild(g);
         }
     }
 
-    // Флоты в морях: по значку на сторону — свой, союзники, враги, прочие.
+    // Подсветка морей, куда эскадра дойдёт за ход (null — снять).
+    setFleetTargets(zones) {
+        this.fleetTargets = zones && zones.size ? zones : null;
+        for (const [id, el] of this.seaZones) el.classList.toggle('fleet-target', !!this.fleetTargets && this.fleetTargets.has(id));
+        this.svg.classList.toggle('fleet-picking', !!this.fleetTargets);
+    }
+
+    // Порты: у реального — в городе, у построенного — у берега области.
+    drawPorts() {
+        if (!this.portLayer || typeof Shipping === 'undefined' || typeof SeasDB === 'undefined') return;
+        const ns = 'http://www.w3.org/2000/svg';
+        const player = this.data.playerCountry;
+        this.portLayer.innerHTML = '';
+        for (const m of Shipping.portMarks(this.data)) {
+            const region = this.data.regions[m.region];
+            const g = document.createElementNS(ns, 'g');
+            g.setAttribute('class', `port-mark${region.owner === player ? ' own' : ''}${Navy.blockaded(this.data, region) ? ' blockaded' : ''}`);
+            g.dataset.region = m.region;
+            g.setAttribute('transform', `translate(${m.x},${m.y})`);
+            g.innerHTML = `<title>Порт ${m.name} · уровень ${region.development.port}</title><g class="badge-inner"><circle r="7"/><text y="0.5">⚓</text></g>`;
+            this.portLayer.appendChild(g);
+        }
+    }
+
+    // Флоты — как значки армий, в центре своего моря: свой, союзники, враги,
+    // прочие. Чужие нейтральные видны только у наших берегов и эскадр.
     drawFleets() {
         if (!this.fleetLayer || typeof Navy === 'undefined') return;
         const ns = 'http://www.w3.org/2000/svg';
         const player = this.data.playerCountry;
         const zones = Navy.zones();
+        const near = new Set(this.data.getCountryRegions(player).flatMap(r => Navy.seasOf(r.id)));
+        for (const f of Navy.fleets(this.data, player)) { near.add(f.zone); for (const n of zones[f.zone]?.adj || []) near.add(n); }
         this.fleetLayer.innerHTML = '';
         for (const [zone, byCc] of Object.entries(this.data.navy || {})) {
             const z = zones[zone];
@@ -1217,27 +1312,31 @@ class MapEngine {
             const sides = { own: 0, ally: 0, enemy: 0, other: 0 };
             for (const [cc, ships] of Object.entries(byCc)) {
                 const kind = cc === player ? 'own' : Diplomacy.isAllied(this.data, cc, player) ? 'ally' : this.data.isAtWar(cc, player) ? 'enemy' : 'other';
+                if (kind === 'other' && !near.has(zone)) continue;
                 sides[kind] += Navy.power(ships);
             }
             const parts = Object.entries(sides).filter(([, p]) => p > 0);
-            const widths = parts.map(([, p]) => 24 + String(p).length * 6.6);
+            if (!parts.length) continue;
+            const widths = parts.map(([, p]) => 26 + String(p).length * 6.6);
             let x = -(widths.reduce((a, b) => a + b, 0) + (parts.length - 1) * 3) / 2;
             const g = document.createElementNS(ns, 'g');
             g.setAttribute('class', 'fleet-mark');
             g.dataset.zone = zone;
             g.setAttribute('transform', `translate(${z.x},${z.y})`);
             g.innerHTML = `<title>${z.name}</title><g class="badge-inner">${parts.map(([kind, p], i) => {
-                const w = widths[i], rect = `<g class="fleet-badge ${kind}"><rect x="${x}" y="-8" width="${w}" height="16" rx="8"/><text x="${x + 7}" y="0.5">⚓${p}</text></g>`;
+                const w = widths[i];
+                const out = `<g class="army-badge fleet ${kind}"><rect x="${x}" y="-8" width="${w}" height="16" rx="2"/>`
+                    + `<text class="fleet-ico" x="${x + 9}" y="0.5">⛴</text><text x="${x + 17}" y="0.5">${p}</text></g>`;
                 x += w + 3;
-                return rect;
+                return out;
             }).join('')}</g>`;
             this.fleetLayer.appendChild(g);
         }
     }
 
     // --- проливы -------------------------------------------------------------
-    // Значок на месте пролива глазами игрока: ⚓ — проход свободен, 💰 —
-    // платный, ⛔ — закрыт для него. Свой пролив — в светлом кольце.
+    // Значок на границе двух морей глазами игрока: ⇄ — проход свободен,
+    // 💰 — платный, ⛔ — закрыт для него. Свой пролив — в светлом кольце.
     drawStraits() {
         if (!this.straitLayer || typeof STRAITS === 'undefined') return;
         const ns = 'http://www.w3.org/2000/svg';
@@ -1247,11 +1346,12 @@ class MapEngine {
             const own = Shipping.keepers(this.data, id).includes(player);
             const pass = Shipping.passage(this.data, id, player);
             const state = own ? 'own' : pass.blocked ? 'blocked' : pass.fee ? 'fee' : 'open';
-            const icon = pass.blocked && !own ? '⛔' : pass.fee && !own ? '💰' : '⚓';
+            const icon = pass.blocked && !own ? '⛔' : pass.fee && !own ? '💰' : '⇄';
+            const [x, y] = Shipping.markOf(id);
             const g = document.createElementNS(ns, 'g');
             g.setAttribute('class', `strait-mark ${state}`);
             g.dataset.strait = id;
-            g.setAttribute('transform', `translate(${s.at[0]},${s.at[1]})`);
+            g.setAttribute('transform', `translate(${x},${y})`);
             g.innerHTML = `<title>${s.name}</title><g class="badge-inner"><circle r="11"/><text y="0.5">${icon}</text></g>`;
             this.straitLayer.appendChild(g);
         }

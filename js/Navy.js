@@ -29,6 +29,7 @@ const SHIPS = {
 };
 
 const NAVY = {
+    SPEED: 2,               // морей за ход
     HULLS_PER_LEVEL: 4,     // корпусов в одном заказе за уровень порта
     SUB_BONUS: 0.5,         // подлодка против надводных без прикрытия: +50%
     SUB_HUNT: 6,            // сколько противолодочных очков «закрывают» одну подлодку
@@ -48,7 +49,23 @@ class Navy {
 
     // --- моря -------------------------------------------------------------
     static zones() { return (typeof SeasDB !== 'undefined' && SeasDB.zones) || {}; }
-    static seasOf(regionId) { return (typeof SeasDB !== 'undefined' && SeasDB.coast[regionId]) || []; }
+    static seasOf(regionId) { return (typeof SeasDB !== 'undefined' && SeasDB.coast[regionId]?.seas) || []; }
+
+    // Куда эскадра дойдёт за ход: до SPEED морей, через открытые проливы.
+    static reachable(d, cc, from) {
+        const out = new Set();
+        let frontier = [from];
+        const seen = new Set([from]);
+        for (let step = 0; step < NAVY.SPEED; step++) {
+            const next = [];
+            for (const z of frontier) for (const n of Navy.zones()[z]?.adj || []) {
+                if (seen.has(n) || !Navy.canPass(d, cc, z, n)) continue;
+                seen.add(n); out.add(n); next.push(n);
+            }
+            frontier = next;
+        }
+        return out;
+    }
     static strait(a, b) { return (typeof SeasDB !== 'undefined' && SeasDB.straits[[a, b].sort().join('|')]) || null; }
 
     // Можно ли эскадре страны cc пройти из a в b за ход.
@@ -186,7 +203,7 @@ class Navy {
     static move(d, cc, from, to, ships) {
         const fleet = Navy.fleet(d, from, cc);
         if (d.gameOver || !fleet) return { ok: false, reason: 'Здесь нет вашего флота' };
-        if (!Navy.canPass(d, cc, from, to)) return { ok: false, reason: 'Туда не пройти: не соседнее море или пролив закрыт' };
+        if (!Navy.reachable(d, cc, from).has(to)) return { ok: false, reason: `Туда не дойти за ход: до ${NAVY.SPEED} морей, через открытые проливы` };
         const busy = Navy.ordered(d, cc, from);
         const sending = {};
         let total = 0;
@@ -255,7 +272,7 @@ class Navy {
 
         // 2. походы (пролив могли закрыть за ход — тогда стоим)
         for (const o of d.navalOrders) {
-            if (!Navy.canPass(d, o.cc, o.from, o.to)) {
+            if (!Navy.reachable(d, o.cc, o.from).has(o.to)) {
                 if (d.isHuman(o.cc)) logs.push({ for: o.cc, success: false, message: `⚓ Поход в ${zname(o.to)} не состоялся: путь закрыт.` });
                 continue;
             }
@@ -376,8 +393,9 @@ class Navy {
             for (const f of Navy.fleets(d, c.id)) {
                 const target = Navy.aiTarget(d, c.id, f.zone, enemies, home);
                 if (!target || target === f.zone) continue;
-                const step = Navy.path(d, c.id, f.zone, target)[1];
-                if (step && zones[f.zone]) Navy.move(d, c.id, f.zone, step, { ...f.ships });
+                const way = Navy.path(d, c.id, f.zone, target);
+                const step = way[Math.min(NAVY.SPEED, way.length - 1)];
+                if (step && step !== f.zone && zones[f.zone]) Navy.move(d, c.id, f.zone, step, { ...f.ships });
             }
         }
     }
