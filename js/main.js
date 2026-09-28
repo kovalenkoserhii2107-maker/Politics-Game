@@ -10,11 +10,19 @@ class GameCore {
         this.loop = new GameLoop(this.data, this.ui, this.map, this.ai);
 
         this.armyAction = { active: false, type: null, fromId: null, forces: {} };
+        this.fleetPick = null;      // эскадра, для которой выбирают море на карте
         this.panelRegion = null;
 
         document.addEventListener('mapBackground', () => this.ui.closePanel());
         document.addEventListener('straitClick', e => this.ui.showStraits(this.data, e.detail));
         document.addEventListener('fleetClick', e => this.ui.showFleet(this.data, e.detail));
+        // море: где стоит флот — окно «Флот» на нём, иначе как пустое место карты
+        document.addEventListener('seaClick', e => {
+            if (this.data.navy[e.detail]) { this.ui.showFleet(this.data, e.detail); return; }
+            this.map.clearSelection();
+            this.ui.closePanel();
+        });
+        document.addEventListener('fleetTarget', e => this.fleetTo(e.detail));
         document.addEventListener('panelClosed', () => {
             this.map.clearSelection();
             this.cancelTargeting();
@@ -153,6 +161,7 @@ class GameCore {
         }
         if (action === 'open-finance') { this.ui.hideModal('gov-modal'); this.openFinance(); return; }
         if (action === 'open-gov') { this.ui.hideModal('finance-modal'); this.openGovernment(); return; }
+        if (action === 'open-diplo') { this.ui.hideModal('gov-modal'); this.openDiplomacy(); return; }
         if (action === 'open-straits') { this.ui.hideModal('finance-modal'); this.ui.hideModal('fleet-modal'); this.ui.showStraits(d); return; }
         if (action === 'open-fleet') { this.ui.showFleet(d, btn.dataset.region || null); return; }
         if (d.gameOver) return;
@@ -211,12 +220,32 @@ class GameCore {
                 const ships = Object.fromEntries(Object.entries(fleet).map(([k, n]) => [k, n - (busy[k] || 0)]));
                 result = d.act('moveFleet', btn.dataset.from, btn.dataset.to, ships);
                 if (result.ok) this.ui.toast(`Эскадра выйдет в ${Navy.zones()[btn.dataset.to].name} в конце хода`);
+            } else if (action === 'fleet-pick') {
+                this.pickFleetTarget(btn.dataset.from);
+                return;
             } else if (action === 'fleet-unmove') {
                 result = d.act('cancelFleetMove', btn.dataset.from, btn.dataset.to);
             }
             if (!result || !result.ok) { if (result && result.reason) this.ui.toast(result.reason); return; }
             this.ui.refreshFleet(d);
             this.map.drawArmyMarkers();
+            this.loop.updateTopBarUI();
+            SaveGame.save(d);
+            return;
+        }
+        if (action === 'strait-hostile' || action === 'strait-rule' || action === 'strait-unrule') {
+            const id = btn.dataset.strait;
+            let result;
+            if (action === 'strait-hostile') result = d.act('setStraitHostile', id, btn.dataset.on === '1');
+            else if (action === 'strait-unrule') result = d.act('setStraitRule', id, btn.dataset.target, null);
+            else {
+                const target = document.querySelector(`[data-strait-pick="${id}"]`)?.value;
+                if (!target) { this.ui.toast('Выберите страну'); return; }
+                result = d.act('setStraitRule', id, target, btn.dataset.rule);
+            }
+            if (!result.ok) { this.ui.toast(result.reason); return; }
+            this.ui.refreshStraits(d);
+            this.map.drawStraits();
             this.loop.updateTopBarUI();
             SaveGame.save(d);
             return;
@@ -939,6 +968,8 @@ class GameCore {
         document.getElementById('target-list-btn').addEventListener('click', () => this.showTargetList());
         document.getElementById('close-target-btn').addEventListener('click', () => this.ui.hideModal('target-modal'));
         document.getElementById('target-list').addEventListener('click', e => {
+            const sea = e.target.closest('[data-fleet-to]');
+            if (sea) { this.fleetTo(sea.dataset.fleetTo); return; }
             const row = e.target.closest('[data-target]');
             if (!row) return;
             this.ui.hideModal('target-modal');
@@ -955,6 +986,7 @@ class GameCore {
     // Те же цели, что подсвечены на карте, но списком: в маленькую область
     // на телефоне пальцем не попасть. Атаки — от лучших шансов к худшим.
     showTargetList() {
+        if (this.fleetPick) { this.showFleetTargetList(); return; }
         const state = this.armyAction;
         if (!state.active) return;
         const d = this.data;
@@ -989,8 +1021,57 @@ class GameCore {
         this.ui.showModal('target-modal');
     }
 
+    // Поход эскадры по карте: подсветить моря в пределах хода, ждать касания.
+    pickFleetTarget(from) {
+        this.cancelTargeting();
+        const targets = Navy.reachable(this.data, this.data.playerCountry, from);
+        if (!targets.size) { this.ui.toast('Отсюда за ход никуда не пройти'); return; }
+        this.fleetPick = from;
+        this.ui.hideModal('fleet-modal');
+        this.ui.closePanelKeepTargeting();
+        this.map.setFleetTargets(targets);
+        this.map.focusSeas([from, ...targets]);
+        this.ui.showTargetBanner('Коснитесь моря для эскадры');
+    }
+
+    // Моря для похода списком: соседние сверху, потом те, что в два перехода.
+    showFleetTargetList() {
+        const d = this.data, from = this.fleetPick, zones = SeasDB.zones;
+        const near = new Set(zones[from].adj);
+        const ids = [...Navy.reachable(d, d.playerCountry, from)].sort((a, b) => (near.has(b) - near.has(a)) || zones[a].name.localeCompare(zones[b].name, 'ru'));
+        document.getElementById('target-title').textContent = 'Куда идти эскадре';
+        document.getElementById('target-hint').textContent = `Из моря «${zones[from].name}». За ход — до ${NAVY.SPEED} морей.`;
+        document.getElementById('target-list').innerHTML = ids.map(id => {
+            const strait = Navy.strait(from, id);
+            return `<button class="target-row" type="button" data-fleet-to="${id}">
+                <span class="swatch" style="background:#2d5d86"></span>
+                <span><b>${this.ui.escape(zones[id].name)}</b><small>${near.has(id) ? 'соседнее море' : 'два перехода'}${strait ? ' · через пролив' : ''}</small></span>
+                <span class="odds move">⛴</span></button>`;
+        }).join('');
+        this.ui.showModal('target-modal');
+    }
+
+    fleetTo(zone) {
+        const d = this.data, from = this.fleetPick;
+        if (!from) return;
+        const fleet = Navy.fleet(d, from, d.playerCountry) || {};
+        const busy = Navy.ordered(d, d.playerCountry, from);
+        const ships = Object.fromEntries(Object.entries(fleet).map(([k, n]) => [k, n - (busy[k] || 0)]));
+        const result = d.act('moveFleet', from, zone, ships);
+        this.cancelTargeting();
+        if (!result.ok) { this.ui.toast(result.reason); return; }
+        this.ui.toast(`Эскадра выйдет в «${Navy.zones()[zone].name}» в конце хода`);
+        this.map.drawArmyMarkers();
+        SaveGame.save(d);
+    }
+
     cancelTargeting() {
         this.ui.hideModal('target-modal');
+        if (this.fleetPick) {
+            this.fleetPick = null;
+            this.map.setFleetTargets(null);
+            this.ui.hideTargetBanner();
+        }
         if (!this.armyAction.active) return;
         this.armyAction.active = false;
         this.map.disableTargetSelection();
@@ -1151,7 +1232,6 @@ class GameCore {
             this.openGovernment();
             document.getElementById('gov-economy-section').scrollIntoView({ block: 'start' });
         });
-        document.getElementById('diplo-btn').addEventListener('click', () => this.openDiplomacy());
         document.getElementById('regions-btn').addEventListener('click', () => { this.cancelTargeting(); this.ui.closePanel(); this.ui.showRegions(this.data); });
         document.getElementById('campaign-btn').addEventListener('click', () => this.ui.showCampaign(this.data));
         document.getElementById('log-btn').addEventListener('click', () => this.ui.showHistory(this.data.history));

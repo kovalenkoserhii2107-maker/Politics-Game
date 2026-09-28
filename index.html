@@ -469,7 +469,7 @@ body { overscroll-behavior: none; }
     #action-bar {
         position: fixed; left: 0; right: 0; bottom: 0; height: var(--nav-h);
         padding: 6px 8px var(--nav-pad-b); box-sizing: border-box; gap: 6px;
-        display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)) minmax(0, 1.2fr); gap: 2px;
+        display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)) minmax(0, 1.2fr); gap: 2px;
         background: rgba(11,18,33,0.98); border-top: 1px solid var(--ui-border); z-index: 30;
     }
     .nav-btn {
@@ -542,8 +542,8 @@ body { overscroll-behavior: none; }
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Exo+2:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;700&display=swap">
 <link rel="stylesheet" href="css/campaign.css?v=fe17f3ba7c">
-<link rel="stylesheet" href="css/theme.css?v=8d8bf52602">
-<link rel="stylesheet" href="css/map.css?v=70063c73a7">
+<link rel="stylesheet" href="css/theme.css?v=e4139ede79">
+<link rel="stylesheet" href="css/map.css?v=339da66d7e">
 <link rel="stylesheet" href="css/start.css?v=5288a0c5d1">
 </head>
 <body>
@@ -710,12 +710,11 @@ body { overscroll-behavior: none; }
             <div class="stat-item"><span>Дата</span> <b class="stat-val" id="glob-date">1 Января</b> <span class="stat-sub" id="glob-year">2024</span></div>
         </div>
         <div class="stat-group" id="action-bar">
-            <button id="diplo-btn" class="top-btn nav-btn" aria-label="Дипломатия"><span class="ico">🤝</span><span class="lbl"><span class="lbl-xl">Дипломатия</span><span class="lbl-xs">Дипл.</span></span><span id="war-badge" class="war-badge"></span></button>
             <button id="regions-btn" class="top-btn nav-btn"><span class="ico">🗺️</span><span class="lbl">Области</span></button>
             <button id="campaign-btn" class="top-btn nav-btn"><span class="ico">🎯</span><span class="lbl">Задания</span><span id="campaign-count" class="mission-badge"></span></button>
             <button id="fleet-btn" class="top-btn nav-btn" aria-label="Флот"><span class="ico">⚓</span><span class="lbl">Флот</span></button>
             <button id="sci-btn" class="top-btn nav-btn"><span class="ico">🔬</span><span class="lbl">Наука</span><span id="sci-badge" class="sci-badge"></span></button>
-            <button id="gov-btn" class="top-btn nav-btn warning" aria-label="Правительство"><span class="ico">🏛️</span><span class="lbl"><span class="lbl-long">Правительство</span><span class="lbl-short">Власть</span></span></button>
+            <button id="gov-btn" class="top-btn nav-btn warning" aria-label="Правительство и дипломатия"><span class="ico">🏛️</span><span class="lbl"><span class="lbl-long">Власть и дипломатия</span><span class="lbl-short">Власть</span></span><span id="war-badge" class="war-badge" title="Идущие войны"></span></button>
             <button id="end-turn-btn" class="top-btn nav-btn primary" aria-label="Конец хода"><span class="ico">⏭️</span><span class="lbl">Конец хода</span></button>
         </div>
     </div>
@@ -776,6 +775,7 @@ body { overscroll-behavior: none; }
                 <button class="close-btn" id="close-gov-btn">✕</button>
             </div>
             <div class="modal-body">
+                <button class="gov-diplo" type="button" data-action="open-diplo">🤝 Дипломатия, союзы и войны<span id="gov-war-note"></span></button>
                 <div class="gov-section" id="gov-economy-section"><h3>Экономика · ресурсы на ход</h3>
                     <div id="gov-economy"></div>
                 </div>
@@ -1025,7 +1025,7 @@ body { overscroll-behavior: none; }
 <script src="js/data/NeighborsDB.js?v=45a5a5d1ad"></script>
 <script src="js/data/BordersDB.js?v=0ece6ee841"></script>
 <script src="js/data/CitiesDB.js?v=96a7a8b11a"></script>
-<script src="js/data/SeasDB.js?v=4b83dbeb41"></script>
+<script src="js/data/SeasDB.js?v=32d7bd74fd"></script>
 
 <!-- Движок -->
 <script src="js/UnitsDB.js?v=8ed53808f1"></script>
@@ -1042,17 +1042,17 @@ body { overscroll-behavior: none; }
 <script src="js/Nuclear.js?v=a5857af620"></script>
 <script src="js/World.js?v=78a2b0d1d0"></script>
 <script src="js/Credit.js?v=dce37b26c3"></script>
-<script src="js/Shipping.js?v=b28aa6e83d"></script>
-<script src="js/Navy.js?v=78b1f0dd45"></script>
+<script src="js/Shipping.js?v=937805b97c"></script>
+<script src="js/Navy.js?v=3ed12e2009"></script>
 <script src="js/Charts.js?v=01f1ed532c"></script>
 <script src="js/Finance.js?v=23af38408e"></script>
-<script src="js/FleetUI.js?v=b3adffcd06"></script>
-<script src="js/GameData.js?v=bf25696b2d"></script>
+<script src="js/FleetUI.js?v=3f57419c5f"></script>
+<script src="js/GameData.js?v=a5ee4d81b0"></script>
 <script src="js/AI.js?v=99e734329b"></script>
-<script src="js/MapEngine.js?v=42b406429f"></script>
-<script src="js/UIManager.js?v=6e934c4182"></script>
-<script src="js/GameLoop.js?v=a6e06a22cc"></script>
+<script src="js/MapEngine.js?v=f0c5934913"></script>
+<script src="js/UIManager.js?v=88d4ade4be"></script>
+<script src="js/GameLoop.js?v=d58eadc684"></script>
 <script src="js/Tutorial.js?v=53ff18fd7f"></script>
-<script src="js/main.js?v=afbb512add"></script>
+<script src="js/main.js?v=1505b6bab0"></script>
 </body>
 </html>

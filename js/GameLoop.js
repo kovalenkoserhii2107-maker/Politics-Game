@@ -481,6 +481,9 @@ class GameLoop {
             badge.textContent = wars;
             badge.style.display = wars ? 'inline-flex' : 'none';
         }
+        // дипломатия живёт во «Власти»: там же — сколько идёт войн
+        const note = document.getElementById('gov-war-note');
+        if (note) note.textContent = wars ? ` · ⚔️ войн: ${wars}` : '';
     }
 }
 

@@ -21,6 +21,7 @@ const pc = require('polygon-clipping');
 const G = require('./lib/geo');
 const source = require('./lib/source');
 const T = require('./lib/translit');
+const { buildSeas } = require('./lib/seas');
 const allCities = require('all-the-cities');
 
 const OUT_DIR = path.join(__dirname, '..', 'js', 'data');
@@ -1215,60 +1216,38 @@ function writeOutput(countries, regions, perCountry, neighbors, cityIndex) {
     report(countries, regions, perCountry, neighbors, cityRows.length);
 }
 
-// Морские зоны для флота (tools/data/seas.json → js/data/SeasDB.js).
-// Береговая точка области относится к зоне ближайшей опорной точки
-// (расстояние по сфере в градусах, с учётом линии перемены дат). Область
-// выходит в зону, если на неё приходится хотя бы 12% её берега (и в
-// самую большую — всегда).
+// Морские зоны (tools/lib/seas.js) и порты на старте (tools/data/ports.json)
+// → js/data/SeasDB.js. Порт — в области, где город (или в ближайшей
+// прибрежной области той же страны); уровень — по месту в рейтинге.
 function writeSeas(regions) {
     const spec = JSON.parse(fs.readFileSync(path.join(__dirname, 'data', 'seas.json'), 'utf8'));
-    const seeds = [];
-    for (const [id, z] of Object.entries(spec.zones)) for (const [lon, lat] of z.seeds) seeds.push({ id, lon, lat });
-    const nearest = (lon, lat) => {
-        let best = null, bd = Infinity;
-        const c = Math.cos(lat * Math.PI / 180);
-        for (const s of seeds) {
-            let dl = Math.abs(lon - s.lon);
-            if (dl > 180) dl = 360 - dl;
-            const d = (dl * c) ** 2 + (lat - s.lat) ** 2;
-            if (d < bd) { bd = d; best = s.id; }
+    const seas = buildSeas(regions, spec);
+    const list = JSON.parse(fs.readFileSync(path.join(__dirname, 'data', 'ports.json'), 'utf8'));
+    const ports = [];
+    const misses = [];
+    const place = ([name, cc, lon, lat], level) => {
+        const pt = [G.lonToX(lon), G.latToY(lat)];
+        let region = regions.find(r => seas.coast[r.id] && pt[0] >= r.bbox[0] && pt[0] <= r.bbox[2] && pt[1] >= r.bbox[1] && pt[1] <= r.bbox[3] && G.pointInMulti(pt, r.mp));
+        if (!region) {
+            // город у самой воды мог попасть в море — берём ближайшую прибрежную область страны
+            let bd = Infinity;
+            for (const r of regions) {
+                if (r.cc !== cc || !seas.coast[r.id]) continue;
+                const a = seas.coast[r.id], d = Math.hypot(a.x - pt[0], a.y - pt[1]);
+                if (d < bd) { bd = d; region = r; }
+            }
         }
-        return best;
+        if (!region) { misses.push(name); return; }
+        ports.push({ name, region: region.id, x: +pt[0].toFixed(2), y: +pt[1].toFixed(2), level });
     };
-    const coast = {};
-    const used = new Set();
-    for (const r of regions) {
-        if (!r.coastPts || (r.coastKm || 0) < 10) continue;
-        const share = {};
-        let total = 0;
-        for (const [x, y, len] of r.coastPts) {
-            const z = nearest(G.xToLon(x), G.yToLat(y));
-            share[z] = (share[z] || 0) + len;
-            total += len;
-        }
-        const list = Object.entries(share).sort((a, b) => b[1] - a[1]);
-        const seas = list.filter(([, v], k) => k === 0 || v / total >= 0.12).map(([z]) => z);
-        coast[r.id] = seas;
-        seas.forEach(z => used.add(z));
-    }
-    const zones = {};
-    for (const [id, z] of Object.entries(spec.zones)) {
-        const [lon, lat] = z.seeds[0];
-        zones[id] = { name: z.name, x: +G.lonToX(lon).toFixed(1), y: +G.latToY(lat).toFixed(1), adj: [] };
-    }
-    const straits = {};
-    for (const [a, b, strait] of spec.edges) {
-        if (!zones[a] || !zones[b]) throw new Error(`seas.json: нет зоны ${zones[a] ? b : a}`);
-        zones[a].adj.push(b); zones[b].adj.push(a);
-        if (strait) straits[[a, b].sort().join('|')] = strait;
-    }
-    const empty = Object.keys(zones).filter(id => !used.has(id));
+    list.top.forEach((p, i) => place(p, i < 3 ? 4 : i < 20 ? 2 : 1));
+    list.extra.forEach(p => place(p, 1));
     fs.writeFileSync(path.join(OUT_DIR, 'SeasDB.js'),
-        HEADER + `const SeasDB = ${JSON.stringify({ zones, straits, coast })};
-
-`
+        HEADER + `const SeasDB = ${JSON.stringify({ zones: seas.zones, borders: seas.borders, straits: seas.straits, marks: seas.marks, coast: seas.coast, ports })};\n\n`
         + 'if (typeof module !== \'undefined\' && module.exports) module.exports = { SeasDB };\n');
-    console.log(`  морских зон: ${Object.keys(zones).length}, прибрежных областей: ${Object.keys(coast).length}${empty.length ? `, зоны без берегов: ${empty.join(', ')}` : ''}`);
+    const lonely = Object.entries(seas.zones).filter(([, z]) => !z.adj.length).map(([id, z]) => `${id} ${z.name}`);
+    console.log(`  морских зон: ${seas.stats.zones} (своих ${seas.stats.auto}), прибрежных областей: ${Object.keys(seas.coast).length}, портов: ${ports.length}`
+        + `${misses.length ? `, не нашлось: ${misses.join(', ')}` : ''}${lonely.length ? `, зоны без соседей: ${lonely.join('; ')}` : ''}`);
 }
 
 // Линии границ: [область, соседняя, путь] — путь в относительных

@@ -268,6 +268,7 @@ class GameData {
         }
 
         this.assignCapitals();
+        Shipping.presetPorts(this); // реальные крупнейшие порты — сразу с уровнями
         Nuclear.init(this);         // арсеналы — до расчёта стартовых бюджетов
         this.distributeArmiesToBorders();
         this.fillStartingStocks();
@@ -1633,6 +1634,14 @@ class GameData {
         return { ok: true, amount };
     }
 
+    setStraitHostile(id, on, countryId = this.playerCountry) {
+        return this.gameOver ? { ok: false, reason: 'Нельзя' } : Shipping.setHostile(this, id, countryId, on);
+    }
+
+    setStraitRule(id, target, rule, countryId = this.playerCountry) {
+        return this.gameOver ? { ok: false, reason: 'Нельзя' } : Shipping.setRule(this, id, countryId, target, rule);
+    }
+
     setStraitPolicy(id, mode, fee = 0, countryId = this.playerCountry) {
         if (this.gameOver) return { ok: false, reason: 'Нельзя' };
         return Shipping.setPolicy(this, id, countryId, mode, fee);
@@ -2367,5 +2376,5 @@ GameData.COMMANDS = {
     setTrade: 0, research: 0, startResearch: 0, cancelResearch: 0, setPolicy: 0, setTaxRate: 0,
     declareWar: 0, proposePeace: -1, diplomacyAction: -1, answerDecision: -1,
     nuclearBuild: 1, nuclearCancel: 0, nuclearStrike: 2,
-    claimMission: -1, skipMission: -1, transfer: -1, cedeRegion: -1, borrow: 1, repay: 1, issueBonds: 1, takeImf: 0, setStraitPolicy: 3, buildShips: 4, cancelShips: 1, moveFleet: 3, cancelFleetMove: 2, suppressRevolt: -1, appeaseRevolt: -1, proposeTrade: -1, giveTroops: 3, planOperation: -1,
+    claimMission: -1, skipMission: -1, transfer: -1, cedeRegion: -1, borrow: 1, repay: 1, issueBonds: 1, takeImf: 0, setStraitPolicy: 3, setStraitHostile: 2, setStraitRule: 3, buildShips: 4, cancelShips: 1, moveFleet: 3, cancelFleetMove: 2, suppressRevolt: -1, appeaseRevolt: -1, proposeTrade: -1, giveTroops: 3, planOperation: -1,
 };

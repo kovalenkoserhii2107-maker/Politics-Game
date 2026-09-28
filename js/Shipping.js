@@ -1,20 +1,21 @@
 // =====================================================================
 // СУДОХОДСТВО: порты, торговый флот, проливы
 //
-// Порт — проект развития прибрежной области (берег от SHIPPING.COAST_MIN км),
-// уровни 1–5. Порты страны дают:
+// Порт — проект развития прибрежной области (с выходом в морскую зону),
+// уровни 1–5. На старте уже есть 100 крупнейших реальных портов и
+// несколько добавленных (SeasDB.ports). Порты страны дают:
 //   · бонус морской торговли: продаём дороже, покупаем дешевле; растёт с
 //     суммой уровней, но всё медленнее (TRADE_MAX · P / (P + TRADE_HALF));
 //   · фрахт — доход торгового флота: за уровень доля базы налогов области.
 // Восставшая или заражённая область порт не использует.
 //
-// Проливы — узкие места мировой торговли. Каждый держат ключевые области
-// на берегах; хозяин каждой сам решает, что делать со своей стороной:
-//   open    — пропускать всех бесплатно;
-//   fee     — брать плату: доля стоимости торговли, идущей проливом;
-//   hostile — закрыть для врагов (война, отношения от −50) и стран под
-//             санкциями, остальным — бесплатно;
-//   closed  — закрыть для всех.
+// Проливы — узкие места мировой торговли и граница между двумя морскими
+// зонами (SeasDB.straits): закрыт — флот не пройдёт. Каждый держат
+// ключевые области на берегах; хозяин каждой настраивает свою сторону:
+//   общий режим — открыт / плата (доля стоимости торговли) / закрыт;
+//   «закрывать врагам» — война, отношения от −50, санкции ООН;
+//   исключения — страны, для которых закрыто (deny), и страны, которых
+//   пропускать бесплатно (allow) при любом режиме.
 // Страны зависят от проливов по географии (users: доля морской торговли,
 // идущей проливом). Закрыт — торговля через него пропадает, кроме доли
 // обхода (bypass: Кильский канал, мыс Доброй Надежды, трубопроводы).
@@ -39,7 +40,6 @@ const SHIPPING = {
 const STRAIT_MODES = {
     open: { name: 'Открыт', icon: '🟢' },
     fee: { name: 'Платный проход', icon: '💰' },
-    hostile: { name: 'Закрыт для врагов', icon: '🛑' },
     closed: { name: 'Закрыт для всех', icon: '⛔' },
 };
 
@@ -91,7 +91,38 @@ class Shipping {
     static init(d) { d.straits = {}; d.straitSeen = {}; }
 
     // --- порты ----------------------------------------------------------------
-    static coastal(region) { return !!region && (RegionsDB[region.id]?.coast || 0) >= SHIPPING.COAST_MIN; }
+    // Прибрежная — область, у которой есть выход в морскую зону (озёра не в счёт).
+    static coastal(region) { return !!region && typeof SeasDB !== 'undefined' && !!SeasDB.coast[region.id]; }
+
+    // Порты на старте — реальные крупнейшие (SeasDB.ports): уровень по рейтингу.
+    static presetPorts(d) {
+        if (typeof SeasDB === 'undefined') return;
+        for (const p of SeasDB.ports || []) {
+            const r = d.regions[p.region];
+            if (r) r.development.port = Math.max(r.development.port || 0, p.level);
+        }
+    }
+
+    // Где на карте значок порта: у реального порта — в его городе, у
+    // построенного — у берега области.
+    static portMarks(d) {
+        const out = [];
+        const named = new Set();
+        for (const p of (typeof SeasDB !== 'undefined' && SeasDB.ports) || []) {
+            const r = d.regions[p.region];
+            if (!r || !(r.development.port > 0)) continue;
+            out.push({ region: r.id, x: p.x, y: p.y, name: p.name });
+            named.add(r.id);
+        }
+        for (const r of Object.values(d.regions)) {
+            if (named.has(r.id) || !(r.development.port > 0) || !Shipping.coastal(r)) continue;
+            const c = SeasDB.coast[r.id];
+            out.push({ region: r.id, x: c.x, y: c.y, name: r.name });
+        }
+        return out;
+    }
+
+    static markOf(id) { return (typeof SeasDB !== 'undefined' && SeasDB.marks && SeasDB.marks[id]) || STRAITS[id].at; }
 
     // Порт работает: область не восстала, не заражена и не блокирована с моря.
     static portActive(d, region) {
@@ -137,27 +168,53 @@ class Shipping {
         return out;
     }
 
+    // Настройки стороны пролива: общий режим, «закрывать врагам» и
+    // исключения — кому закрыто (deny) и кого пропускать бесплатно (allow).
     static policy(d, id, cc) {
         const p = d.straits && d.straits[id] && d.straits[id][cc];
-        return p || { mode: 'open', fee: 0 };
+        return p || { mode: 'open', fee: 0, hostile: false, deny: [], allow: [] };
     }
 
-    static setPolicy(d, id, cc, mode, fee = 0) {
-        if (!STRAITS[id] || !STRAIT_MODES[mode]) return { ok: false, reason: 'Нельзя' };
+    static edit(d, id, cc, change) {
+        if (!STRAITS[id]) return { ok: false, reason: 'Нельзя' };
         if (!Shipping.keepers(d, id).includes(cc)) return { ok: false, reason: 'Этот пролив вам не принадлежит' };
-        if (mode === 'fee' && !SHIPPING.FEES.includes(fee)) return { ok: false, reason: 'Нельзя' };
+        const p = structuredClone(Shipping.policy(d, id, cc));
+        const res = change(p);
+        if (res && !res.ok) return res;
         d.straits[id] = d.straits[id] || {};
-        if (mode === 'open') delete d.straits[id][cc];
-        else d.straits[id][cc] = { mode, fee: mode === 'fee' ? fee : 0 };
+        const plain = p.mode === 'open' && !p.hostile && !p.deny.length && !p.allow.length;
+        if (plain) delete d.straits[id][cc]; else d.straits[id][cc] = p;
         if (!Object.keys(d.straits[id]).length) delete d.straits[id];
         return { ok: true };
     }
 
+    static setPolicy(d, id, cc, mode, fee = 0) {
+        if (!STRAIT_MODES[mode]) return { ok: false, reason: 'Нельзя' };
+        if (mode === 'fee' && !SHIPPING.FEES.includes(fee)) return { ok: false, reason: 'Нельзя' };
+        return Shipping.edit(d, id, cc, p => { p.mode = mode; p.fee = mode === 'fee' ? fee : 0; });
+    }
+
+    static setHostile(d, id, cc, on) {
+        return Shipping.edit(d, id, cc, p => { p.hostile = !!on; });
+    }
+
+    // rule: 'deny' — закрыт для страны, 'allow' — пропускать бесплатно, null — как всем.
+    static setRule(d, id, cc, target, rule) {
+        if (!d.countries[target] || target === cc || ![null, 'deny', 'allow'].includes(rule)) return { ok: false, reason: 'Нельзя' };
+        return Shipping.edit(d, id, cc, p => {
+            p.deny = p.deny.filter(x => x !== target);
+            p.allow = p.allow.filter(x => x !== target);
+            if (rule) p[rule].push(target);
+        });
+    }
+
+    static enemyOf(d, k, x) { return d.isAtWar(k, x) || Diplomacy.relation(d, k, x) <= -50 || Council.sanctioned(d, x); }
+
     // Закрыта ли для страны x сторона хозяина k.
     static shut(d, k, p, x) {
-        if (p.mode === 'closed') return true;
-        if (p.mode !== 'hostile') return false;
-        return d.isAtWar(k, x) || Diplomacy.relation(d, k, x) <= -50 || Council.sanctioned(d, x);
+        if (p.allow.includes(x)) return false;
+        if (p.deny.includes(x) || p.mode === 'closed') return true;
+        return p.hostile && Shipping.enemyOf(d, k, x);
     }
 
     // Пролив для страны x: закрыт ли и сколько стоит проход (доля торговли).
@@ -167,7 +224,7 @@ class Shipping {
         for (const k of Shipping.keepers(d, id)) {
             if (k === x) continue;
             const p = Shipping.policy(d, id, k);
-            if (Shipping.shut(d, k, p, x)) { blocked = true; by.push(k); } else if (p.mode === 'fee') fee += p.fee;
+            if (Shipping.shut(d, k, p, x)) { blocked = true; by.push(k); } else if (p.mode === 'fee' && !p.allow.includes(x)) fee += p.fee;
         }
         return { blocked, fee, by };
     }
@@ -208,7 +265,7 @@ class Shipping {
                 for (const k of Shipping.keepers(d, id)) {
                     if (k === cc) continue;
                     const p = Shipping.policy(d, id, k);
-                    if (p.mode !== 'fee' || Shipping.passage(d, id, cc).blocked) continue;
+                    if (p.mode !== 'fee' || p.allow.includes(cc) || Shipping.passage(d, id, cc).blocked) continue;
                     const pay = Math.round(v * dep * p.fee);
                     transit[cc] = (transit[cc] || 0) + pay;
                     tolls[k] = (tolls[k] || 0) + pay;
@@ -227,14 +284,14 @@ class Shipping {
             const keepers = Shipping.keepers(d, id);
             if (d.turn % SHIPPING.RELATION_EVERY === 0) for (const k of keepers) {
                 const p = Shipping.policy(d, id, k);
-                if (p.mode === 'open') continue;
+                if (p.mode === 'open' && !p.hostile && !p.deny.length) continue;
                 for (const [cc, dep] of Object.entries(STRAITS[id].users)) {
                     if (cc === k || !d.countries[cc]?.alive) continue;
-                    if (p.mode === 'fee') Diplomacy.changeRelation(d, k, cc, -SHIPPING.FEE_RELATION * p.fee * dep);
-                    else if (Shipping.shut(d, k, p, cc)) Diplomacy.changeRelation(d, k, cc, -SHIPPING.CLOSE_RELATION * dep);
+                    if (Shipping.shut(d, k, p, cc)) Diplomacy.changeRelation(d, k, cc, -SHIPPING.CLOSE_RELATION * dep);
+                    else if (p.mode === 'fee' && !p.allow.includes(cc)) Diplomacy.changeRelation(d, k, cc, -SHIPPING.FEE_RELATION * p.fee * dep);
                 }
             }
-            const sig = keepers.map(k => { const p = Shipping.policy(d, id, k); return `${k}:${p.mode}:${p.fee}`; }).join('|');
+            const sig = keepers.map(k => { const p = Shipping.policy(d, id, k); return `${k}:${p.mode}:${p.fee}:${p.hostile}:${p.deny.join(',')}:${p.allow.join(',')}`; }).join('|');
             const was = d.straitSeen[id];
             d.straitSeen[id] = sig;
             if (was === undefined || was === sig) continue;
@@ -259,10 +316,12 @@ class Shipping {
                 if ((d.turn + slot) % SHIPPING.AI_EVERY !== 0) continue;
                 const trait = World.traitId(d, k);
                 let mode = 'open', fee = 0;
-                if (d.enemiesOf(k).length || Council.sanctioned(d, k)) mode = 'hostile';
-                else if (STRAITS[id].canal) { mode = 'fee'; fee = SHIPPING.FEES[trait === 'expansionist' ? 1 : 0]; }
+                if (STRAITS[id].canal) { mode = 'fee'; fee = SHIPPING.FEES[trait === 'expansionist' ? 1 : 0]; }
                 else if (trait === 'expansionist') { mode = 'fee'; fee = SHIPPING.FEES[0]; }
                 Shipping.setPolicy(d, id, k, mode, fee);
+                // на войне и под санкциями — закрыть врагам; союзникам — бесплатно
+                Shipping.setHostile(d, id, k, d.enemiesOf(k).length > 0 || Council.sanctioned(d, k));
+                Shipping.edit(d, id, k, p => { p.allow = Diplomacy.allies(d, k).filter(x => STRAITS[id].users[x]); });
             }
         }
     }
@@ -273,8 +332,10 @@ class Shipping {
     static valid(x) {
         const obj = o => !!o && typeof o === 'object' && !Array.isArray(o);
         if (!obj(x) || !obj(x.straits) || !obj(x.seen)) return false;
+        const list = l => Array.isArray(l) && l.every(cc => CountriesDB[cc]);
         return Object.entries(x.straits).every(([id, byCc]) => STRAITS[id] && obj(byCc) && Object.entries(byCc).every(([cc, p]) =>
-            CountriesDB[cc] && obj(p) && STRAIT_MODES[p.mode] && (p.mode !== 'fee' || SHIPPING.FEES.includes(p.fee))))
+            CountriesDB[cc] && obj(p) && STRAIT_MODES[p.mode] && (p.mode !== 'fee' || SHIPPING.FEES.includes(p.fee))
+            && typeof p.hostile === 'boolean' && list(p.deny) && list(p.allow)))
             && Object.entries(x.seen).every(([id, s]) => STRAITS[id] && typeof s === 'string');
     }
 

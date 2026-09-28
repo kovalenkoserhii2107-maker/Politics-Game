@@ -71,14 +71,15 @@ class FleetUI {
                 const strait = Navy.strait(f.zone, z);
                 const foe = Navy.enemyPower(data, z, cc);
                 return `<button class="chip help-chip" type="button" data-action="fleet-move" data-from="${f.zone}" data-to="${z}" ${ok && free && !data.gameOver ? '' : 'disabled'}
-                    title="${ok ? '' : 'Пролив закрыт'}">${strait ? (ok ? '⚓ ' : '⛔ ') : ''}${zname(z)}${foe ? ` <span class="neg">⚔${foe}</span>` : ''}</button>`;
+                    title="${ok ? '' : 'Пролив закрыт'}">${strait ? (ok ? '⇄ ' : '⛔ ') : ''}${zname(z)}${foe ? ` <span class="neg">⚔${foe}</span>` : ''}</button>`;
             }).join('');
+            const pick = `<button class="mini-btn fl-pick" type="button" data-action="fleet-pick" data-from="${f.zone}" ${free && !data.gameOver ? '' : 'disabled'}>🗺️ Выбрать море на карте · до ${NAVY.SPEED} морей за ход</button>`;
             const queued = going.map(o => `<div class="budget-row"><span>→ ${zname(o.to)}: ${ships(o.ships)}</span><b><button class="mini-btn" type="button" data-action="fleet-unmove" data-from="${o.from}" data-to="${o.to}">✕</button></b></div>`).join('');
             const control = Navy.controller(data, f.zone) === cc ? '<span class="pos">море за нами</span>' : '<span class="neg">здесь сильнее чужой флот</span>';
             return `<div class="fin-block loan fl-squad ${focus === f.zone ? 'focus' : ''}" id="squad-${f.zone}"><div class="loan-head"><b>${zname(f.zone)}</b><small>сила ${Navy.power(f.ships)} · ${control}</small></div>
                 <div class="fl-ships">${ships(f.ships)}</div>
                 ${near ? `<p class="hint">Рядом: ${near}</p>` : ''}${queued}
-                ${free ? `<div class="fl-go">Идти всей эскадрой в:</div><div class="help-chips">${moves}</div>` : '<p class="hint">Вся эскадра уже в походе.</p>'}</div>`;
+                ${free ? `${pick}<div class="fl-go">Или в соседнее море:</div><div class="help-chips">${moves}</div>` : '<p class="hint">Вся эскадра уже в походе.</p>'}</div>`;
         };
         const squads = fleets.length ? fleets.map(squad).join('')
             : '<p class="hint">Кораблей пока нет. Постройте их на верфи — они выйдут в море у порта.</p>';

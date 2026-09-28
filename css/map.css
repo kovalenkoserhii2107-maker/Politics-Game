@@ -103,8 +103,26 @@
 #world-map.global-view #layer-seas { display: none; }
 #layer-fleets { pointer-events: none; }
 .fleet-mark { pointer-events: auto; cursor: pointer; }
-.fleet-badge rect { fill: rgba(10, 11, 13, 0.9); stroke: var(--text-3); stroke-width: 1.5; }
-.fleet-badge text { font-size: 10px; font-weight: 700; fill: var(--text); dominant-baseline: central; }
-.fleet-badge.own rect { stroke: var(--good); }
-.fleet-badge.ally rect { stroke: #7fb2ff; }
-.fleet-badge.enemy rect { stroke: var(--accent); }
+/* флот — плашка как у армии, со значком корабля; цвет рамки — чья */
+.army-badge.fleet rect { stroke: var(--text-3); }
+.army-badge.fleet.own rect { stroke: var(--good); }
+.army-badge.fleet.ally rect { stroke: #7fb2ff; }
+.army-badge.fleet.enemy rect { stroke: var(--accent); }
+.army-badge.fleet .fleet-ico { font-size: 11px; text-anchor: middle; }
+
+/* морские зоны: под сушей, видна только вода; границы между ними — пунктир */
+#layer-sea-zones .sea-zone { fill: transparent; stroke: none; pointer-events: fill; cursor: pointer; }
+#layer-sea-zones .sea-zone:hover { fill: rgba(127, 178, 255, 0.05); }
+#layer-sea-zones .sea-zone.fleet-target { fill: rgba(61, 220, 151, 0.12); }
+#layer-sea-zones .sea-zone.fleet-target:hover { fill: rgba(61, 220, 151, 0.24); }
+.sea-borders { fill: none; stroke: rgba(127, 178, 255, 0.22); stroke-width: calc(var(--sw) * 0.8); stroke-dasharray: calc(var(--sw) * 3) calc(var(--sw) * 2); pointer-events: none; }
+#world-map.global-view .sea-borders { stroke: rgba(127, 178, 255, 0.12); }
+
+/* порты: ⚓ в городе или у берега; свой — зелёный, под блокадой — красный */
+#layer-ports { pointer-events: none; }
+.port-mark { pointer-events: auto; cursor: pointer; }
+.port-mark circle { fill: rgba(10, 11, 13, 0.85); stroke: #7fb2ff; stroke-width: 1.5; }
+.port-mark.own circle { stroke: var(--good); }
+.port-mark.blockaded circle { stroke: var(--accent); stroke-width: 2; }
+.port-mark text { font-size: 9px; text-anchor: middle; dominant-baseline: central; fill: var(--text); pointer-events: none; }
+#world-map.global-view #layer-ports { display: none; }
