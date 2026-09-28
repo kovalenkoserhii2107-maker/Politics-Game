@@ -20,12 +20,13 @@ class UIManager {
         bind('close-stats-btn', () => this.hideModal('stats-modal'));
         bind('close-regions-btn', () => this.hideModal('regions-modal'));
         bind('close-gov-btn', () => this.hideModal('gov-modal'));
+        bind('close-finance-btn', () => this.hideModal('finance-modal'));
         bind('close-history-btn', () => this.hideModal('history-modal'));
         bind('close-diplo-btn', () => this.hideModal('diplo-modal'));
         bind('close-science-btn', () => this.hideModal('science-modal'));
         bind('close-summary-btn', () => this.closeSummary());
 
-        for (const id of ['history-modal', 'gov-modal', 'diplo-modal', 'campaign-modal', 'science-modal', 'chat-modal', 'stats-modal', 'regions-modal']) {
+        for (const id of ['history-modal', 'gov-modal', 'finance-modal', 'diplo-modal', 'campaign-modal', 'science-modal', 'chat-modal', 'stats-modal', 'regions-modal']) {
             const modal = document.getElementById(id);
             if (modal) modal.addEventListener('click', e => { if (e.target === modal) this.hideModal(id); });
         }
@@ -633,6 +634,7 @@ class UIManager {
     showTurnSummary(turnData, onClose) {
         this.closePanel();
         this.hideModal('gov-modal');
+        this.hideModal('finance-modal');
         this.hideModal('diplo-modal');
         this.hideModal('campaign-modal');
         this.onSummaryClose = onClose;
@@ -1196,6 +1198,20 @@ class UIManager {
         this.showModal('diplo-modal');
     }
 
+    // --- финансы ---------------------------------------------------------------------------------
+    showFinance(data) {
+        this.closePanel();
+        // сначала показать: графикам нужна настоящая ширина окна
+        this.showModal('finance-modal');
+        Finance.render(document.getElementById('finance-content'), data, this);
+    }
+
+    // Окно открыто — перерисовать после займа или смены налога.
+    refreshFinance(data) {
+        const modal = document.getElementById('finance-modal');
+        if (modal && modal.classList.contains('active')) Finance.render(document.getElementById('finance-content'), data, this);
+    }
+
     // --- правительство -----------------------------------------------------------------------------
     // Финансы: мировой цикл и госдолг с кнопками «занять» и «вернуть».
     renderFinance(data) {
@@ -1226,8 +1242,6 @@ class UIManager {
 
     renderGovernment(data) {
         const player = data.countries[data.playerCountry];
-        const balance = data.countryBalance(player.id);
-        const net = balance.income - balance.expense;
 
         const select = document.getElementById('gov-policy');
         select.innerHTML = Object.entries(POLICIES).map(([key, policy]) => `<option value="${key}">${policy.name}</option>`).join('');
@@ -1247,17 +1261,6 @@ class UIManager {
         note.classList.toggle('neg', target < REVOLT.THRESHOLD);
 
         this.renderEconomy(data);
-        this.renderFinance(data);
-        document.getElementById('gov-budget').innerHTML = `
-            <div class="budget-row"><span>Налоги</span><span class="pos">+${this.money(balance.tax)}</span></div>
-            <div class="budget-row"><span>Продажа ресурсов</span><span class="pos">+${this.money(balance.sales)}</span></div>
-            <div class="budget-row"><span>Закупка ресурсов</span><span class="neg">−${this.money(balance.purchases)}</span></div>
-            <div class="budget-row"><span>Социальная программа</span><span class="neg">−${this.money(balance.social)}</span></div>
-            <div class="budget-row"><span>Содержание армии</span><span class="neg">−${this.money(balance.upkeep)}</span></div>
-            ${balance.interest ? `<div class="budget-row"><span>Проценты по долгу</span><span class="neg">−${this.money(balance.interest)}</span></div>` : ''}
-            <div class="budget-row total"><span>Итого за ход (прогноз)</span><span class="${net >= 0 ? 'pos' : 'neg'}">${net >= 0 ? '+' : ''}${this.money(net)}</span></div>
-            <p class="hint">Прогноз по ценам и спросу прошлого хода${data.enemiesOf(data.playerCountry).length ? `, с учётом блокады (на войне торговля — ${Math.round(ECONOMY.WAR_TRADE * 100)}%)` : ''}. Факт — в отчёте хода: цены, спрос и бои его немного сдвинут. Помощь партнёров и репарации — отдельно.</p>`;
-
     }
 
     // Ресурсы страны: сколько производим и тратим, запас на складе, цена

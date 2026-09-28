@@ -254,6 +254,12 @@ class GameLoop {
         const d = this.data;
         const before = {};
         for (const region of Object.values(d.regions)) before[region.id] = region.owner;
+        // что игрок видел в прогнозе и сколько было в казне — для отчёта «прогноз и факт»
+        const plan = {};
+        for (const cc of d.humans) {
+            const b = d.countryBalance(cc);
+            plan[cc] = { money: d.countries[cc].money, forecast: Finance.lines(b) };
+        }
 
         this.ai.planTurn();
         const { logs, worldBattles } = d.processOrders();
@@ -278,9 +284,15 @@ class GameLoop {
             }
             const missions = d.withPlayer(cc, () => Missions.update(d));
             const balance = balances[cc] || { income: 0, expense: 0 };
+            const net = balance.income - balance.expense;
+            const money = d.countries[cc].money;
             const turnData = {
                 date: this.formatDate(d.currentDate),
-                financial: { income: balance.income, expense: balance.expense, net: balance.income - balance.expense },
+                turn: d.turn,
+                // статьи факта и прогноза; «прочее» — всё, что пришло или ушло
+                // мимо бюджета: помощь партнёров, события, репарации, возвраты
+                financial: { income: balance.income, expense: balance.expense, net, ...Finance.lines(balance),
+                    other: Math.round(money - plan[cc].money - net), money, forecast: plan[cc].forecast },
                 logs: logs.filter(l => l.for === cc),
                 events: [...shared.filter(e => (!e.for || e.for === cc) && e.exceptFor !== cc), ...missions].map(e => e.message),
                 worldBattles,
