@@ -3,8 +3,8 @@ const assert=require('node:assert/strict');
 const fs=require('node:fs'),path=require('node:path'),vm=require('node:vm');
 function engine(){
  const values=new Map();let seed=123456;const math=Object.create(Math);math.random=()=>{seed=(Math.imul(seed,1664525)+1013904223)>>>0;return seed/4294967296;};const context=vm.createContext({console,Date,Math:math,structuredClone,localStorage:{setItem:(k,v)=>values.set(k,v),getItem:k=>values.get(k)||null,removeItem:k=>values.delete(k),key:i=>[...values.keys()][i]??null,get length(){return values.size;}}});
- for(const file of ['data/CountriesDB','data/RegionsDB','data/NeighborsDB','data/CitiesDB','UnitsDB','Tech','Economy','Diplomacy','Missions','Score','Events','Unrest','Trade','Council','Nuclear','World','Credit','GameData','AI','Finance','GameLoop'])vm.runInContext(fs.readFileSync(path.join(__dirname,'../js',file+'.js'),'utf8'),context);
- return Object.assign(vm.runInContext('({Credit,BOND,IMF,GameData,AI,SaveGame,GameLoop,RegionsDB,UnitsDB,DEVELOPMENT,POLICIES,Economy,RESOURCES,ECONOMY,Tech,TECH_TREE,MODERNIZATION,Diplomacy,DIPLOMACY,Missions,MISSION_KINDS,MISSION_RULES,Score,GOALS,Events,EVENTS,DEBT,CYCLES,INFRA,Unrest,REVOLT,Trade,Council,COUNCIL,RULES,Nuclear,NUCLEAR,World,WORLD,TRAITS})',context),{localStorage:context.localStorage});
+ for(const file of ['data/CountriesDB','data/RegionsDB','data/NeighborsDB','data/CitiesDB','UnitsDB','Tech','Economy','Diplomacy','Missions','Score','Events','Unrest','Trade','Council','Nuclear','World','Credit','Shipping','GameData','AI','Finance','GameLoop'])vm.runInContext(fs.readFileSync(path.join(__dirname,'../js',file+'.js'),'utf8'),context);
+ return Object.assign(vm.runInContext('({Credit,BOND,IMF,Shipping,SHIPPING,STRAITS,GameData,AI,SaveGame,GameLoop,RegionsDB,UnitsDB,DEVELOPMENT,POLICIES,Economy,RESOURCES,ECONOMY,Tech,TECH_TREE,MODERNIZATION,Diplomacy,DIPLOMACY,Missions,MISSION_KINDS,MISSION_RULES,Score,GOALS,Events,EVENTS,DEBT,CYCLES,INFRA,Unrest,REVOLT,Trade,Council,COUNCIL,RULES,Nuclear,NUCLEAR,World,WORLD,TRAITS})',context),{localStorage:context.localStorage});
 }
 test('casualties are invariant under splitting an attack into orders',()=>{
  const {GameData}=engine();const fight=split=>{const d=new GameData('UA',{scenario:'war2024'});for(const id of ['UA-2','RU-62']){d.regions[id].army=d.emptyArmy();d.regions[id].army.infantry=10;}
@@ -1430,4 +1430,76 @@ test('AI allies defend with troops: a neighbour sends a contingent to the front,
     ai.helpAllies(d.countries.PL, []);
     ai.helpAllies(d.countries.PT, []);
     assert.equal(d.garrisonsOf('PL').length + d.garrisonsOf('PT').length, 0);
+});
+
+test('ports: only on the coast; levels raise trade bonus and freight; saved', () => {
+    const { GameData, Shipping, SHIPPING } = engine();
+    const d = new GameData('UA');
+    const odesa = d.regions['UA-1'], kyiv = d.regions['UA-6'];
+    assert.ok(Shipping.coastal(odesa) && !Shipping.coastal(kyiv));
+    assert.ok(d.developKinds(odesa).includes('port') && !d.developKinds(kyiv).includes('port'));
+    d.countries.UA.money = 1e9;
+    assert.equal(d.act('invest', kyiv.id, 'port').ok, false, 'в Киеве порт не строится');
+    const before = d.countryBalance('UA');
+    assert.equal(before.shipping, 0);
+    assert.equal(d.act('invest', odesa.id, 'port').ok, true);
+    for (let i = 0; i < 3; i++) d.applyEndOfTurn();
+    assert.equal(odesa.development.port, 1);
+    const after = d.countryBalance('UA');
+    assert.ok(after.shipping > 0, 'фрахт пошёл');
+    assert.ok(Shipping.portBonus(d, 'UA') > 0 && after.tradeBonus > before.tradeBonus, 'торговый бонус вырос');
+    assert.ok(Shipping.portValue(d, odesa.id) > 0);
+    const back = GameData.restore(JSON.parse(JSON.stringify(d.serialize())));
+    assert.equal(back.regions['UA-1'].development.port, 1);
+    // восставшая область порт не использует
+    d.revolts[odesa.id] = { turn: d.turn };
+    assert.equal(Shipping.portLevels(d, 'UA'), 0);
+});
+
+test('straits: keepers charge fees or close; dependents pay, lose trade and grow angry; AI keepers react to war', () => {
+    const { GameData, Shipping, STRAITS, Diplomacy, AI, Economy } = engine();
+    const d = new GameData('TR');
+    assert.deepEqual([...Shipping.keepers(d, 'bosporus')], ['TR']);
+    assert.equal(Shipping.access(d, 'GE'), 1);
+    // плата: Грузия платит Турции с торговли
+    assert.equal(d.act('setStraitPolicy', 'bosporus', 'fee', 0.05).ok, true);
+    assert.equal(Shipping.passage(d, 'bosporus', 'GE').fee, 0.05);
+    const { transit, tolls } = Shipping.settle(d, { GE: 1e6, BG: 2e6 });
+    assert.equal(transit.GE, Math.round(1e6 * 1 * 0.05));
+    assert.equal(tolls.TR, transit.GE + transit.BG);
+    assert.equal(d.countries.TR.lastTolls, tolls.TR);
+    assert.ok(d.countryBalance('TR').tolls > 0);
+    // чужой пролив не настроить
+    assert.equal(d.act('setStraitPolicy', 'suez', 'closed', 0).ok, false);
+    // закрыт: торговля Грузии падает, отношения портятся
+    const rel = Diplomacy.relation(d, 'TR', 'GE');
+    d.act('setStraitPolicy', 'bosporus', 'closed', 0);
+    assert.ok(Shipping.access(d, 'GE') < 0.2);
+    assert.ok(Economy.reach(d, 'GE') < 0.2);
+    d.turn = 5;
+    Shipping.endTurn(d, []);
+    assert.ok(Diplomacy.relation(d, 'TR', 'GE') < rel);
+    // «врагам — нет»: закрыт только для воюющих
+    d.act('setStraitPolicy', 'bosporus', 'hostile', 0);
+    assert.equal(Shipping.passage(d, 'bosporus', 'BG').blocked, false);
+    d.startWar('TR', 'GE');
+    assert.equal(Shipping.passage(d, 'bosporus', 'GE').blocked, true);
+    // сохранение
+    const back = GameData.restore(JSON.parse(JSON.stringify(d.serialize())));
+    assert.equal(Shipping.policy(back, 'bosporus', 'TR').mode, 'hostile');
+    const bad = d.serialize(); bad.shipping.straits.bosporus.TR.mode = 'пираты';
+    assert.throws(() => GameData.restore(bad), /проливы/);
+    // игрок узнаёт о закрытии пролива, от которого зависит
+    const g = new GameData('GE');
+    const ev = [];
+    Shipping.endTurn(g, ev);
+    Shipping.setPolicy(g, 'bosporus', 'TR', 'closed');
+    Shipping.endTurn(g, ev);
+    assert.ok(ev.some(e => e.for === 'GE' && e.message.includes('Босфор')));
+    // ИИ-хозяин на войне закрывает пролив врагам
+    const w = new GameData('GE');
+    w.startWar('EG', 'IL');
+    for (let t = 0; t < 6; t++) { w.turn = t; Shipping.planAI(w); }
+    assert.equal(Shipping.policy(w, 'suez', 'EG').mode, 'hostile');
+    assert.equal(Shipping.passage(w, 'suez', 'IL').blocked, true);
 });

@@ -539,8 +539,8 @@ body { overscroll-behavior: none; }
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Exo+2:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;700&display=swap">
 <link rel="stylesheet" href="css/campaign.css?v=fe17f3ba7c">
-<link rel="stylesheet" href="css/theme.css?v=3c74100194">
-<link rel="stylesheet" href="css/map.css?v=cd9372e1e8">
+<link rel="stylesheet" href="css/theme.css?v=b34892de5e">
+<link rel="stylesheet" href="css/map.css?v=bd1279e57a">
 <link rel="stylesheet" href="css/start.css?v=5288a0c5d1">
 </head>
 <body>
@@ -798,6 +798,16 @@ body { overscroll-behavior: none; }
     </div>
 
     <!-- ФИНАНСЫ -->
+    <div id="straits-modal" class="modal ui-element" role="dialog" aria-modal="true" aria-labelledby="straits-title">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 id="straits-title">⚓ Судоходство и проливы</h2>
+                <button class="close-btn" id="close-straits-btn">✕</button>
+            </div>
+            <div id="straits-content" class="modal-body"></div>
+        </div>
+    </div>
+
     <div id="finance-modal" class="modal ui-element" role="dialog" aria-modal="true" aria-labelledby="finance-title">
         <div class="modal-content">
             <div class="modal-header">
@@ -997,7 +1007,7 @@ body { overscroll-behavior: none; }
 
 <!-- Данные карты (сгенерированы tools/build_map.js) -->
 <script src="js/data/CountriesDB.js?v=a84f0c04d3"></script>
-<script src="js/data/RegionsDB.js?v=d5ca758dab"></script>
+<script src="js/data/RegionsDB.js?v=9d5fa4219f"></script>
 <script src="js/data/NeighborsDB.js?v=45a5a5d1ad"></script>
 <script src="js/data/BordersDB.js?v=0ece6ee841"></script>
 <script src="js/data/CitiesDB.js?v=96a7a8b11a"></script>
@@ -1005,7 +1015,7 @@ body { overscroll-behavior: none; }
 <!-- Движок -->
 <script src="js/UnitsDB.js?v=8ed53808f1"></script>
 <script src="js/Tech.js?v=fbb65caf74"></script>
-<script src="js/Economy.js?v=3f2482ff4d"></script>
+<script src="js/Economy.js?v=18a0adaa29"></script>
 <script src="js/Diplomacy.js?v=1b5887bdf7"></script>
 <script src="js/Net.js?v=4cefb68e70"></script>
 <script src="js/Missions.js?v=fe83f7c237"></script>
@@ -1017,14 +1027,15 @@ body { overscroll-behavior: none; }
 <script src="js/Nuclear.js?v=a5857af620"></script>
 <script src="js/World.js?v=78a2b0d1d0"></script>
 <script src="js/Credit.js?v=dce37b26c3"></script>
+<script src="js/Shipping.js?v=ee14921cfb"></script>
 <script src="js/Charts.js?v=01f1ed532c"></script>
-<script src="js/Finance.js?v=fd90fd95c9"></script>
-<script src="js/GameData.js?v=20ee919bc1"></script>
-<script src="js/AI.js?v=253c51b5af"></script>
-<script src="js/MapEngine.js?v=08fa07fcde"></script>
-<script src="js/UIManager.js?v=25d1f4669e"></script>
-<script src="js/GameLoop.js?v=c8c80b1010"></script>
+<script src="js/Finance.js?v=870d5071d5"></script>
+<script src="js/GameData.js?v=e8ac48fcff"></script>
+<script src="js/AI.js?v=16e70f9dba"></script>
+<script src="js/MapEngine.js?v=0aa88869e8"></script>
+<script src="js/UIManager.js?v=dcc63745ad"></script>
+<script src="js/GameLoop.js?v=2fb75eab3d"></script>
 <script src="js/Tutorial.js?v=53ff18fd7f"></script>
-<script src="js/main.js?v=ccc9f41ff2"></script>
+<script src="js/main.js?v=320ec3a0ec"></script>
 </body>
 </html>

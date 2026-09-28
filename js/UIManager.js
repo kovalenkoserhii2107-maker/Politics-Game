@@ -23,12 +23,13 @@ class UIManager {
         bind('close-regions-btn', () => this.hideModal('regions-modal'));
         bind('close-gov-btn', () => this.hideModal('gov-modal'));
         bind('close-finance-btn', () => this.hideModal('finance-modal'));
+        bind('close-straits-btn', () => this.hideModal('straits-modal'));
         bind('close-history-btn', () => this.hideModal('history-modal'));
         bind('close-diplo-btn', () => this.hideModal('diplo-modal'));
         bind('close-science-btn', () => this.hideModal('science-modal'));
         bind('close-summary-btn', () => this.closeSummary());
 
-        for (const id of ['history-modal', 'gov-modal', 'finance-modal', 'diplo-modal', 'campaign-modal', 'science-modal', 'chat-modal', 'stats-modal', 'regions-modal']) {
+        for (const id of ['history-modal', 'gov-modal', 'finance-modal', 'straits-modal', 'diplo-modal', 'campaign-modal', 'science-modal', 'chat-modal', 'stats-modal', 'regions-modal']) {
             const modal = document.getElementById(id);
             if (modal) modal.addEventListener('click', e => { if (e.target === modal) this.hideModal(id); });
         }
@@ -654,6 +655,7 @@ class UIManager {
         this.closePanel();
         this.hideModal('gov-modal');
         this.hideModal('finance-modal');
+        this.hideModal('straits-modal');
         this.hideModal('diplo-modal');
         this.hideModal('campaign-modal');
         this.onSummaryClose = onClose;
@@ -824,17 +826,20 @@ class UIManager {
         }
         const project = data.projects.find(p => p.regionId === region.id);
         container.open = false;
-        let html = `<summary>Развитие области${project ? ` · ${project.remaining} ход.` : ' · 4 проекта'}</summary>`;
+        const kinds = data.developKinds(region);
+        let html = `<summary>Развитие области${project ? ` · ${project.remaining} ход.` : ` · ${kinds.length} проект${kinds.length === 5 ? 'ов' : 'а'}`}</summary>`;
         if (project) {
             html += `<div class="development-card"><strong>${DEVELOPMENT[project.kind].name}</strong><p>До завершения: ${project.remaining} ход. Средства зарезервированы.</p><button class="mini-btn" data-action="cancel-project" data-region="${region.id}">Отменить · вернуть ${this.money(project.cost)}</button></div>`;
         } else {
-            for (const [kind, plan] of Object.entries(DEVELOPMENT)) {
+            for (const kind of kinds) {
+                const plan = DEVELOPMENT[kind];
                 const level = region.development[kind] || 0, cost = data.developmentCost(region.id, kind);
                 const value = Economy.projectValue(data, region.id, kind);
                 const payback = value > 0 ? Math.ceil(cost / value) : null;
                 const disabled = level >= 5 || data.countries[data.playerCountry].money < cost || data.gameOver;
                 const what = plan.yields
                     ? `больше ресурса «${RESOURCES[plan.yields].icon} ${RESOURCES[plan.yields].name}»`
+                    : kind === 'port' ? `⚓ фрахт и морская торговля: продажи дороже, закупки дешевле для всей страны (сейчас +${Math.round(Shipping.portBonus(data, region.owner) * 100)}%)`
                     : `налоги области +${Math.round(INFRA.TAX * 100)}% и лояльность +${Math.round(INFRA.LOYALTY * 100)}% за уровень`;
                 html += `<div class="development-card"><strong>${plan.name} · ${level}/5</strong><p>${plan.turns} ход. стройки · ${what} · по нынешним ценам около +${this.money(value)}/ход${payback ? `, окупится за ~${payback} ход.` : ''}${kind === 'industry' ? ' Заводам нужна энергия. Также растёт мощность набора войск.' : ''}</p><button class="mini-btn" data-action="invest" data-region="${region.id}" data-kind="${kind}" ${disabled ? 'disabled' : ''}>${level >= 5 ? 'Максимальный уровень' : `Построить · ${this.money(cost)}`}</button></div>`;
             }
@@ -881,7 +886,7 @@ class UIManager {
     // Самый быстро окупаемый проект области (или null, если всё на максимуме).
     bestProject(data, region) {
         let best = null;
-        for (const kind of Object.keys(DEVELOPMENT)) {
+        for (const kind of data.developKinds(region)) {
             if ((region.development[kind] || 0) >= 5) continue;
             const cost = data.developmentCost(region.id, kind), value = Economy.projectValue(data, region.id, kind);
             const payback = value > 0 ? cost / value : 1e9;
@@ -905,7 +910,7 @@ class UIManager {
         for (const r of this.regionRows(data).rows) {
             if (r.project) continue;
             const kind = st.kind === 'best' ? (r.best && r.best.kind) : st.kind;
-            if (!kind || (r.region.development[kind] || 0) >= 5) continue;
+            if (!kind || (r.region.development[kind] || 0) >= 5 || !data.developKinds(r.region).includes(kind)) continue;
             const cost = data.developmentCost(r.region.id, kind);
             if (cost > budget) continue;
             budget -= cost;
@@ -934,8 +939,8 @@ class UIManager {
         const me = data.countries[data.playerCountry];
         const { rows, counts, total } = this.regionRows(data);
         const esc = t => this.escape(t);
-        const icons = { industry: '🏭', agro: '🌾', oil: '⚡', infra: '🛣️' };
-        const short = { industry: 'Пром', agro: 'Агро', oil: 'Энерго', infra: 'Дороги' };
+        const icons = { industry: '🏭', agro: '🌾', oil: '⚡', infra: '🛣️', port: '⚓' };
+        const short = { industry: 'Пром', agro: 'Агро', oil: 'Энерго', infra: 'Дороги', port: 'Порт' };
         const units = Object.keys(UnitsDB).filter(u => Tech.unitUnlocked(me, u));
         if (!units.includes(st.unit)) st.unit = units[0];
         const budget = this.regionsBudget(data);
@@ -947,14 +952,15 @@ class UIManager {
         const list = rows.map(r => {
             const region = r.region;
             const marks = [me.capital === region.id ? '⭐' : '', data.revolts[region.id] ? '🔥' : '', r.front ? '⚔️' : ''].join('');
-            const dev = Object.keys(DEVELOPMENT).map(k => `<span title="${DEVELOPMENT[k].name}">${icons[k]}${region.development[k] || 0}</span>`).join('');
+            const kinds = data.developKinds(region);
+            const dev = kinds.map(k => `<span title="${DEVELOPMENT[k].name}">${icons[k]}${region.development[k] || 0}</span>`).join('');
             let works;
             if (r.project) {
                 const plan = DEVELOPMENT[r.project.kind];
                 works = `<div class="rg-project">🏗️ ${plan.name} → ур. ${(region.development[r.project.kind] || 0) + 1} · ${r.project.remaining} ход.
                     <button class="mini-btn" type="button" data-action="rg-cancel" data-region="${region.id}">✕ Отменить</button></div>`;
             } else {
-                works = `<div class="rg-builds">${Object.keys(DEVELOPMENT).map(k => {
+                works = `<div class="rg-builds">${kinds.map(k => {
                     const level = region.development[k] || 0;
                     if (level >= 5) return `<button class="rg-build" type="button" disabled>${icons[k]} макс.</button>`;
                     const cost = data.developmentCost(region.id, k);
@@ -1215,6 +1221,73 @@ class UIManager {
         }
         document.getElementById('diplo-content').innerHTML = html;
         this.showModal('diplo-modal');
+    }
+
+    // --- судоходство и проливы -----------------------------------------------------------------
+    // Сверху — порты страны и деньги от моря; дальше проливы: свои (с
+    // выбором режима), потом те, от которых зависит торговля, потом прочие.
+    showStraits(data, focus = null) {
+        this.closePanel();
+        this.showModal('straits-modal');
+        this.renderStraits(data);
+        if (focus) document.getElementById(`strait-${focus}`)?.scrollIntoView({ block: 'start' });
+        else document.getElementById('straits-content').scrollTop = 0;
+    }
+
+    refreshStraits(data) {
+        const modal = document.getElementById('straits-modal');
+        if (modal && modal.classList.contains('active')) {
+            const box = document.getElementById('straits-content'), top = box.scrollTop;
+            this.renderStraits(data);
+            box.scrollTop = top;
+        }
+    }
+
+    renderStraits(data) {
+        const cc = data.playerCountry;
+        const b = data.countryBalance(cc);
+        const name = x => this.escape(data.countries[x].name);
+        const levels = Shipping.portLevels(data, cc);
+        const ports = data.getCountryRegions(cc).filter(r => (r.development.port || 0) > 0);
+        const coastal = data.getCountryRegions(cc).filter(r => Shipping.coastal(r)).length;
+        const row = (label, value) => `<div class="budget-row"><span>${label}</span><b>${value}</b></div>`;
+        const head = `<div class="fin-block loan"><div class="loan-head"><b>⚓ Ваше судоходство</b><small>${coastal ? `прибрежных областей: ${coastal}` : 'выхода к морю нет'}</small></div>
+            ${row('Порты', ports.length ? `${ports.length} · уровни ${levels}` : 'нет')}
+            ${row('Бонус морской торговли', `+${(Shipping.portBonus(data, cc) * 100).toFixed(1)}%`)}
+            ${row('Фрахт за ход', `<span class="pos">+${this.money(b.shipping)}</span>`)}
+            ${b.tolls ? row('Сборы за проливы', `<span class="pos">+${this.money(b.tolls)}</span>`) : ''}
+            ${b.transit ? row('Проход чужих проливов', `<span class="neg">−${this.money(b.transit)}</span>`) : ''}
+            <p class="hint">${coastal ? 'Порт строится в карточке прибрежной области («Развитие области»), до 5 уровней. Каждый уровень даёт фрахт, а все порты вместе — бонус к продажам и скидку на закупки.' : 'Без берега порты не построить: торговля идёт по суше и через проливы соседей.'}</p></div>`;
+
+        const ids = Object.keys(STRAITS);
+        const mine = id => Shipping.keepers(data, id).includes(cc);
+        ids.sort((a, b2) => (mine(b2) - mine(a)) || (Shipping.dep(b2, cc) - Shipping.dep(a, cc)) || STRAITS[a].name.localeCompare(STRAITS[b2].name, 'ru'));
+        const cards = ids.map(id => {
+            const s = STRAITS[id];
+            const keepers = Shipping.keepers(data, id);
+            const state = k => { const p = Shipping.policy(data, id, k); return `${STRAIT_MODES[p.mode].icon} ${p.mode === 'fee' ? `плата ${Math.round(p.fee * 100)}%` : STRAIT_MODES[p.mode].name.toLowerCase()}`; };
+            let body = keepers.map(k => `<div class="budget-row"><span>${k === cc ? '<b>Вы</b>' : name(k)}</span><b>${state(k)}</b></div>`).join('');
+            const dep = Shipping.dep(id, cc);
+            if (dep && !mine(id)) {
+                const pass = Shipping.passage(data, id, cc);
+                const status = pass.blocked ? `<span class="neg">закрыт для вас — теряете ${Math.round(dep * (1 - s.bypass) * 100)}% морской торговли</span>`
+                    : pass.fee ? `<span class="neg">плата ${Math.round(pass.fee * 100)}% с ${Math.round(dep * 100)}% торговли</span>` : '<span class="pos">проход свободен</span>';
+                body += `<p class="hint">Через пролив идёт ${Math.round(dep * 100)}% вашей морской торговли${s.bypass ? `, в обход можно провезти ${Math.round(s.bypass * 100)}% от неё` : ', обхода нет'}. Сейчас: ${status}.</p>`;
+            }
+            if (mine(id)) {
+                const p = Shipping.policy(data, id, cc);
+                const chip = (mode, fee, label) => {
+                    const on = p.mode === mode && (mode !== 'fee' || p.fee === fee);
+                    return `<button class="chip help-chip ${on ? 'on' : ''}" type="button" data-action="strait-mode" data-strait="${id}" data-mode="${mode}" data-fee="${fee}" ${data.gameOver ? 'disabled' : ''}>${label}</button>`;
+                };
+                const users = Object.entries(s.users).filter(([x]) => x !== cc && data.countries[x]?.alive).sort((a, b2) => b2[1] - a[1]);
+                body += `<div class="help-chips">${chip('open', 0, '🟢 Открыт')}${SHIPPING.FEES.map(f => chip('fee', f, `💰 ${Math.round(f * 100)}%`)).join('')}
+                    ${chip('hostile', 0, '🛑 Врагам — нет')}${chip('closed', 0, '⛔ Закрыт')}</div>
+                    <p class="hint">Зависят: ${users.slice(0, 6).map(([x, v]) => `${name(x)} ${Math.round(v * 100)}%`).join(', ')}${users.length > 6 ? ` и ещё ${users.length - 6}` : ''}. Плата — доход с их торговли; закрытие режет им торговлю. И то и другое портит с ними отношения. «Врагам — нет»: закрыт для тех, с кем война, отношения от −50 или кто под санкциями ООН.</p>`;
+            }
+            return `<div class="fin-block loan strait-card ${mine(id) ? 'mine' : ''}" id="strait-${id}"><div class="loan-head"><b>${s.name}</b><small>${mine(id) ? 'ваш пролив' : dep ? `ваша торговля: ${Math.round(dep * 100)}%` : ''}</small></div>${body}</div>`;
+        }).join('');
+        document.getElementById('straits-content').innerHTML = `${head}<h3 class="section-title">Проливы</h3>${cards}`;
     }
 
     // --- финансы ---------------------------------------------------------------------------------

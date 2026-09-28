@@ -13,7 +13,10 @@
 const FINANCE_LINES = [
     { key: 'tax', name: 'Налоги', sign: 1 },
     { key: 'sales', name: 'Продажа ресурсов', sign: 1 },
+    { key: 'shipping', name: 'Фрахт и порты', sign: 1, optional: true },
+    { key: 'tolls', name: 'Сборы за проливы', sign: 1, optional: true },
     { key: 'purchases', name: 'Закупка ресурсов', sign: -1 },
+    { key: 'transit', name: 'Проход проливов', sign: -1, optional: true },
     { key: 'social', name: 'Социальная программа', sign: -1 },
     { key: 'upkeep', name: 'Содержание армии', sign: -1 },
     { key: 'interest', name: 'Проценты банкам', sign: -1, optional: true },
@@ -113,6 +116,7 @@ class Finance {
         const empty = !flow && !cash ? '<p class="hint">Графики появятся через пару ходов: игра записывает итоги в конце каждого хода.</p>' : '';
 
         container.innerHTML = `${tiles}${plan}${compare}${flow}${cash}${empty}
+            <button class="mini-btn fin-gov" type="button" data-action="open-straits">⚓ Судоходство и проливы</button>
             <h3 class="section-title">Займы</h3><div id="gov-finance"></div>
             <button class="mini-btn fin-gov" type="button" data-action="open-gov">⚖️ Налоги и политический курс — в «Правительстве»</button>`;
         ui.renderFinance(data);

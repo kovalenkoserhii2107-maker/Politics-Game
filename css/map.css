@@ -87,3 +87,12 @@
 }
 #layer-borders path.on { display: inline; }
 #world-map.regional-view #layer-borders path { stroke-width: calc(var(--sw) * 2); }
+
+/* проливы: значок постоянного размера, нажимается */
+#layer-straits { pointer-events: none; }
+.strait-mark { pointer-events: auto; cursor: pointer; }
+.strait-mark circle { fill: rgba(10, 11, 13, 0.88); stroke: #7fb2ff; stroke-width: 2; }
+.strait-mark text { font-size: 12px; text-anchor: middle; dominant-baseline: central; pointer-events: none; }
+.strait-mark.fee circle { stroke: var(--warn); }
+.strait-mark.blocked circle { stroke: var(--accent); stroke-width: 2.5; }
+.strait-mark.own circle { stroke: #fff; stroke-width: 2.5; }

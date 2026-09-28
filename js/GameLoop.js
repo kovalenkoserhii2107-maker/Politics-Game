@@ -17,7 +17,8 @@ const SaveGame = {
     mapId() {
         if (this.signature) return this.signature;
         // Include geometry, owners, links and cities, not merely endpoint IDs.
-        const input = JSON.stringify([RegionsDB, NeighborsDB, CitiesDB, Object.keys(UnitsDB)]);
+        // длина берега (coast) — справка, не форма карты: в подпись не входит
+        const input = JSON.stringify([RegionsDB, NeighborsDB, CitiesDB, Object.keys(UnitsDB)], (k, v) => (k === 'coast' ? undefined : v));
         let a = 2166136261, b = 5381;
         for (let i = 0; i < input.length; i++) {
             const code = input.charCodeAt(i);

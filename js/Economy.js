@@ -149,7 +149,7 @@ class Economy {
         const country = data.countries[countryId];
         Economy.initCountry(country);
         const f = Economy.flows(data, countryId);
-        const reach = (data.enemiesOf(countryId).length ? ECONOMY.WAR_TRADE : 1) * (Council.sanctioned(data, countryId) ? COUNCIL.SANCTION_TRADE : 1);
+        const reach = Economy.reach(data, countryId);
         let sales = 0, purchases = 0;
         const lines = {};
         for (const key of Object.keys(RESOURCES)) {
@@ -168,6 +168,15 @@ class Economy {
         }
         return { sales, purchases, lines };
     }
+
+    // Какая доля торговли доходит до рынка: блокада на войне, санкции,
+    // закрытые проливы.
+    static reach(data, cc) {
+        return (data.enemiesOf(cc).length ? ECONOMY.WAR_TRADE : 1) * (Council.sanctioned(data, cc) ? COUNCIL.SANCTION_TRADE : 1) * Shipping.access(data, cc);
+    }
+
+    // Торговые договоры и порты: продаём дороже, покупаем дешевле.
+    static tradeBonus(data, cc) { return Diplomacy.tradeBonus(data, cc) + Shipping.portBonus(data, cc); }
 
     // Один ход рынка для всех стран. Меняет склады и цены; возвращает по
     // каждой стране деньги от торговли и обеспеченность ресурсами.
@@ -188,7 +197,7 @@ class Economy {
             let offers = 0, bids = 0;
             for (const c of countries) {
                 const f = flowOf(c);
-                const reach = (data.enemiesOf(c.id).length ? ECONOMY.WAR_TRADE : 1) * (Council.sanctioned(data, c.id) ? COUNCIL.SANCTION_TRADE : 1);
+                const reach = Economy.reach(data, c.id);
                 const cap = f.need * ECONOMY.STOCK_CAP;
                 const target = f.need * ECONOMY.STOCK_TARGET;
                 const entry = { c, f, cap, offer: 0, bid: 0, deficit: 0 };
@@ -289,6 +298,7 @@ class Economy {
         const policy = POLICIES[country.policy] || POLICIES.balanced;
         const work = 0.5 + 0.5 * region.loyalty;
         const p = data.market;
+        if (kind === 'port') return Shipping.portValue(data, regionId);
         if (kind === 'infra') {
             const tax = data.taxBase(region) * country.taxRate * region.loyalty * Economy.taxFactor(country) * Tech.factor(country, 'tax');
             return tax * INFRA.TAX * Economy.cycle(data).tax;

@@ -88,6 +88,7 @@ class MapEngine {
         this.labelLayer = g('layer-labels');
         this.orderLayer = g('layer-orders');
         this.armyLayer = g('layer-armies');
+        this.straitLayer = g('layer-straits');
 
         // Наконечники стрел приказов. markerUnits=strokeWidth — наконечник
         // масштабируется вместе с линией, толщина которой постоянна на экране.
@@ -482,6 +483,15 @@ class MapEngine {
             const path = e.target.closest('.region');
             if (!path || path.classList.contains('dimmed')) return;
             this.onRegionClick(path.dataset.region);
+        });
+
+        // значок пролива — открыть окно проливов на нём
+        this.straitLayer.addEventListener('click', e => {
+            if (this.wasDragging) return;
+            const mark = e.target.closest('.strait-mark');
+            if (!mark) return;
+            e.stopPropagation();
+            document.dispatchEvent(new CustomEvent('straitClick', { detail: mark.dataset.strait }));
         });
 
         this.regionLayer.addEventListener('mouseover', e => {
@@ -1162,8 +1172,31 @@ class MapEngine {
             }
         }
         this.armyLayer.appendChild(fragment);
+        this.drawStraits();
         this.cull();
         this.scheduleDeclutter();
+    }
+
+    // --- проливы -------------------------------------------------------------
+    // Значок на месте пролива глазами игрока: ⚓ — проход свободен, 💰 —
+    // платный, ⛔ — закрыт для него. Свой пролив — в светлом кольце.
+    drawStraits() {
+        if (!this.straitLayer || typeof STRAITS === 'undefined') return;
+        const ns = 'http://www.w3.org/2000/svg';
+        const player = this.data.playerCountry;
+        this.straitLayer.innerHTML = '';
+        for (const [id, s] of Object.entries(STRAITS)) {
+            const own = Shipping.keepers(this.data, id).includes(player);
+            const pass = Shipping.passage(this.data, id, player);
+            const state = own ? 'own' : pass.blocked ? 'blocked' : pass.fee ? 'fee' : 'open';
+            const icon = pass.blocked && !own ? '⛔' : pass.fee && !own ? '💰' : '⚓';
+            const g = document.createElementNS(ns, 'g');
+            g.setAttribute('class', `strait-mark ${state}`);
+            g.dataset.strait = id;
+            g.setAttribute('transform', `translate(${s.at[0]},${s.at[1]})`);
+            g.innerHTML = `<title>${s.name}</title><g class="badge-inner"><circle r="11"/><text y="0.5">${icon}</text></g>`;
+            this.straitLayer.appendChild(g);
+        }
     }
 }
 

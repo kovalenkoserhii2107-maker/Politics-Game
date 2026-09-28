@@ -490,7 +490,9 @@ function loadMap() {
     const ctx = {};
     vm.createContext(ctx);
     for (const f of files) vm.runInContext(fs.readFileSync(f, 'utf8'), ctx);
-    const input = vm.runInContext('JSON.stringify([RegionsDB, NeighborsDB, CitiesDB, Object.keys(UnitsDB)])', ctx);
+    // длина берега (coast) — справка, а не форма карты: в подпись не входит,
+    // иначе сохранения сочли бы карту новой (так же в SaveGame.mapId)
+    const input = vm.runInContext('JSON.stringify([RegionsDB, NeighborsDB, CitiesDB, Object.keys(UnitsDB)], (k, v) => (k === "coast" ? undefined : v))', ctx);
     let a = 2166136261, b = 5381;
     for (let i = 0; i < input.length; i++) {
         const code = input.charCodeAt(i);
@@ -971,7 +973,8 @@ function seaPoints(region, step = 0.25) {
                 const len = Math.hypot(b[0] - a[0], b[1] - a[1]);
                 const k = Math.max(1, Math.ceil(len / step));
                 for (let s = 0; s < k; s++) {
-                    pts.push([a[0] + ((b[0] - a[0]) * s) / k, a[1] + ((b[1] - a[1]) * s) / k]);
+                    // третье число — длина берега, которую представляет точка
+                    pts.push([a[0] + ((b[0] - a[0]) * s) / k, a[1] + ((b[1] - a[1]) * s) / k, len / k]);
                 }
             }
         }
@@ -1012,6 +1015,8 @@ function addSeaLinks(regions, links) {
         }
         return true;
     }));
+    // длина береговой линии области, км: по ней игра решает, где строить порт
+    coastal.forEach((list, i) => { regions[i].coastKm = Math.round(list.reduce((sum, p) => sum + p[2] / pxPerKm(p[1]), 0)); });
     const coastGrid = new Map();
     coastal.forEach((list, i) => {
         for (const p of list) {
@@ -1164,7 +1169,7 @@ function writeOutput(countries, regions, perCountry, neighbors, cityIndex) {
            + ` bx: ${r.bbox[0].toFixed(1)}, by: ${r.bbox[1].toFixed(1)},`
            + ` bw: ${(r.bbox[2] - r.bbox[0]).toFixed(1)}, bh: ${(r.bbox[3] - r.bbox[1]).toFixed(1)},`
            + ` population: ${r.population},`
-           + ` agro: ${r.agro}, industry: ${r.industry}, oil: ${r.oil},`
+           + ` agro: ${r.agro}, industry: ${r.industry}, oil: ${r.oil}, coast: ${r.coastKm || 0},`
            + ` path: '${pathData(r.mp)}' },\n`;
     }
     s += '};\n\nif (typeof module !== \'undefined\' && module.exports) module.exports = { RegionsDB };\n';
