@@ -11,15 +11,24 @@
 // с оглядкой на реальность (Россия не станет изоляционистом, Швейцария —
 // экспансионистом), поэтому мир каждый раз складывается по-своему.
 //
-// Помощь жертве агрессии: пока слабая страна отбивается от сильного
-// агрессора, друзья (отношения от +25, с агрессором — не лучше нуля) каждый
-// ход переводят ей часть своих налогов — как западная помощь Украине.
+// Помощь жертве агрессии: пока страна отбивается от агрессора, друзья,
+// союзники и иногда соседи переводят ей часть своих налогов — как западная
+// помощь Украине. Когда ООН признаёт агрессора, помощь растёт и к ней
+// добавляются поставки оружия.
 // =====================================================================
 const WORLD = {
     AID_SHARE: 0.03,        // доля недельных налогов донора
     AID_CAP: 0.6,           // не больше этой доли содержания армии жертвы
     AID_MIN_RELATION: 25,
-    AID_POWER_RATIO: 1.2,   // помогают, если агрессор сильнее хотя бы во столько раз
+    AID_POWER_RATIO: 0.9,   // помогают, если агрессор не намного слабее жертвы
+    ALLY_AID: 1.5,          // союзник жертвы даёт больше друга
+    NEIGHBOUR_CHANCE: 0.45, // сосед без особой дружбы помогает не каждый ход
+    COALITION_MAX_RELATION: 10,
+    BRANDED_AID: 2,         // ООН признала агрессора — помощь вдвое больше
+    BRANDED_CAP: 1,         // и может покрыть всё содержание армии
+    ARMS_EVERY: 3,          // поставки оружия — раз в столько ходов
+    ARMS_WEEKS: 0.5,        // каждый из трёх главных доноров — на полнедели налогов
+    ARMS_CAP_UPKEEP: 2,     // но не больше двух ходов содержания армии жертвы
 };
 
 const TRAITS = {
@@ -95,38 +104,82 @@ class World {
     static traitId(d, cc) { return (d.traits && d.traits[cc]) || 'defensive'; }
 
     // --- помощь жертве агрессии -------------------------------------------------
+    // Деньги каждый ход: друзья жертвы (отношения от +25, с агрессором —
+    // не лучше нуля), союзники — щедрее, соседи без особой дружбы — время от
+    // времени, если с агрессором у них плохо. Когда ООН признала агрессора
+    // (санкции, эмбарго, принуждение, осуждение), к помощи присоединяется
+    // широкая коалиция, денег вдвое больше, и раз в несколько ходов приходят
+    // поставки оружия — войска в приграничную область жертвы.
     static endTurn(d, events) {
         if (!d.un) return;
         for (const [key, w] of Object.entries(d.un.wars)) {
             if (w.end !== null || !d.wars.has(key)) continue;
             const victim = key.split('|').find(cc => cc !== w.aggressor);
             const v = d.countries[victim], a = d.countries[w.aggressor];
-            if (!v || !a || !v.alive || !a.alive) continue;
-            if (d.calculateMilitaryPower(w.aggressor) < WORLD.AID_POWER_RATIO * d.calculateMilitaryPower(victim)) continue;
+            if (!v || !a || !v.alive || !a.alive || !d.regionsByCountry[victim].length) continue;
+            const branded = Credit.branded(d, w.aggressor);
+            if (!branded && d.calculateMilitaryPower(w.aggressor) < WORLD.AID_POWER_RATIO * d.calculateMilitaryPower(victim)) continue;
+            const around = new Set(d.neighbourCountries(victim));
             const donors = [];
             let total = 0;
             for (const c of Object.values(d.countries)) {
                 if (!c.alive || !c.playable || d.isHuman(c.id) || c.id === victim || c.id === w.aggressor) continue;
-                if (d.isAtWar(c.id, victim) || Diplomacy.relation(d, c.id, victim) < WORLD.AID_MIN_RELATION || Diplomacy.relation(d, c.id, w.aggressor) > 0) continue;
-                const gift = Math.round(d.countryBalance(c.id).tax * WORLD.AID_SHARE);
+                if (d.isAtWar(c.id, victim) || !d.regionsByCountry[c.id].length) continue;
+                const relV = Diplomacy.relation(d, c.id, victim), relA = Diplomacy.relation(d, c.id, w.aggressor);
+                const ally = Diplomacy.isAllied(d, c.id, victim);
+                const friend = relV >= WORLD.AID_MIN_RELATION && relA <= 0;
+                const neighbour = around.has(c.id) && relV >= 0 && relA < 0 && Math.random() < WORLD.NEIGHBOUR_CHANCE;
+                const coalition = branded && relV >= 0 && relA < WORLD.COALITION_MAX_RELATION;
+                if (!ally && !friend && !neighbour && !coalition) continue;
+                const share = WORLD.AID_SHARE * (branded ? WORLD.BRANDED_AID : 1) * (ally ? WORLD.ALLY_AID : friend ? 1 : 0.5);
+                const gift = Math.round(d.countryBalance(c.id).tax * share);
                 if (gift <= 0 || c.money < gift * 10) continue;
-                donors.push({ c, gift });
+                donors.push({ c, gift, why: ally ? 'ally' : friend ? 'friend' : neighbour ? 'neighbour' : 'coalition' });
                 total += gift;
             }
             if (!total) continue;
             const upkeep = d.countryBalance(victim).upkeep;
-            const scale = Math.min(1, (upkeep * WORLD.AID_CAP) / total);
+            const scale = Math.min(1, (upkeep * (branded ? WORLD.BRANDED_CAP : WORLD.AID_CAP)) / total);
             let paid = 0;
-            for (const { c, gift } of donors) {
-                const g = Math.round(gift * scale);
-                c.money -= g;
-                paid += g;
+            for (const x of donors) {
+                x.paid = Math.round(x.gift * scale);
+                x.c.money -= x.paid;
+                paid += x.paid;
             }
             v.money += paid;
+            donors.sort((x, y) => y.paid - x.paid);
             if (d.isHuman(victim) && paid > 0) {
-                const top = donors.sort((x, y) => y.gift - x.gift).slice(0, 3).map(x => x.c.name).join(', ');
-                events.push({ type: 'aid', for: victim, message: `🤝 Помощь партнёров против агрессии: +$${(paid / 1e6).toFixed(1)}M (${donors.length} стран, больше всех — ${top}).` });
+                const top = donors.slice(0, 3).map(x => x.c.name).join(', ');
+                const near = donors.filter(x => x.why === 'neighbour').map(x => x.c.name);
+                events.push({ type: 'aid', for: victim, message: `🤝 ${branded ? 'Коалиция против агрессора' : 'Помощь партнёров против агрессии'}: +$${(paid / 1e6).toFixed(1)}M (${donors.length} стран, больше всех — ${top}).${near.length ? ` Соседи тоже помогли: ${near.slice(0, 3).join(', ')}.` : ''}` });
             }
+            if (branded && (d.turn - w.start) % WORLD.ARMS_EVERY === 0) World.sendArms(d, victim, w.aggressor, donors, events);
+        }
+    }
+
+    // Поставки оружия: крупнейшие доноры отдают технику на сумму
+    // ARMS_WEEKS своих недельных налогов — в самую слабую приграничную
+    // область жертвы. Техника становится армией жертвы.
+    static sendArms(d, victim, aggressor, donors, events) {
+        const top = donors.slice(0, 3);
+        if (!top.length) return;
+        let value = top.reduce((s, x) => s + d.countryBalance(x.c.id).tax * WORLD.ARMS_WEEKS, 0);
+        value = Math.min(value, d.countryBalance(victim).upkeep * WORLD.ARMS_CAP_UPKEEP + 2e6);
+        const front = d.getCountryRegions(victim).filter(r => d.getNeighbors(r.id).some(id => d.regions[id] && d.regions[id].owner === aggressor));
+        const capital = d.regions[d.countries[victim].capital];
+        const pool = front.length ? front : capital && capital.owner === victim ? [capital] : d.getCountryRegions(victim);
+        if (!pool.length) return;
+        const target = pool.reduce((a, b) => (d.armyPower(b.army, victim) < d.armyPower(a.army, victim) ? b : a));
+        const kinds = ['artillery', 'antiair', 'tanks'];
+        if (Tech.unitUnlocked(top[0].c, 'drones')) kinds.push('drones');
+        const got = {};
+        for (const unitId of kinds) {
+            const n = Math.floor(value / kinds.length / UnitsDB[unitId].buildCost);
+            if (n > 0) { target.army[unitId] += n; got[unitId] = n; }
+        }
+        if (!Object.keys(got).length) return;
+        if (d.isHuman(victim)) {
+            events.push({ type: 'aid', for: victim, message: `📦 Поставки оружия от ${top.map(x => x.c.name).join(', ')}: ${d.describeForces(got)} — прибыли в ${target.name}.` });
         }
     }
 

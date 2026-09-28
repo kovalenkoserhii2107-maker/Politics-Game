@@ -192,6 +192,40 @@ class GameCore {
             this.afterStateChange();
             return;
         }
+        if (action === 'bonds') {
+            const result = d.act('issueBonds', Number(btn.dataset.amount));
+            if (!result.ok) { this.ui.toast(result.reason); return; }
+            this.ui.toast(`Облигации проданы: +${this.ui.money(result.amount)}, выплаты с хода ${result.start}`);
+            this.ui.refreshFinance(d);
+            this.loop.updateTopBarUI();
+            SaveGame.save(d);
+            return;
+        }
+        if (action === 'imf' && !btn.dataset.confirmed) {
+            const offer = Credit.imfOffer(d, d.playerCountry);
+            if (!offer.ok) { this.ui.toast(offer.reason); return; }
+            const second = offer.total - offer.first;
+            this.ui.showDecision({
+                title: `🏦 Программа МВФ на ${this.ui.money(offer.total)}?`,
+                text: [`Сейчас — ${this.ui.money(offer.first)}, через ${IMF.TRANCHE_TURNS} ходов — ещё ${this.ui.money(second)}, если условия соблюдены.`,
+                    `Выплаты начнутся со следующего хода: ${IMF.TERM} ходов, ${(IMF.RATE * 100).toFixed(1)}% за ход на остаток.`,
+                    `Условия: ${offer.conditions.map(k => IMF_CONDITIONS[k].name.toLowerCase()).join('; ')}.`,
+                    'Нарушение — второй транш отменят, долг придётся гасить вдвое быстрее, влияние −' + IMF.INFLUENCE + '.'].join('\n'),
+                accept: 'Принять программу', decline: 'Отмена',
+                onAccept: () => { btn.dataset.confirmed = '1'; try { this.runAction(btn); } finally { delete btn.dataset.confirmed; } },
+                onDecline: () => {},
+            });
+            return;
+        }
+        if (action === 'imf') {
+            const result = d.act('takeImf');
+            if (!result.ok) { this.ui.toast(result.reason); return; }
+            this.ui.toast(`МВФ перевёл первый транш: +${this.ui.money(result.amount)}`);
+            this.ui.refreshFinance(d);
+            this.loop.updateTopBarUI();
+            SaveGame.save(d);
+            return;
+        }
         if (action === 'borrow' || action === 'repay') {
             const result = d.act(action, Number(btn.dataset.amount));
             if (!result.ok) { this.ui.toast(result.reason); return; }
@@ -284,6 +318,8 @@ class GameCore {
                 const lines = [`Стоит ${RULES.WAR_COST} влияния. Мир потом можно будет только предложить — противник может отказать.`];
                 if (allies.length) lines.push(`Её союзники тоже вступят в войну: ${allies.map(x => d.countries[x].name).join(', ')}.`);
                 if (d.isHuman(cc)) lines.push('Это живой игрок.');
+                const imf = Credit.peek(d, player)?.imf;
+                if (imf && !imf.broken && imf.conditions.includes('noWar')) lines.push('⚠️ Программа МВФ запрещает новые войны: второй транш отменят, долг придётся гасить вдвое быстрее.');
                 this.ui.showDecision({
                     title: `⚔️ Объявить войну: ${name}?`, text: lines.join('\n'),
                     accept: 'Объявить войну', decline: 'Отмена', danger: true,
@@ -1871,3 +1907,21 @@ class GameCore {
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', ready);
     else ready();
 })();
+
+// iOS: у приложения с домашнего экрана при прозрачной строке статуса окно
+// бывает короче экрана на высоту этой строки, а рисуется от самого верха —
+// внизу остаётся пустая полоса, и нижняя панель висит над ней. Меряем зазор
+// и опускаем панель в него (--vp-fix). В браузере и на Android зазора нет.
+function fitStandaloneViewport() {
+    let gap = 0;
+    if (navigator.standalone === true) {
+        const landscape = window.innerWidth > window.innerHeight;
+        const full = landscape ? Math.min(screen.width, screen.height) : Math.max(screen.width, screen.height);
+        gap = full - window.innerHeight;
+        if (!(gap > 0 && gap <= 80)) gap = 0;     // клавиатура и прочее — не наш случай
+    }
+    document.documentElement.style.setProperty('--vp-fix', gap + 'px');
+}
+fitStandaloneViewport();
+window.addEventListener('resize', fitStandaloneViewport);
+window.addEventListener('orientationchange', () => setTimeout(fitStandaloneViewport, 300));
