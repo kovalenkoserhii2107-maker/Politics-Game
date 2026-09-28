@@ -88,6 +88,8 @@ class MapEngine {
         this.labelLayer = g('layer-labels');
         this.orderLayer = g('layer-orders');
         this.armyLayer = g('layer-armies');
+        this.seaLayer = g('layer-seas');
+        this.fleetLayer = g('layer-fleets');
         this.straitLayer = g('layer-straits');
 
         // Наконечники стрел приказов. markerUnits=strokeWidth — наконечник
@@ -483,6 +485,15 @@ class MapEngine {
             const path = e.target.closest('.region');
             if (!path || path.classList.contains('dimmed')) return;
             this.onRegionClick(path.dataset.region);
+        });
+
+        // значок флота — окно «Флот» на этом море
+        this.fleetLayer.addEventListener('click', e => {
+            if (this.wasDragging) return;
+            const mark = e.target.closest('.fleet-mark');
+            if (!mark) return;
+            e.stopPropagation();
+            document.dispatchEvent(new CustomEvent('fleetClick', { detail: mark.dataset.zone }));
         });
 
         // значок пролива — открыть окно проливов на нём
@@ -1172,9 +1183,56 @@ class MapEngine {
             }
         }
         this.armyLayer.appendChild(fragment);
+        this.drawSeas();
+        this.drawFleets();
         this.drawStraits();
         this.cull();
         this.scheduleDeclutter();
+    }
+
+    // --- моря и флоты ----------------------------------------------------------
+    // Названия морей — один раз; видны при приближении (см. map.css).
+    drawSeas() {
+        if (!this.seaLayer || this.seaLayer.childElementCount || typeof SeasDB === 'undefined') return;
+        const ns = 'http://www.w3.org/2000/svg';
+        for (const z of Object.values(SeasDB.zones)) {
+            const g = document.createElementNS(ns, 'g');
+            g.setAttribute('class', 'sea-label');
+            g.setAttribute('transform', `translate(${z.x},${z.y})`);
+            g.innerHTML = `<g class="badge-inner"><text y="-16">${z.name}</text></g>`;
+            this.seaLayer.appendChild(g);
+        }
+    }
+
+    // Флоты в морях: по значку на сторону — свой, союзники, враги, прочие.
+    drawFleets() {
+        if (!this.fleetLayer || typeof Navy === 'undefined') return;
+        const ns = 'http://www.w3.org/2000/svg';
+        const player = this.data.playerCountry;
+        const zones = Navy.zones();
+        this.fleetLayer.innerHTML = '';
+        for (const [zone, byCc] of Object.entries(this.data.navy || {})) {
+            const z = zones[zone];
+            if (!z) continue;
+            const sides = { own: 0, ally: 0, enemy: 0, other: 0 };
+            for (const [cc, ships] of Object.entries(byCc)) {
+                const kind = cc === player ? 'own' : Diplomacy.isAllied(this.data, cc, player) ? 'ally' : this.data.isAtWar(cc, player) ? 'enemy' : 'other';
+                sides[kind] += Navy.power(ships);
+            }
+            const parts = Object.entries(sides).filter(([, p]) => p > 0);
+            const widths = parts.map(([, p]) => 24 + String(p).length * 6.6);
+            let x = -(widths.reduce((a, b) => a + b, 0) + (parts.length - 1) * 3) / 2;
+            const g = document.createElementNS(ns, 'g');
+            g.setAttribute('class', 'fleet-mark');
+            g.dataset.zone = zone;
+            g.setAttribute('transform', `translate(${z.x},${z.y})`);
+            g.innerHTML = `<title>${z.name}</title><g class="badge-inner">${parts.map(([kind, p], i) => {
+                const w = widths[i], rect = `<g class="fleet-badge ${kind}"><rect x="${x}" y="-8" width="${w}" height="16" rx="8"/><text x="${x + 7}" y="0.5">⚓${p}</text></g>`;
+                x += w + 3;
+                return rect;
+            }).join('')}</g>`;
+            this.fleetLayer.appendChild(g);
+        }
     }
 
     // --- проливы -------------------------------------------------------------

@@ -17,6 +17,7 @@ const FINANCE_LINES = [
     { key: 'tolls', name: 'Сборы за проливы', sign: 1, optional: true },
     { key: 'purchases', name: 'Закупка ресурсов', sign: -1 },
     { key: 'transit', name: 'Проход проливов', sign: -1, optional: true },
+    { key: 'navy', name: 'Содержание флота', sign: -1, optional: true },
     { key: 'social', name: 'Социальная программа', sign: -1 },
     { key: 'upkeep', name: 'Содержание армии', sign: -1 },
     { key: 'interest', name: 'Проценты банкам', sign: -1, optional: true },

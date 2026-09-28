@@ -96,3 +96,15 @@
 .strait-mark.fee circle { stroke: var(--warn); }
 .strait-mark.blocked circle { stroke: var(--accent); stroke-width: 2.5; }
 .strait-mark.own circle { stroke: #fff; stroke-width: 2.5; }
+
+/* моря и флоты */
+#layer-seas { pointer-events: none; }
+.sea-label text { font-size: 10px; font-style: italic; letter-spacing: 0.06em; fill: rgba(170, 190, 220, 0.45); text-anchor: middle; }
+#world-map.global-view #layer-seas { display: none; }
+#layer-fleets { pointer-events: none; }
+.fleet-mark { pointer-events: auto; cursor: pointer; }
+.fleet-badge rect { fill: rgba(10, 11, 13, 0.9); stroke: var(--text-3); stroke-width: 1.5; }
+.fleet-badge text { font-size: 10px; font-weight: 700; fill: var(--text); dominant-baseline: central; }
+.fleet-badge.own rect { stroke: var(--good); }
+.fleet-badge.ally rect { stroke: #7fb2ff; }
+.fleet-badge.enemy rect { stroke: var(--accent); }

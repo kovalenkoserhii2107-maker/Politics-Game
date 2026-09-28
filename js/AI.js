@@ -43,6 +43,7 @@ class AI {
     planTurn() {
         const d = this.data;
         Shipping.planAI(d);
+        Navy.planAI(d, this);
         // соседи людей готовятся к обороне; страны людей ИИ не трогает
         const playerNeighbours = new Set(d.humans.flatMap(cc => d.neighbourCountries(cc)));
         for (const country of Object.values(d.countries)) {
@@ -712,6 +713,6 @@ class AI {
 
 // Порядок исследований ИИ: в мире сначала экономика, на войне — оружие.
 AI.PEACE_SCIENCE = ['agrotech', 'powergrid', 'medicine', 'logistics1', 'drones', 'motorized', 'automation', 'fortify',
-    'ewar', 'specops', 'digital', 'missiles', 'stealth', 'fusion', 'logistics2', 'nuclear', 'hydrogen'];
+    'ewar', 'specops', 'submarines', 'digital', 'missiles', 'stealth', 'fusion', 'logistics2', 'nuclear', 'hydrogen'];
 AI.WAR_SCIENCE = ['drones', 'medicine', 'motorized', 'fortify', 'ewar', 'specops', 'missiles', 'nuclear', 'stealth', 'hydrogen',
-    'agrotech', 'powergrid', 'logistics1', 'automation', 'digital', 'fusion', 'logistics2'];
+    'agrotech', 'powergrid', 'logistics1', 'submarines', 'automation', 'digital', 'fusion', 'logistics2'];

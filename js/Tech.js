@@ -14,6 +14,7 @@ const TECH_BRANCHES = {
     support: { name: 'Оборона и снабжение', icon: '🧱' },
     economy: { name: 'Экономика', icon: '🏭' },
     nuclear: { name: 'Ядерное оружие', icon: '☢️' },
+    navy:    { name: 'Флот', icon: '⚓' },
 };
 
 const TECH_TREE = {
@@ -76,6 +77,10 @@ const TECH_TREE = {
     fusion: {
         branch: 'economy', name: 'Термоядерная энергетика', icon: '☢️', cost: 80e6, turns: 6, requires: ['digital'],
         effect: { energy: 1.35 }, text: 'Энергии производится ещё на 35% больше.',
+    },
+    submarines: {
+        branch: 'navy', name: 'Подводные лодки', icon: '🦈', cost: 12e6, turns: 3, requires: [],
+        text: 'Верфи с портом 2-го уровня строят подлодки: засады на крупные корабли, пока у врага мало противолодочных сил.',
     },
     nuclear: {
         branch: 'nuclear', name: 'Ядерная бомба', icon: '☢️', cost: 60e6, turns: 5, requires: ['missiles'],

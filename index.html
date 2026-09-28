@@ -323,9 +323,12 @@ body { overscroll-behavior: none; }
 .nav-btn .ico { display: none; }
 .lbl-short { display: none; }
 .lbl-xs { display: none; }
-@media (max-width: 360px) {
+/* семь кнопок внизу: на телефоне «Дипломатия» — «Дипл.» */
+@media (max-width: 440px) {
     .lbl-xl { display: none; }
     .lbl-xs { display: inline; }
+}
+@media (max-width: 360px) {
     #action-bar .nav-btn .lbl { font-size: 8.5px; }
 }
 .war-badge {
@@ -466,7 +469,7 @@ body { overscroll-behavior: none; }
     #action-bar {
         position: fixed; left: 0; right: 0; bottom: 0; height: var(--nav-h);
         padding: 6px 8px var(--nav-pad-b); box-sizing: border-box; gap: 6px;
-        display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)) minmax(0, 1.2fr); gap: 2px;
+        display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)) minmax(0, 1.2fr); gap: 2px;
         background: rgba(11,18,33,0.98); border-top: 1px solid var(--ui-border); z-index: 30;
     }
     .nav-btn {
@@ -539,8 +542,8 @@ body { overscroll-behavior: none; }
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Exo+2:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;700&display=swap">
 <link rel="stylesheet" href="css/campaign.css?v=fe17f3ba7c">
-<link rel="stylesheet" href="css/theme.css?v=b34892de5e">
-<link rel="stylesheet" href="css/map.css?v=bd1279e57a">
+<link rel="stylesheet" href="css/theme.css?v=8d8bf52602">
+<link rel="stylesheet" href="css/map.css?v=70063c73a7">
 <link rel="stylesheet" href="css/start.css?v=5288a0c5d1">
 </head>
 <body>
@@ -710,6 +713,7 @@ body { overscroll-behavior: none; }
             <button id="diplo-btn" class="top-btn nav-btn" aria-label="Дипломатия"><span class="ico">🤝</span><span class="lbl"><span class="lbl-xl">Дипломатия</span><span class="lbl-xs">Дипл.</span></span><span id="war-badge" class="war-badge"></span></button>
             <button id="regions-btn" class="top-btn nav-btn"><span class="ico">🗺️</span><span class="lbl">Области</span></button>
             <button id="campaign-btn" class="top-btn nav-btn"><span class="ico">🎯</span><span class="lbl">Задания</span><span id="campaign-count" class="mission-badge"></span></button>
+            <button id="fleet-btn" class="top-btn nav-btn" aria-label="Флот"><span class="ico">⚓</span><span class="lbl">Флот</span></button>
             <button id="sci-btn" class="top-btn nav-btn"><span class="ico">🔬</span><span class="lbl">Наука</span><span id="sci-badge" class="sci-badge"></span></button>
             <button id="gov-btn" class="top-btn nav-btn warning" aria-label="Правительство"><span class="ico">🏛️</span><span class="lbl"><span class="lbl-long">Правительство</span><span class="lbl-short">Власть</span></span></button>
             <button id="end-turn-btn" class="top-btn nav-btn primary" aria-label="Конец хода"><span class="ico">⏭️</span><span class="lbl">Конец хода</span></button>
@@ -798,6 +802,16 @@ body { overscroll-behavior: none; }
     </div>
 
     <!-- ФИНАНСЫ -->
+    <div id="fleet-modal" class="modal ui-element" role="dialog" aria-modal="true" aria-labelledby="fleet-title">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 id="fleet-title">⚓ Флот</h2>
+                <button class="close-btn" id="close-fleet-btn">✕</button>
+            </div>
+            <div id="fleet-content" class="modal-body"></div>
+        </div>
+    </div>
+
     <div id="straits-modal" class="modal ui-element" role="dialog" aria-modal="true" aria-labelledby="straits-title">
         <div class="modal-content">
             <div class="modal-header">
@@ -1011,11 +1025,12 @@ body { overscroll-behavior: none; }
 <script src="js/data/NeighborsDB.js?v=45a5a5d1ad"></script>
 <script src="js/data/BordersDB.js?v=0ece6ee841"></script>
 <script src="js/data/CitiesDB.js?v=96a7a8b11a"></script>
+<script src="js/data/SeasDB.js?v=4b83dbeb41"></script>
 
 <!-- Движок -->
 <script src="js/UnitsDB.js?v=8ed53808f1"></script>
-<script src="js/Tech.js?v=fbb65caf74"></script>
-<script src="js/Economy.js?v=18a0adaa29"></script>
+<script src="js/Tech.js?v=d11d3a0cf2"></script>
+<script src="js/Economy.js?v=3c7f82ab90"></script>
 <script src="js/Diplomacy.js?v=1b5887bdf7"></script>
 <script src="js/Net.js?v=4cefb68e70"></script>
 <script src="js/Missions.js?v=fe83f7c237"></script>
@@ -1027,15 +1042,17 @@ body { overscroll-behavior: none; }
 <script src="js/Nuclear.js?v=a5857af620"></script>
 <script src="js/World.js?v=78a2b0d1d0"></script>
 <script src="js/Credit.js?v=dce37b26c3"></script>
-<script src="js/Shipping.js?v=ee14921cfb"></script>
+<script src="js/Shipping.js?v=b28aa6e83d"></script>
+<script src="js/Navy.js?v=78b1f0dd45"></script>
 <script src="js/Charts.js?v=01f1ed532c"></script>
-<script src="js/Finance.js?v=870d5071d5"></script>
-<script src="js/GameData.js?v=e8ac48fcff"></script>
-<script src="js/AI.js?v=16e70f9dba"></script>
-<script src="js/MapEngine.js?v=0aa88869e8"></script>
-<script src="js/UIManager.js?v=dcc63745ad"></script>
-<script src="js/GameLoop.js?v=2fb75eab3d"></script>
+<script src="js/Finance.js?v=23af38408e"></script>
+<script src="js/FleetUI.js?v=b3adffcd06"></script>
+<script src="js/GameData.js?v=bf25696b2d"></script>
+<script src="js/AI.js?v=99e734329b"></script>
+<script src="js/MapEngine.js?v=42b406429f"></script>
+<script src="js/UIManager.js?v=6e934c4182"></script>
+<script src="js/GameLoop.js?v=a6e06a22cc"></script>
 <script src="js/Tutorial.js?v=53ff18fd7f"></script>
-<script src="js/main.js?v=320ec3a0ec"></script>
+<script src="js/main.js?v=afbb512add"></script>
 </body>
 </html>

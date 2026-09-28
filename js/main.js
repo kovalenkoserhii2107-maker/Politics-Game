@@ -14,6 +14,7 @@ class GameCore {
 
         document.addEventListener('mapBackground', () => this.ui.closePanel());
         document.addEventListener('straitClick', e => this.ui.showStraits(this.data, e.detail));
+        document.addEventListener('fleetClick', e => this.ui.showFleet(this.data, e.detail));
         document.addEventListener('panelClosed', () => {
             this.map.clearSelection();
             this.cancelTargeting();
@@ -152,7 +153,8 @@ class GameCore {
         }
         if (action === 'open-finance') { this.ui.hideModal('gov-modal'); this.openFinance(); return; }
         if (action === 'open-gov') { this.ui.hideModal('finance-modal'); this.openGovernment(); return; }
-        if (action === 'open-straits') { this.ui.hideModal('finance-modal'); this.ui.showStraits(d); return; }
+        if (action === 'open-straits') { this.ui.hideModal('finance-modal'); this.ui.hideModal('fleet-modal'); this.ui.showStraits(d); return; }
+        if (action === 'open-fleet') { this.ui.showFleet(d, btn.dataset.region || null); return; }
         if (d.gameOver) return;
         if (action.startsWith('rg-')) { this.regionsAction(action, btn); return; }
         if (['invest', 'cancel-project', 'integrate'].includes(action)) {
@@ -192,6 +194,31 @@ class GameCore {
                 : result.won ? `Восстание подавлено: гарнизон ${result.ours} против ${result.theirs}` : `Подавить не вышло: гарнизон ${result.ours} против ${result.theirs}. Нужно больше войск.`);
             this.map.refreshColors();
             this.afterStateChange();
+            return;
+        }
+        if (action.startsWith('fleet-')) {
+            let result;
+            if (action === 'fleet-build') {
+                const zone = document.querySelector(`[data-fleet-zone="${btn.dataset.region}"]`)?.value;
+                result = d.act('buildShips', btn.dataset.region, btn.dataset.type, Number(btn.dataset.n), zone || Navy.seasOf(btn.dataset.region)[0]);
+                if (result.ok) this.ui.toast(`Верфь: ${btn.dataset.n} × ${SHIPS[btn.dataset.type].name}, готово через ${result.turns} ход.`);
+            } else if (action === 'fleet-cancel') {
+                result = d.act('cancelShips', btn.dataset.region);
+                if (result.ok) this.ui.toast(`Стройка отменена, возвращено ${this.ui.money(result.refund)}`);
+            } else if (action === 'fleet-move') {
+                const fleet = Navy.fleet(d, btn.dataset.from, d.playerCountry) || {};
+                const busy = Navy.ordered(d, d.playerCountry, btn.dataset.from);
+                const ships = Object.fromEntries(Object.entries(fleet).map(([k, n]) => [k, n - (busy[k] || 0)]));
+                result = d.act('moveFleet', btn.dataset.from, btn.dataset.to, ships);
+                if (result.ok) this.ui.toast(`Эскадра выйдет в ${Navy.zones()[btn.dataset.to].name} в конце хода`);
+            } else if (action === 'fleet-unmove') {
+                result = d.act('cancelFleetMove', btn.dataset.from, btn.dataset.to);
+            }
+            if (!result || !result.ok) { if (result && result.reason) this.ui.toast(result.reason); return; }
+            this.ui.refreshFleet(d);
+            this.map.drawArmyMarkers();
+            this.loop.updateTopBarUI();
+            SaveGame.save(d);
             return;
         }
         if (action === 'strait-mode') {
@@ -736,7 +763,7 @@ class GameCore {
     onNewWorld(report) {
         this.cancelTargeting();
         this.ui.closePanel();
-        for (const id of ['diplo-modal', 'campaign-modal', 'gov-modal', 'finance-modal', 'straits-modal', 'science-modal', 'decision-modal', 'trade-modal', 'regions-modal']) this.ui.hideModal(id);
+        for (const id of ['diplo-modal', 'campaign-modal', 'gov-modal', 'finance-modal', 'straits-modal', 'fleet-modal', 'science-modal', 'decision-modal', 'trade-modal', 'regions-modal']) this.ui.hideModal(id);
         this.loop.failed = false;
         this.loop.awaitingSummary = false;
         if (report) this.loop.showReport(report);
@@ -1118,6 +1145,7 @@ class GameCore {
     initTopButtons() {
         document.getElementById('gov-btn').addEventListener('click', () => this.openGovernment());
         document.getElementById('sci-btn').addEventListener('click', () => this.ui.showScience(this.data));
+        document.getElementById('fleet-btn').addEventListener('click', () => this.ui.showFleet(this.data));
         document.getElementById('money-status').addEventListener('click', () => this.openFinance());
         document.getElementById('res-status').addEventListener('click', () => {
             this.openGovernment();

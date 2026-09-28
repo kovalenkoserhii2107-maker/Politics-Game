@@ -169,10 +169,11 @@ class Economy {
         return { sales, purchases, lines };
     }
 
-    // Какая доля торговли доходит до рынка: блокада на войне, санкции,
-    // закрытые проливы.
+    // Какая доля торговли доходит до рынка: война, санкции, закрытые
+    // проливы, морская блокада.
     static reach(data, cc) {
-        return (data.enemiesOf(cc).length ? ECONOMY.WAR_TRADE : 1) * (Council.sanctioned(data, cc) ? COUNCIL.SANCTION_TRADE : 1) * Shipping.access(data, cc);
+        return (data.enemiesOf(cc).length ? ECONOMY.WAR_TRADE : 1) * (Council.sanctioned(data, cc) ? COUNCIL.SANCTION_TRADE : 1)
+            * Shipping.access(data, cc) * Navy.tradeFactor(data, cc);
     }
 
     // Торговые договоры и порты: продаём дороже, покупаем дешевле.

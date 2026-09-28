@@ -24,12 +24,13 @@ class UIManager {
         bind('close-gov-btn', () => this.hideModal('gov-modal'));
         bind('close-finance-btn', () => this.hideModal('finance-modal'));
         bind('close-straits-btn', () => this.hideModal('straits-modal'));
+        bind('close-fleet-btn', () => this.hideModal('fleet-modal'));
         bind('close-history-btn', () => this.hideModal('history-modal'));
         bind('close-diplo-btn', () => this.hideModal('diplo-modal'));
         bind('close-science-btn', () => this.hideModal('science-modal'));
         bind('close-summary-btn', () => this.closeSummary());
 
-        for (const id of ['history-modal', 'gov-modal', 'finance-modal', 'straits-modal', 'diplo-modal', 'campaign-modal', 'science-modal', 'chat-modal', 'stats-modal', 'regions-modal']) {
+        for (const id of ['history-modal', 'gov-modal', 'finance-modal', 'straits-modal', 'fleet-modal', 'diplo-modal', 'campaign-modal', 'science-modal', 'chat-modal', 'stats-modal', 'regions-modal']) {
             const modal = document.getElementById(id);
             if (modal) modal.addEventListener('click', e => { if (e.target === modal) this.hideModal(id); });
         }
@@ -498,8 +499,12 @@ class UIManager {
         tags.push(this.tag(`Лояльность ${Math.round(region.loyalty * 100)}%`, region.loyalty < 0.6 ? 'war' : ''));
         if (Council.peacekeeping(data, region) > 1) tags.push(this.tag('🪖 Миротворцы ООН: оборона +30%', ''));
         if (Nuclear.fallout(data, region.id)) tags.push(this.tag(`☢️ Заражение: ещё ${data.nuclear.fallout[region.id] - data.turn} ход., налогов нет`, 'war'));
+        const seas = Navy.seasOf(region.id);
+        if (seas.length) tags.push(this.tag(`🌊 ${seas.map(z => Navy.zones()[z].name).join(', ')}`, ''));
+        if (Navy.blockaded(data, region)) tags.push(this.tag('⚓ Блокада с моря: порт стоит', 'war'));
         if (data.revolts[region.id]) tags.push(this.tag('🔥 Восстание', 'war'));
         else if ((region.unrest || 0) >= REVOLT.WARN) tags.push(this.tag(`⚠️ Недовольство ${Math.round(region.unrest * 100)}%`, 'truce'));
+        if (isOwner && (region.development.port || 0) > 0 && seas.length) tags.push(`<button class="mini-btn panel-yard" type="button" data-action="open-fleet" data-region="${region.id}">⚓ Верфь · порт ${region.development.port}</button>`);
         document.getElementById('panel-tags').innerHTML = tags.join('');
         this.fillEconomy(data, { region });
         this.renderDevelopment(region, data);
@@ -656,6 +661,7 @@ class UIManager {
         this.hideModal('gov-modal');
         this.hideModal('finance-modal');
         this.hideModal('straits-modal');
+        this.hideModal('fleet-modal');
         this.hideModal('diplo-modal');
         this.hideModal('campaign-modal');
         this.onSummaryClose = onClose;
@@ -1221,6 +1227,24 @@ class UIManager {
         }
         document.getElementById('diplo-content').innerHTML = html;
         this.showModal('diplo-modal');
+    }
+
+    // --- флот -------------------------------------------------------------------------------------
+    showFleet(data, focus = null) {
+        this.closePanel();
+        this.showModal('fleet-modal');
+        FleetUI.render(document.getElementById('fleet-content'), data, this, focus);
+        const box = document.getElementById('fleet-content');
+        const target = focus && (document.getElementById(`squad-${focus}`) || document.getElementById(`yard-${focus}`));
+        if (target) target.scrollIntoView({ block: 'start' }); else box.scrollTop = 0;
+    }
+
+    refreshFleet(data) {
+        const modal = document.getElementById('fleet-modal');
+        if (!modal || !modal.classList.contains('active')) return;
+        const box = document.getElementById('fleet-content'), top = box.scrollTop;
+        FleetUI.render(box, data, this);
+        box.scrollTop = top;
     }
 
     // --- судоходство и проливы -----------------------------------------------------------------
