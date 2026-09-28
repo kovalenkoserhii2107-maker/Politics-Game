@@ -745,6 +745,13 @@ body.hotseat-handoff #ui-layer > :not(#hotseat-screen) { visibility: hidden; }
 .nuke-btn:disabled { opacity: 0.45; }
 .sci-card.arsenal { border-color: rgba(255, 196, 0, 0.45); }
 #world-map .region.fallout { stroke: #facc15 !important; stroke-width: calc(var(--sw) * 2.5) !important; stroke-dasharray: calc(var(--sw) * 2) calc(var(--sw) * 2); filter: saturate(0.35) brightness(0.8); }
+/* штриховка и значок заражения — поверх областей, клики проходят насквозь */
+#layer-fallout { pointer-events: none; }
+#fallout-hatch .hatch-line { fill: rgba(250, 204, 21, 0.55); }
+.fallout-hatch { fill: url(#fallout-hatch); stroke: none; }
+.fallout-mark rect { fill: #1a1300; stroke: #facc15; stroke-width: 1.5; }
+.fallout-mark text { fill: #facc15; font-size: 10px; font-weight: 800; dominant-baseline: middle; text-anchor: middle; font-family: var(--font-mono, monospace); }
+.fallout-mark .fallout-ico { font-size: 12px; }
 
 /* ООН в «Дипломатии» */
 .un-box .un-title { font-weight: 700; color: var(--text); letter-spacing: 0.02em; }

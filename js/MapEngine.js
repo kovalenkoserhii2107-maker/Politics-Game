@@ -85,6 +85,7 @@ class MapEngine {
         this.seaZoneLayer = g('layer-sea-zones');
         this.regionLayer = g('layer-regions');
         this.borderLayer = g('layer-borders');
+        this.falloutLayer = g('layer-fallout');   // штриховка заражённых областей
         this.cityLayer = g('layer-cities');
         this.regionLabelLayer = g('layer-region-labels');
         this.labelLayer = g('layer-labels');
@@ -102,7 +103,10 @@ class MapEngine {
         const defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
         defs.innerHTML = [['attack', '#ff3b2f'], ['move', '#eceef1'], ['sea', '#7fc4ff']].map(([kind, color]) =>
             `<marker id="arrow-${kind}" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="3.2" markerHeight="3.2" orient="auto" markerUnits="strokeWidth">`
-            + `<path d="M0,0 L10,5 L0,10 z" fill="${color}"/></marker>`).join('');
+            + `<path d="M0,0 L10,5 L0,10 z" fill="${color}"/></marker>`).join('')
+            // косая штриховка заражения; шаг держим постоянным на экране (setStrokeScale)
+            + '<pattern id="fallout-hatch" patternUnits="userSpaceOnUse" width="1" height="1" patternTransform="rotate(45)">'
+            + '<rect class="hatch-line" x="0" y="0" width="0.35" height="1"/></pattern>';
         this.svg.insertBefore(defs, this.svg.firstChild);
         this.changed = [];
 
@@ -217,6 +221,7 @@ class MapEngine {
             path.classList.toggle('operation', targets.has(id));
             path.classList.toggle('fallout', Nuclear.fallout(this.data, id));
         }
+        this.drawFallout();
         for (const line of this.borders || []) {
             const on = this.data.getRegion(line.a).owner !== this.data.getRegion(line.b).owner;
             if (on !== line.on) { line.on = on; line.el.classList.toggle('on', on); }
@@ -438,6 +443,16 @@ class MapEngine {
         this.lastK = k;
         this.svg.style.setProperty('--sw', (1 / k).toFixed(5) + 'px');
         this.svg.style.setProperty('--k', (1 / k).toFixed(5));
+        // шаг штриховки — 7 экранных пикселей, линия — 2.5
+        const hatch = this.svg.querySelector('#fallout-hatch');
+        if (hatch) {
+            const step = 7 / k;
+            hatch.setAttribute('width', step.toFixed(4));
+            hatch.setAttribute('height', step.toFixed(4));
+            const line = hatch.firstChild;
+            line.setAttribute('width', (2.5 / k).toFixed(4));
+            line.setAttribute('height', step.toFixed(4));
+        }
     }
 
     // Карту нельзя утащить за край: центр экрана остаётся над миром.
@@ -1113,6 +1128,37 @@ class MapEngine {
         if (num >= 1000000) return (num / 1000000).toFixed(1) + 'M';
         if (num >= 1000) return (num / 1000).toFixed(1) + 'K';
         return String(Math.floor(num));
+    }
+
+    // --- ядерное заражение ------------------------------------------------------
+    // Поверх области — жёлтая косая штриховка, в центре — значок ☢️ с числом
+    // оставшихся ходов. Держится, пока длится заражение.
+    drawFallout() {
+        if (!this.falloutLayer || typeof Nuclear === 'undefined') return;
+        const ns = 'http://www.w3.org/2000/svg';
+        const hot = Object.keys((this.data.nuclear && this.data.nuclear.fallout) || {}).filter(id => Nuclear.fallout(this.data, id));
+        const key = hot.map(id => `${id}:${this.data.nuclear.fallout[id]}`).join(',') + '@' + this.data.turn;
+        if (key === this.falloutKey) return;
+        this.falloutKey = key;
+        this.falloutLayer.innerHTML = '';
+        const fragment = document.createDocumentFragment();
+        for (const id of hot) {
+            const src = this.paths.get(id), region = this.data.getRegion(id);
+            if (!src || !region) continue;
+            const hatch = document.createElementNS(ns, 'path');
+            hatch.setAttribute('d', src.getAttribute('d'));
+            hatch.setAttribute('class', 'fallout-hatch');
+            fragment.appendChild(hatch);
+            const left = this.data.nuclear.fallout[id] - this.data.turn;
+            const mark = document.createElementNS(ns, 'g');
+            mark.setAttribute('class', 'fallout-mark');
+            mark.setAttribute('transform', `translate(${region.lx},${region.ly})`);
+            // над значком войск: тот стоит ровно в центре области
+            mark.innerHTML = `<title>Радиоактивное заражение: ещё ${left} ход.</title><g class="badge-inner"><g transform="translate(0,-19)">`
+                + `<rect x="-17" y="-8" width="34" height="16" rx="8"/><text class="fallout-ico" x="-8" y="0.5">☢</text><text x="4" y="0.5">${left}</text></g></g>`;
+            fragment.appendChild(mark);
+        }
+        this.falloutLayer.appendChild(fragment);
     }
 
     // --- стрелки приказов --------------------------------------------------------
