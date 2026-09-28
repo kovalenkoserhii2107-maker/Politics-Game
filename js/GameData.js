@@ -82,6 +82,7 @@ class GameData {
         this.operations = [];       // совместные операции союзников: { by, target, turn }
         this.garrisons = {};        // войска в помощь союзнику: область → страна → войска
         Council.init(this);
+        Credit.init(this);          // облигации и программы МВФ
         this.diploEvents = [];      // что случилось в дипломатии между отчётами хода
         // Страны под управлением людей. В одиночной игре — только игрок; в
         // сетевой — все участники. Задания, решения и журнал каждого, кроме
@@ -464,6 +465,32 @@ class GameData {
         return { ok: true, text: this.describeForces(forces) };
     }
 
+    // Контингент ИИ-союзника: из своей области на границе с союзником — по
+    // его территории в любую его область (обычно на фронт).
+    deployToAlly(fromId, toId, forces, countryId) {
+        const from = this.regions[fromId], to = this.regions[toId];
+        if (!from || !to || !this.validateForces(fromId, forces, countryId) || to.owner === countryId || !Diplomacy.isAllied(this, countryId, to.owner)
+            || !this.getNeighbors(fromId).some(id => this.regions[id] && this.regions[id].owner === to.owner)) return { ok: false };
+        const byCountry = this.garrisons[toId] || (this.garrisons[toId] = {});
+        const army = byCountry[countryId] || (byCountry[countryId] = this.emptyArmy());
+        for (const [unitId, n] of Object.entries(forces)) { from.army[unitId] -= n; army[unitId] += n; }
+        if (this.isHuman(to.owner)) this.diploEvents.push({ type: 'troops', for: to.owner, message: `🛡️ Союзник ${this.countries[countryId].name} перебросил войска вам на фронт, в ${to.name}: ${this.describeForces(forces)}. Содержит их сам, обороняют вместе с вашими.` });
+        return { ok: true };
+    }
+
+    // Экспедиционный отряд дальнего союзника: набран за его счёт прямо в
+    // области союзника и стоит там как контингент.
+    stationExpedition(countryId, toId, forces, cost) {
+        const c = this.countries[countryId], to = this.regions[toId];
+        if (!c || !to || c.money < cost || to.owner === countryId || !Diplomacy.isAllied(this, countryId, to.owner)) return { ok: false };
+        c.money -= cost;
+        const byCountry = this.garrisons[toId] || (this.garrisons[toId] = {});
+        const army = byCountry[countryId] || (byCountry[countryId] = this.emptyArmy());
+        for (const [unitId, n] of Object.entries(forces)) army[unitId] += n;
+        if (this.isHuman(to.owner)) this.diploEvents.push({ type: 'troops', for: to.owner, message: `🛡️ Союзник ${c.name} прислал экспедиционный отряд в ${to.name}: ${this.describeForces(forces)}. Содержит его сам, обороняет область вместе с вашими.` });
+        return { ok: true };
+    }
+
     // Куда вернуть контингент: соседняя своя область, иначе столица, иначе любая своя.
     garrisonHome(regionId, countryId) {
         const near = this.getNeighbors(regionId).map(id => this.regions[id]).find(r => r && r.owner === countryId);
@@ -574,6 +601,7 @@ class GameData {
         const check = this.canDeclareWar(attacker, target);
         if (!check.ok) return check;
         this.countries[attacker].influence -= RULES.WAR_COST;
+        Credit.onDeclareWar(this, attacker);
         const joined = this.startWar(attacker, target, false);
         return { ok: true, joined };
     }
@@ -1539,7 +1567,7 @@ class GameData {
         let tax = 0, upkeep = 0, social = 0;
         if (!country || !this.regionsByCountry[countryId]?.length) {
             // interest обязателен: без него расходы страны с долгами — NaN
-            return { income: 0, expense: 0, tax, sales: 0, purchases: 0, upkeep, social, interest: 0, trade: { lines: {} } };
+            return { income: 0, expense: 0, tax, sales: 0, purchases: 0, upkeep, social, interest: 0, bonds: 0, imf: 0, trade: { lines: {} } };
         }
         const policy = POLICIES[country.policy] || POLICIES.balanced;
         for (const region of this.getCountryRegions(countryId)) {
@@ -1560,9 +1588,10 @@ class GameData {
         const sales = trade.sales * (1 + bonus) * cycle.trade, purchases = trade.purchases * (1 - bonus);
         const debt = country.debt || 0;
         const interest = debt ? Math.round(debt * Economy.rateFor(debt, tax)) : 0;
+        const { bonds, imf } = Credit.due(this, countryId);
         return {
-            income: tax + sales, expense: upkeep + social + purchases + interest,
-            tax, sales, purchases, upkeep, social, interest, trade, tradeBonus: bonus,
+            income: tax + sales, expense: upkeep + social + purchases + interest + bonds + imf,
+            tax, sales, purchases, upkeep, social, interest, bonds, imf, trade, tradeBonus: bonus,
         };
     }
 
@@ -1581,6 +1610,9 @@ class GameData {
         c.money += amount;
         return { ok: true, amount };
     }
+
+    issueBonds(amount, countryId = this.playerCountry) { return Credit.issueBonds(this, countryId, amount); }
+    takeImf(countryId = this.playerCountry) { return Credit.takeImf(this, countryId); }
 
     repay(amount, countryId = this.playerCountry) {
         const c = this.countries[countryId];
@@ -1627,7 +1659,7 @@ class GameData {
             balance.sales = Math.round(sales * (1 + bonus) * Economy.cycle(this).trade);
             balance.purchases = Math.round(purchases * (1 - bonus));
             balance.income = balance.tax + balance.sales;
-            balance.expense = balance.upkeep + balance.social + balance.purchases + balance.interest;
+            balance.expense = balance.upkeep + balance.social + balance.purchases + balance.interest + balance.bonds + balance.imf;
             balances[country.id] = balance;
             const net = Math.round(balance.income - balance.expense);
             country.lastNetIncome = Number.isFinite(net) ? net : 0;
@@ -1636,12 +1668,22 @@ class GameData {
             if (economy) this.applyShortages(country, economy, events);
             country.influence = Math.min(RULES.INFLUENCE_MAX, country.influence + RULES.INFLUENCE_PER_TURN);
 
+            Credit.settle(this, country.id, events);
+
+            // Пустая казна: первый ход — предупреждение, дальше армия
+            // разбегается тем сильнее, чем глубже дыра относительно
+            // содержания армии (от 3% до 10% за ход).
+            const credit = Credit.peek(this, country.id);
             if (country.money < 0) {
-                this.applyDesertion(country.id);
+                const broke = Credit.of(this, country.id).broke = ((credit && credit.broke) || 0) + 1;
+                const depth = -country.money / Math.max(1, balance.upkeep);
+                if (broke >= 2) this.applyDesertion(country.id, Math.min(RULES.DESERTION, 0.03 + 0.02 * depth));
                 if (this.isHuman(country.id)) {
-                    events.push({ type: 'bankrupt', for: country.id, message: '💸 Казна пуста: часть войск дезертировала, лояльность падает.' });
+                    events.push({ type: 'bankrupt', for: country.id, message: broke >= 2
+                        ? '💸 Казна пуста: часть войск дезертировала, лояльность падает. Выпустите облигации, возьмите кредит или программу МВФ в «Финансах».'
+                        : '💸 Казна ушла в минус. Со следующего хода армия начнёт разбегаться — займите в «Финансах»: облигации, банк или МВФ.' });
                 }
-            }
+            } else if (credit && credit.broke) credit.broke = 0;
         }
 
         // Лояльность тянется к цели: захваченные земли, высокие налоги, голод
@@ -1701,11 +1743,15 @@ class GameData {
         if (pct('goods') >= 5) events.push({ type: 'shortage', for: to, message: `📦 Не хватает товаров (${pct('goods')}%): налоги собираются хуже, растёт недовольство.` });
     }
 
-    applyDesertion(countryId) {
+    // Малые отряды теряют бойца с вероятностью доли — а не каждый ход по
+    // одному, как раньше: иначе гарнизоны из двух-трёх отрядов таяли за ход.
+    applyDesertion(countryId, share = RULES.DESERTION) {
         for (const region of this.getCountryRegions(countryId)) {
             for (const unitId of Object.keys(UnitsDB)) {
                 const count = region.army[unitId];
-                if (count > 0) region.army[unitId] -= Math.max(1, Math.floor(count * RULES.DESERTION));
+                if (count <= 0) continue;
+                const exact = count * share;
+                region.army[unitId] -= Math.min(count, Math.floor(exact) + (Math.random() < exact % 1 ? 1 : 0));
             }
             region.loyalty = Math.max(0.3, region.loyalty - 0.05);
         }
@@ -1836,6 +1882,7 @@ class GameData {
             council: Council.serialize(this),
             traits: { ...(this.traits || {}) },
             nuclear: Nuclear.serialize(this),
+            credit: Credit.serialize(this),
             chronicle: this.chronicle ? structuredClone(this.chronicle) : undefined,
             diplomacy: Diplomacy.serialize(this),
             missions: this.missions.map(m => ({ ...m, reward: { ...m.reward } })),
@@ -1915,6 +1962,7 @@ class GameData {
         if (save.chronicle !== undefined && !Score.validChronicle(save.chronicle)) fail('хроника');
         if (save.council !== undefined && !Council.valid(save.council)) fail('совет');
         if (save.nuclear !== undefined && !Nuclear.valid(save.nuclear)) fail('ядерное оружие');
+        if (save.credit !== undefined && !Credit.valid(save.credit)) fail('займы');
         if (save.traits !== undefined && !World.valid(save.traits)) fail('характеры стран');
         if (save.garrisons !== undefined && (!save.garrisons || typeof save.garrisons !== 'object' || !Object.entries(save.garrisons).every(([id, byCountry]) =>
             RegionsDB[id] && byCountry && typeof byCountry === 'object' && Object.entries(byCountry).every(([cc, army]) =>
@@ -2049,6 +2097,7 @@ class GameData {
         if (save.traits && Object.keys(save.traits).length) data.traits = { ...save.traits }; else World.rollTraits(data);
         // партии до ядерного оружия: стартовые арсеналы, как в новой игре
         if (save.nuclear) Nuclear.restore(data, save.nuclear); else Nuclear.init(data);
+        if (save.credit) Credit.restore(data, save.credit); else Credit.init(data);
         // хроника: у старых партий графики начинаются с момента загрузки
         if (save.chronicle) data.chronicle = structuredClone(save.chronicle);
         else Score.initChronicle(data);
@@ -2267,5 +2316,5 @@ GameData.COMMANDS = {
     setTrade: 0, research: 0, startResearch: 0, cancelResearch: 0, setPolicy: 0, setTaxRate: 0,
     declareWar: 0, proposePeace: -1, diplomacyAction: -1, answerDecision: -1,
     nuclearBuild: 1, nuclearCancel: 0, nuclearStrike: 2,
-    claimMission: -1, skipMission: -1, transfer: -1, cedeRegion: -1, borrow: 1, repay: 1, suppressRevolt: -1, appeaseRevolt: -1, proposeTrade: -1, giveTroops: 3, planOperation: -1,
+    claimMission: -1, skipMission: -1, transfer: -1, cedeRegion: -1, borrow: 1, repay: 1, issueBonds: 1, takeImf: 0, suppressRevolt: -1, appeaseRevolt: -1, proposeTrade: -1, giveTroops: 3, planOperation: -1,
 };

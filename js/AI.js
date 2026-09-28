@@ -22,6 +22,10 @@ const AI_RULES = {
     RESERVE_TURNS: 3,           // запас казны в ходах содержания армии, который ИИ не тратит на науку
     MODERNIZE_RESERVE: 1.5,     // модернизирует, когда денег больше этого числа запасов
     ARMS_SHARE: 0.3,            // в мирное время на армию — до такой доли дохода (× характер)
+    ALLY_HELP_EVERY: 2,         // союзнику, на которого напали, войска — раз в столько ходов
+    ALLY_HELP_SHARE: 0.35,      // доля войск приграничной области, уходящая союзнику
+    ALLY_HELP_CAP: 0.3,         // за границей — не больше такой доли своей силы
+    EXPEDITION_WEEKS: 1,        // дальний союзник тратит на экспедицию до недели налогов
 };
 
 class AI {
@@ -50,6 +54,7 @@ class AI {
             this.planNuclear(country);
             const enemies = d.enemiesOf(country.id);
             this.disbandIfBroke(country, enemies);
+            this.helpAllies(country, enemies);
             if (enemies.length) this.planWar(country, enemies);
             else {
                 if (playerNeighbours.has(country.id)) this.planPeace(country);
@@ -111,6 +116,76 @@ class AI {
         const capital = d.regions[country.capital];
         const where = border.length ? border : capital && capital.owner === country.id ? [capital] : [];
         if (where.length) this.recruit(country, where, new Set(rival ? [rival] : []), AI_RULES.PEACE_SPEND_SHARE);
+    }
+
+    // Оборонительный союз — не только деньги: союзнику, на которого напали,
+    // сосед по границе отправляет контингент в его приграничную область,
+    // а дальний союзник за свой счёт собирает экспедиционный отряд прямо
+    // там. Контингент обороняет область вместе с хозяином, содержит его
+    // страна-отправитель. Когда у союзника войны больше нет — отзываем.
+    helpAllies(country, enemies) {
+        const d = this.data;
+        for (const g of d.garrisonsOf(country.id)) {
+            const owner = d.regions[g.region].owner;
+            if (!d.enemiesOf(owner).length) d.recallGarrison(g.region, country.id);
+        }
+        if ((d.turn + country.id.charCodeAt(1)) % AI_RULES.ALLY_HELP_EVERY !== 0) return;
+        const myEnemies = new Set(enemies);
+        const own = d.calculateMilitaryPower(country.id);
+        // своего фронта нет (или воюем с тем, до кого не дотянуться) — можно слать экспедицию
+        const hasFront = enemies.length > 0 && d.getCountryRegions(country.id).some(r => d.getNeighbors(r.id).some(id => d.regions[id] && myEnemies.has(d.regions[id].owner)));
+        for (const ally of Diplomacy.allies(d, country.id)) {
+            // союз оборонительный: помогаем тому, на кого напали
+            const aggressor = Credit.aggressorAgainst(d, ally);
+            if (!aggressor) continue;
+            const foes = new Set(d.enemiesOf(ally));
+            const front = d.getCountryRegions(ally).filter(r => d.getNeighbors(r.id).some(id => d.regions[id] && foes.has(d.regions[id].owner)));
+            if (!front.length) continue;
+            const abroad = d.garrisonsOf(country.id).reduce((s, g) => s + d.armyPower(g.army, country.id), 0);
+            if (abroad >= own * AI_RULES.ALLY_HELP_CAP) continue;
+            const frontIds = new Set(front.map(r => r.id));
+            if (!this.sendToAlly(country, ally, front, myEnemies) && !hasFront) this.expedition(country, ally, front);
+        }
+    }
+
+    // Сосед союзника: часть войск из своей приграничной с ним области,
+    // которой самой ничего не грозит, — по его территории в самую слабую
+    // фронтовую область.
+    sendToAlly(country, ally, front, myEnemies) {
+        const d = this.data;
+        const to = front.reduce((a, b) => (d.armyPower(b.army, ally) < d.armyPower(a.army, ally) ? b : a));
+        for (const region of d.getCountryRegions(country.id)) {
+            if (d.getNeighbors(region.id).some(id => d.regions[id] && myEnemies.has(d.regions[id].owner))) continue;
+            if (!d.getNeighbors(region.id).some(id => d.regions[id] && d.regions[id].owner === ally)) continue;
+            const available = d.getAvailableArmy(region.id);
+            const forces = {};
+            let any = false;
+            for (const unitId of Object.keys(UnitsDB)) {
+                const keep = unitId === 'infantry' ? 1 : 0;
+                forces[unitId] = Math.max(0, Math.min((available[unitId] || 0) - keep, Math.floor((available[unitId] || 0) * AI_RULES.ALLY_HELP_SHARE)));
+                if (forces[unitId] > 0) any = true;
+            }
+            if (!any) continue;
+            if (d.deployToAlly(region.id, to.id, forces, country.id).ok) return true;
+        }
+        return false;
+    }
+
+    // Дальний союзник: экспедиционный отряд на неделю налогов, если казна позволяет.
+    expedition(country, ally, front) {
+        const d = this.data;
+        if (this.richness(country) < 1.2) return false;
+        const budget = Math.min(d.countryBalance(country.id).tax * AI_RULES.EXPEDITION_WEEKS, country.money * 0.1);
+        const kinds = ['infantry', 'artillery', 'antiair'];
+        const forces = {};
+        let cost = 0;
+        for (const unitId of kinds) {
+            const n = Math.floor(budget / kinds.length / UnitsDB[unitId].buildCost);
+            if (n > 0) { forces[unitId] = n; cost += n * UnitsDB[unitId].buildCost; }
+        }
+        if (!cost) return false;
+        const to = front.reduce((a, b) => (d.armyPower(b.army, ally) < d.armyPower(a.army, ally) ? b : a));
+        return d.stationExpedition(country.id, to.id, forces, cost).ok;
     }
 
     // Восстание: если есть деньги — уступки, иначе подавляем, когда гарнизон сильнее.

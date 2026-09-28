@@ -311,7 +311,10 @@ input[type=range] { width: 100%; cursor: pointer; accent-color: var(--ui-accent)
 
 
 /* ================= НОВЫЕ ЭЛЕМЕНТЫ ================= */
-:root { --nav-h: 0px; --safe-b: env(safe-area-inset-bottom, 0px); --safe-t: env(safe-area-inset-top, 0px); }
+/* --vp-fix: зазор снизу у приложения с домашнего экрана iOS (см. main.js);
+   --nav-pad-b: под кнопками — зона «полоски домой», но не вся: половины хватает */
+:root { --nav-h: 0px; --safe-b: env(safe-area-inset-bottom, 0px); --safe-t: env(safe-area-inset-top, 0px); --vp-fix: 0px;
+    --nav-pad-b: max(6px, calc(var(--safe-b) - 14px)); }
 body { overscroll-behavior: none; }
 #top-bar { padding-top: calc(10px + var(--safe-t)); }
 .nav-btn .ico { display: none; }
@@ -450,7 +453,9 @@ body { overscroll-behavior: none; }
 
 /* ================= ТЕЛЕФОН ================= */
 @media (max-width: 768px) {
-    :root { --nav-h: calc(62px + var(--safe-b)); }
+    /* --nav-h — сколько панель занимает над низом окна; сама панель
+       ещё и уходит вниз на --vp-fix */
+    :root { --nav-h: calc(60px + var(--nav-pad-b) - var(--vp-fix)); }
 
     #top-bar { padding: calc(6px + var(--safe-t)) 10px 6px; font-size: 12px; }
     #top-bar .stats { flex: 1 1 100%; justify-content: space-between; gap: 8px; }
@@ -458,8 +463,8 @@ body { overscroll-behavior: none; }
 
     /* кнопки уезжают в нижнюю навигацию — до них достаёт большой палец */
     #action-bar {
-        position: fixed; left: 0; right: 0; bottom: 0; height: var(--nav-h);
-        padding: 6px 8px var(--safe-b); box-sizing: border-box; gap: 6px;
+        position: fixed; left: 0; right: 0; bottom: calc(-1 * var(--vp-fix)); height: calc(var(--nav-h) + var(--vp-fix));
+        padding: 6px 8px var(--nav-pad-b); box-sizing: border-box; gap: 6px;
         display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)) minmax(0, 1.2fr); gap: 2px;
         background: rgba(11,18,33,0.98); border-top: 1px solid var(--ui-border); z-index: 30;
     }
@@ -533,7 +538,7 @@ body { overscroll-behavior: none; }
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Exo+2:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;700&display=swap">
 <link rel="stylesheet" href="css/campaign.css?v=fe17f3ba7c">
-<link rel="stylesheet" href="css/theme.css?v=fd46e18f2e">
+<link rel="stylesheet" href="css/theme.css?v=29b07c5a75">
 <link rel="stylesheet" href="css/map.css?v=cd9372e1e8">
 <link rel="stylesheet" href="css/start.css?v=5288a0c5d1">
 </head>
@@ -691,13 +696,14 @@ body { overscroll-behavior: none; }
         <div class="stat-group stats">
             <button class="stat-item money-status" id="money-status" type="button" aria-label="Казна: открыть финансы">
                 <span>Казна</span> <b class="stat-val">$<span id="glob-money">0</span></b>
-                <span id="glob-net"></span></button>
-            <div class="stat-item"><span>Влияние</span> <b class="stat-val" id="glob-influence">0</b></div>
+                <span class="stat-sub" id="glob-net"></span></button>
+            <div class="stat-item"><span>Влияние</span> <b class="stat-val" id="glob-influence">0</b> <span class="stat-sub" id="glob-influence-sub"></span></div>
             <button class="stat-item res-status" id="res-status" type="button" aria-label="Ресурсы: открыть экономику">
                 <span>Ресурсы</span>
                 <span class="res-dots"><i data-k="food">🌾</i><i data-k="energy">⚡</i><i data-k="goods">📦</i></span>
+                <span class="stat-sub" id="res-sub"></span>
             </button>
-            <div class="stat-item"><span>Дата</span> <b class="stat-val" id="glob-date">1 Января 2024</b></div>
+            <div class="stat-item"><span>Дата</span> <b class="stat-val" id="glob-date">1 Января</b> <span class="stat-sub" id="glob-year">2024</span></div>
         </div>
         <div class="stat-group" id="action-bar">
             <button id="diplo-btn" class="top-btn nav-btn" aria-label="Дипломатия"><span class="ico">🤝</span><span class="lbl"><span class="lbl-xl">Дипломатия</span><span class="lbl-xs">Дипл.</span></span><span id="war-badge" class="war-badge"></span></button>
@@ -902,9 +908,15 @@ body { overscroll-behavior: none; }
 
     <!-- КАРТОЧКА ОБЛАСТИ / СТРАНЫ -->
     <div id="side-panel" class="ui-element">
-        <div class="sheet-handle" id="sheet-handle" aria-label="Закрыть"></div>
-        <button class="close-btn" id="close-panel-btn">✕</button>
-        <div id="panel-badge" class="badge">Уровень</div>
+        <!-- шапка карточки закреплена: закрыть можно, не листая наверх -->
+        <div class="panel-head" id="panel-head">
+            <div class="sheet-handle" id="sheet-handle" aria-label="Закрыть"></div>
+            <div class="panel-head-row">
+                <div id="panel-badge" class="badge">Уровень</div>
+                <span class="panel-head-name" id="panel-head-name"></span>
+                <button class="close-btn" id="close-panel-btn" type="button" aria-label="Закрыть">✕</button>
+            </div>
+        </div>
         <h2 id="panel-title">Название</h2>
         <div id="panel-owner-wrap">
             <span id="panel-color" class="owner-flag"></span>
@@ -1002,15 +1014,16 @@ body { overscroll-behavior: none; }
 <script src="js/Trade.js?v=8f3185be41"></script>
 <script src="js/Council.js?v=f5ddde9199"></script>
 <script src="js/Nuclear.js?v=a5857af620"></script>
-<script src="js/World.js?v=21ad371561"></script>
+<script src="js/World.js?v=78a2b0d1d0"></script>
+<script src="js/Credit.js?v=dce37b26c3"></script>
 <script src="js/Charts.js?v=01f1ed532c"></script>
-<script src="js/Finance.js?v=c7779d7612"></script>
-<script src="js/GameData.js?v=4aeb717ca6"></script>
-<script src="js/AI.js?v=59728b4daf"></script>
+<script src="js/Finance.js?v=fd90fd95c9"></script>
+<script src="js/GameData.js?v=20ee919bc1"></script>
+<script src="js/AI.js?v=253c51b5af"></script>
 <script src="js/MapEngine.js?v=08fa07fcde"></script>
-<script src="js/UIManager.js?v=a5d7aaf0c8"></script>
-<script src="js/GameLoop.js?v=67dc6062e8"></script>
+<script src="js/UIManager.js?v=8f5f882771"></script>
+<script src="js/GameLoop.js?v=c8c80b1010"></script>
 <script src="js/Tutorial.js?v=53ff18fd7f"></script>
-<script src="js/main.js?v=ade3e2c2ac"></script>
+<script src="js/main.js?v=8ad907e487"></script>
 </body>
 </html>

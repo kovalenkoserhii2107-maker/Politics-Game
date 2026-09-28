@@ -16,7 +16,9 @@ const FINANCE_LINES = [
     { key: 'purchases', name: 'Закупка ресурсов', sign: -1 },
     { key: 'social', name: 'Социальная программа', sign: -1 },
     { key: 'upkeep', name: 'Содержание армии', sign: -1 },
-    { key: 'interest', name: 'Проценты по долгу', sign: -1 },
+    { key: 'interest', name: 'Проценты банкам', sign: -1, optional: true },
+    { key: 'bonds', name: 'Выплаты по облигациям', sign: -1, optional: true },
+    { key: 'imf', name: 'Выплаты МВФ', sign: -1, optional: true },
 ];
 
 const FINANCE_CHART = { HEIGHT: 170, PAD: { top: 12, right: 12, bottom: 22, left: 44 }, BAR_MAX: 24 };
@@ -57,19 +59,21 @@ class Finance {
         const net = balance.income - balance.expense;
         const turns = Finance.turns(data);
         const last = turns.length ? turns[turns.length - 1] : null;
-        const debt = player.debt || 0, limit = Economy.debtLimit(data, player.id);
+        const bonds = Credit.bondsOwed(data, player.id), imf = Credit.peek(data, player.id)?.imf;
+        const debt = (player.debt || 0) + bonds + (imf ? imf.left : 0);
+        const parts = [['банк', player.debt || 0], ['облигации', bonds], ['МВФ', imf ? imf.left : 0]].filter(([, v]) => v);
         const signed = v => `<span class="${v >= 0 ? 'pos' : 'neg'}">${Finance.money(v, true)}</span>`;
 
         const tiles = `<div class="fin-tiles">
             <div class="fin-tile hero"><span>Казна</span><b>${Finance.money(player.money)}</b></div>
             <div class="fin-tile"><span>Прогноз на ход</span><b>${signed(net)}</b></div>
             <div class="fin-tile"><span>Прошлый ход, факт</span><b>${last ? signed(last.f.net) : '—'}</b>${last && last.f.forecast ? `<small>прогноз был ${Finance.money(Finance.net(last.f.forecast), true)}</small>` : ''}</div>
-            <div class="fin-tile"><span>Госдолг</span><b>${Finance.money(debt)}</b><small>из ${Finance.money(limit)}</small></div>
+            <div class="fin-tile"><span>Госдолг</span><b>${Finance.money(debt)}</b><small>${parts.length ? parts.map(([k, v]) => `${k} ${Finance.money(v)}`).join(' · ') : 'долгов нет'}</small></div>
         </div>`;
 
         // прогноз: статьи с полосками, шкала общая для доходов и расходов
         const top = Math.max(1, ...FINANCE_LINES.map(l => forecast[l.key]));
-        const rows = FINANCE_LINES.filter(l => l.key !== 'interest' || forecast.interest).map(l => {
+        const rows = FINANCE_LINES.filter(l => !l.optional || forecast[l.key]).map(l => {
             const v = forecast[l.key];
             return `<div class="fin-row"><span class="fin-name">${l.name}</span>
                 <span class="fin-bar"><i class="${l.sign > 0 ? 'in' : 'out'}" style="width:${Math.max(v ? 2 : 0, v / top * 100).toFixed(1)}%"></i></span>
@@ -79,7 +83,7 @@ class Finance {
         const plan = `<h3 class="section-title">Бюджет на следующий ход · прогноз</h3>
             <div class="fin-block">${rows}
                 <div class="fin-row total"><span class="fin-name">Итого за ход</span><span></span><span class="fin-val">${signed(net)}</span></div>
-                <p class="hint">По ценам и спросу прошлого хода${war ? `, с учётом блокады (на войне торговля — ${Math.round(ECONOMY.WAR_TRADE * 100)}%)` : ''}. Цены, спрос и бои немного сдвинут факт. Помощь партнёров, события и репарации — мимо бюджета, в строке «прочее» отчёта.</p>
+                <p class="hint">По ценам и спросу прошлого хода${war ? `, с учётом блокады (на войне торговля — ${Math.round(ECONOMY.WAR_TRADE * 100)}%)` : ''}. Цены, спрос и бои немного сдвинут факт. Помощь партнёров, транши МВФ, события и репарации — мимо бюджета, в строке «прочее» отчёта.</p>
             </div>`;
 
         // прошлый ход: прогноз и факт по статьям
@@ -90,7 +94,7 @@ class Finance {
             const lines = FINANCE_LINES.filter(l => (last.f[l.key] || 0) || (fc && fc[l.key]));
             const body = lines.map(l => `<tr><th>${l.name}</th>${fc ? cell(fc[l.key], l.sign) : ''}${cell(last.f[l.key], l.sign)}</tr>`).join('');
             const total = `<tr class="total"><th>Итого по бюджету</th>${fc ? `<td>${Finance.money(Finance.net(fc), true)}</td>` : ''}<td>${signed(last.f.net)}</td></tr>`;
-            const other = Number.isFinite(last.f.other) && last.f.other ? `<tr><th>Прочее: помощь, события, репарации</th>${fc ? '<td class="muted">—</td>' : ''}<td>${Finance.money(last.f.other, true)}</td></tr>
+            const other = Number.isFinite(last.f.other) && last.f.other ? `<tr><th>Прочее: помощь, транши, события</th>${fc ? '<td class="muted">—</td>' : ''}<td>${Finance.money(last.f.other, true)}</td></tr>
                 <tr class="total"><th>Казна изменилась</th>${fc ? '<td class="muted">—</td>' : ''}<td>${signed(last.f.net + last.f.other)}</td></tr>` : '';
             compare = `<h3 class="section-title">Прошлый ход${last.date ? ` · ${Finance.esc(last.date)}` : ''}</h3>
                 <div class="fin-block"><table class="fin-table"><thead><tr><th></th>${fc ? '<th>Прогноз</th>' : ''}<th>Факт</th></tr></thead><tbody>${body}${total}${other}</tbody></table>
@@ -109,7 +113,7 @@ class Finance {
         const empty = !flow && !cash ? '<p class="hint">Графики появятся через пару ходов: игра записывает итоги в конце каждого хода.</p>' : '';
 
         container.innerHTML = `${tiles}${plan}${compare}${flow}${cash}${empty}
-            <h3 class="section-title">Долг и мировая экономика</h3><div class="fin-block" id="gov-finance"></div>
+            <h3 class="section-title">Займы</h3><div id="gov-finance"></div>
             <button class="mini-btn fin-gov" type="button" data-action="open-gov">⚖️ Налоги и политический курс — в «Правительстве»</button>`;
         ui.renderFinance(data);
 

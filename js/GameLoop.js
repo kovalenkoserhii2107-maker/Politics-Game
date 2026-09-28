@@ -454,14 +454,17 @@ class GameLoop {
         document.getElementById('glob-money').textContent = this.ui.formatNumber(player.money);
         const net = document.getElementById('glob-net');
         const value = this.getProjectedNetIncome(player.id);
-        net.textContent = value === 0 ? '(0)'
-            : (value > 0 ? '(+' : '(−') + this.ui.formatNumber(Math.abs(value)) + ')';
+        net.textContent = (value > 0 ? '+' : value < 0 ? '−' : '') + this.ui.formatNumber(Math.abs(value)) + '/ход';
+        net.title = 'Прогноз изменения казны за ход';
         net.style.color = value > 0 ? 'var(--good)' : value < 0 ? 'var(--accent-2)' : 'var(--text-3)';
 
         document.getElementById('glob-influence').textContent = player.influence;
+        document.getElementById('glob-influence-sub').textContent = player.influence >= RULES.INFLUENCE_MAX ? 'максимум' : `+${RULES.INFLUENCE_PER_TURN}/ход`;
         this.ui.updateResourceStatus(this.data);
         this.ui.updateScienceBadge(this.data);
-        document.getElementById('glob-date').textContent = this.formatDate(this.data.currentDate);
+        const date = this.data.currentDate;
+        document.getElementById('glob-date').textContent = `${date.getDate()} ${this.monthNames[date.getMonth()]}`;
+        document.getElementById('glob-year').textContent = date.getFullYear();
 
         const ready = Missions.readyCount(this.data);
         const missionBadge = document.getElementById('campaign-count');

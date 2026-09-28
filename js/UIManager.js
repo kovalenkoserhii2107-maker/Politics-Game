@@ -16,6 +16,13 @@ class UIManager {
             if (el) el.addEventListener('click', handler);
         };
         bind('close-panel-btn', () => this.closePanel());
+        // карточку пролистали — в закреплённой шапке появляется название
+        const head = document.getElementById('panel-head');
+        this.panel.addEventListener('scroll', () => {
+            const scrolled = this.panel.scrollTop > 40;
+            if (scrolled) document.getElementById('panel-head-name').textContent = document.getElementById('panel-title').textContent;
+            head.classList.toggle('scrolled', scrolled);
+        }, { passive: true });
         bind('close-campaign-btn', () => this.hideModal('campaign-modal'));
         bind('close-stats-btn', () => this.hideModal('stats-modal'));
         bind('close-regions-btn', () => this.hideModal('regions-modal'));
@@ -1214,30 +1221,84 @@ class UIManager {
 
     // --- правительство -----------------------------------------------------------------------------
     // Финансы: мировой цикл и госдолг с кнопками «занять» и «вернуть».
+    // Займы: облигации, МВФ, банк — и мировой цикл.
     renderFinance(data) {
         const player = data.countries[data.playerCountry];
-        const balance = data.countryBalance(player.id);
+        const cc = player.id;
+        const balance = data.countryBalance(cc);
         const cycle = Economy.cycle(data);
         const left = data.cycle ? Math.max(0, data.cycle.until - data.turn) : 0;
-        const debt = player.debt || 0;
-        const limit = Economy.debtLimit(data, player.id);
-        const rating = Economy.debtRating(data, player.id);
-        const rate = Economy.rateFor(debt, balance.tax);
+        const off = data.gameOver;
+        const chip = (action, amount, label, ok) => `<button class="chip help-chip" type="button" data-action="${action}" data-amount="${amount}" ${ok && !off ? '' : 'disabled'}>${label}</button>`;
+        const row = (name, value) => `<div class="budget-row"><span>${name}</span><b>${value}</b></div>`;
+        const card = (icon, title, note, body) => `<div class="fin-block loan"><div class="loan-head"><b>${icon} ${title}</b><small>${note}</small></div>${body}</div>`;
         const week = Math.max(1e5, Math.round(balance.tax / 1e5) * 1e5);
+
+        // облигации
+        const owed = Credit.bondsOwed(data, cc), bondLimit = Credit.bondLimit(data, cc);
+        const bondMax = Math.floor(Credit.bondRoom(data, cc) / (1 + BOND.RATE * BOND.GRACE) / 1e5) * 1e5;
+        const bondList = Credit.peek(data, cc)?.bonds || [];
+        const next = bondList.length ? bondList.reduce((a, b) => (b.start < a.start ? b : a)) : null;
+        const due = Credit.due(data, cc);
+        const bondStep = Math.max(BOND.MIN, week * 2);
+        const bonds = card('🏛️', 'Облигации внутреннего займа', `выплаты через ${BOND.GRACE} ходов`,
+            row('В обращении', `${this.money(owed)} <small class="muted">из ${this.money(bondLimit)}</small>`)
+            + (due.bonds ? row('Выплаты сейчас', `<span class="neg">−${this.money(due.bonds)}</span>/ход`)
+                : next ? row(`Выплаты с хода ${next.start}`, `−${this.money(next.pay)}/ход`) : '')
+            + `<div class="help-chips">${chip('bonds', bondStep, `Выпустить ${this.money(bondStep)}`, bondMax >= bondStep)}
+                ${bondMax > bondStep ? chip('bonds', bondMax, `Весь остаток ${this.money(bondMax)}`, true) : ''}</div>
+            <p class="hint">Сумма скромная — до ${BOND.WEEKS} недельных налогов, зато ${BOND.GRACE} ходов ничего не платите. Потом долг с процентом за отсрочку (+${Math.round(BOND.RATE * BOND.GRACE * 100)}%) гасится за ${BOND.TERM} ходов.</p>`);
+
+        // МВФ
+        const program = Credit.peek(data, cc)?.imf;
+        let imfBody;
+        if (program) {
+            const now = Credit.imfViolations(data, cc);
+            const conds = program.conditions.map(k => `<span class="imf-cond ${program.broken || now.includes(k) ? 'bad' : 'ok'}">${program.broken || now.includes(k) ? '⚠️' : '✓'} ${IMF_CONDITIONS[k].name}</span>`).join('');
+            imfBody = row('Программа', this.money(program.total))
+                + row('Осталось вернуть', this.money(program.left))
+                + (due.imf ? row('Выплата', `<span class="neg">−${this.money(due.imf)}</span>/ход`) : '')
+                + (program.second > 0 ? row(`Второй транш через ${Math.max(0, program.trancheAt - data.turn)} ход.`, this.money(program.second)) : '')
+                + `<div class="imf-conds">${conds}</div>`
+                + `<p class="hint ${program.broken || now.length ? 'neg' : ''}">${program.broken ? 'Программа заморожена за нарушение: долг гасится вдвое быстрее.'
+                    : now.length ? 'Сейчас условие нарушено — если не исправить до конца хода, МВФ заморозит программу.' : 'Условия соблюдаются.'}</p>`;
+        } else {
+            const offer = Credit.imfOffer(data, cc);
+            if (offer.ok) {
+                const who = offer.aggressor ? (offer.branded
+                    ? `Вы — жертва агрессии, и ООН уже признала агрессором страну ${data.countries[offer.aggressor].name}: МВФ даёт ${offer.weeks} недельных налогов и мягкие условия.`
+                    : `Вы — жертва агрессии (${data.countries[offer.aggressor].name}): МВФ даёт больше — ${offer.weeks} недельных налогов — и мягче.`) : '';
+                imfBody = row('Программа', this.money(offer.total))
+                    + row('Сразу', this.money(offer.first))
+                    + row(`Через ${IMF.TRANCHE_TURNS} ходов`, this.money(offer.total - offer.first))
+                    + `<div class="imf-conds">${offer.conditions.map(k => `<span class="imf-cond">${IMF_CONDITIONS[k].name}</span>`).join('')}</div>`
+                    + `<div class="help-chips"><button class="chip help-chip" type="button" data-action="imf" ${off ? 'disabled' : ''}>Взять программу МВФ</button></div>`
+                    + `<p class="hint">${who ? who + ' ' : ''}Крупная сумма, но выплаты — со следующего хода, ${IMF.TERM} ходов. Второй транш (${Math.round((1 - IMF.FIRST) * 100)}%) — через ${IMF.TRANCHE_TURNS} ходов, если условия соблюдены.</p>`;
+            } else imfBody = `<p class="hint">${offer.reason}.</p>`;
+        }
+        const imf = card('🏦', 'Международный валютный фонд', 'крупно, с условиями', imfBody);
+
+        // банк
+        const debt = player.debt || 0;
+        const limit = Economy.debtLimit(data, cc);
+        const rating = Economy.debtRating(data, cc);
+        const rate = Economy.rateFor(debt, balance.tax);
         const room = Math.max(0, limit - debt);
-        const chip = (action, amount, label, ok) => `<button class="chip help-chip" data-action="${action}" data-amount="${amount}" ${ok ? '' : 'disabled'}>${label}</button>`;
-        document.getElementById('gov-finance').innerHTML = `
-            <div class="cycle-line ${data.cycle ? data.cycle.phase : 'normal'}"><b>${cycle.icon} ${cycle.name}</b><small>${cycle.text}${left ? ` Ещё ${left} ход.` : ''}</small></div>
-            <div class="budget-row"><span>Госдолг</span><b>${this.money(debt)} <small class="muted">из ${this.money(limit)}</small></b></div>
-            <div class="budget-row"><span>Кредитный рейтинг</span><b class="rating-${rating.grade}">${rating.grade} · ${rating.text}</b></div>
-            <div class="budget-row"><span>Ставка за ход</span><b>${(rate * 100).toFixed(2)}%${debt ? ` · −${this.money(balance.interest)}` : ''}</b></div>
-            <div class="help-chips">
-                ${chip('borrow', week, `Занять ${this.money(week)}`, room >= week && !data.gameOver)}
-                ${chip('borrow', week * 4, `Занять ${this.money(week * 4)}`, room >= week * 4 && !data.gameOver)}
+        const bank = card('💳', 'Банковский кредит', 'проценты каждый ход',
+            row('Долг банкам', `${this.money(debt)} <small class="muted">из ${this.money(limit)}</small>`)
+            + row('Кредитный рейтинг', `<span class="rating-${rating.grade}">${rating.grade} · ${rating.text}</span>`)
+            + row('Ставка за ход', `${(rate * 100).toFixed(2)}%${debt ? ` · −${this.money(balance.interest)}` : ''}`)
+            + `<div class="help-chips">
+                ${chip('borrow', week, `Занять ${this.money(week)}`, room >= week)}
+                ${chip('borrow', week * 4, `Занять ${this.money(week * 4)}`, room >= week * 4)}
                 ${debt ? chip('repay', Math.min(debt, week), `Вернуть ${this.money(Math.min(debt, week))}`, player.money > 0) : ''}
                 ${debt > week ? chip('repay', debt, 'Вернуть всё', player.money >= debt) : ''}
             </div>
-            <p class="hint">Занять можно до ${DEBT.LIMIT_WEEKS} недельных налоговых сборов. Чем больше долг, тем выше ставка — выгодно брать на стройки, которые окупятся быстрее, или на войну, которую нельзя проиграть.</p>`;
+            <p class="hint">До ${DEBT.LIMIT_WEEKS} недельных налогов. Чем больше долг, тем выше ставка — выгодно брать на стройки, которые быстро окупятся.</p>`);
+
+        const alert = player.money < 0 ? `<div class="fin-alert">💸 Казна в минусе: со второго такого хода армия начнёт разбегаться. Быстрее всего помогут облигации — платить по ним только через ${BOND.GRACE} ходов.</div>` : '';
+        document.getElementById('gov-finance').innerHTML = `${alert}${bonds}${imf}${bank}
+            <div class="fin-block"><div class="cycle-line ${data.cycle ? data.cycle.phase : 'normal'}"><b>${cycle.icon} ${cycle.name}</b><small>${cycle.text}${left ? ` Ещё ${left} ход.` : ''}</small></div></div>`;
     }
 
     renderGovernment(data) {
@@ -1308,13 +1369,20 @@ class UIManager {
         const player = data.countries[data.playerCountry];
         if (!player || !data.regionsByCountry[player.id]?.length) return;
         const f = Economy.flows(data, player.id);
+        const states = [];
         for (const el of document.querySelectorAll('#res-status [data-k]')) {
             const key = el.dataset.k;
             const sat = player.economy ? player.economy.sat[key] : 1;
             const state = sat < 0.95 ? 'short' : f[key].prod < f[key].need ? 'import' : 'ok';
             el.className = state;
             el.title = `${RESOURCES[key].name}: ${state === 'short' ? 'не хватает' : state === 'import' ? 'докупаем на рынке' : 'хватает'}`;
+            states.push(state);
         }
+        // словами под значками — чтобы не читать состояние только по цвету
+        const sub = document.getElementById('res-sub');
+        const worst = states.includes('short') ? 'short' : states.includes('import') ? 'import' : 'ok';
+        sub.textContent = { short: 'нехватка', import: 'докупаем', ok: 'всё есть' }[worst];
+        sub.className = 'stat-sub ' + worst;
     }
 
     // --- наука ----------------------------------------------------------------------------------

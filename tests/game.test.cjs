@@ -3,8 +3,8 @@ const assert=require('node:assert/strict');
 const fs=require('node:fs'),path=require('node:path'),vm=require('node:vm');
 function engine(){
  const values=new Map();let seed=123456;const math=Object.create(Math);math.random=()=>{seed=(Math.imul(seed,1664525)+1013904223)>>>0;return seed/4294967296;};const context=vm.createContext({console,Date,Math:math,structuredClone,localStorage:{setItem:(k,v)=>values.set(k,v),getItem:k=>values.get(k)||null,removeItem:k=>values.delete(k),key:i=>[...values.keys()][i]??null,get length(){return values.size;}}});
- for(const file of ['data/CountriesDB','data/RegionsDB','data/NeighborsDB','data/CitiesDB','UnitsDB','Tech','Economy','Diplomacy','Missions','Score','Events','Unrest','Trade','Council','Nuclear','World','GameData','AI','Finance','GameLoop'])vm.runInContext(fs.readFileSync(path.join(__dirname,'../js',file+'.js'),'utf8'),context);
- return Object.assign(vm.runInContext('({GameData,AI,SaveGame,GameLoop,RegionsDB,UnitsDB,DEVELOPMENT,POLICIES,Economy,RESOURCES,ECONOMY,Tech,TECH_TREE,MODERNIZATION,Diplomacy,DIPLOMACY,Missions,MISSION_KINDS,MISSION_RULES,Score,GOALS,Events,EVENTS,DEBT,CYCLES,INFRA,Unrest,REVOLT,Trade,Council,COUNCIL,RULES,Nuclear,NUCLEAR,World,WORLD,TRAITS})',context),{localStorage:context.localStorage});
+ for(const file of ['data/CountriesDB','data/RegionsDB','data/NeighborsDB','data/CitiesDB','UnitsDB','Tech','Economy','Diplomacy','Missions','Score','Events','Unrest','Trade','Council','Nuclear','World','Credit','GameData','AI','Finance','GameLoop'])vm.runInContext(fs.readFileSync(path.join(__dirname,'../js',file+'.js'),'utf8'),context);
+ return Object.assign(vm.runInContext('({Credit,BOND,IMF,GameData,AI,SaveGame,GameLoop,RegionsDB,UnitsDB,DEVELOPMENT,POLICIES,Economy,RESOURCES,ECONOMY,Tech,TECH_TREE,MODERNIZATION,Diplomacy,DIPLOMACY,Missions,MISSION_KINDS,MISSION_RULES,Score,GOALS,Events,EVENTS,DEBT,CYCLES,INFRA,Unrest,REVOLT,Trade,Council,COUNCIL,RULES,Nuclear,NUCLEAR,World,WORLD,TRAITS})',context),{localStorage:context.localStorage});
 }
 test('casualties are invariant under splitting an attack into orders',()=>{
  const {GameData}=engine();const fight=split=>{const d=new GameData('UA',{scenario:'war2024'});for(const id of ['UA-2','RU-62']){d.regions[id].army=d.emptyArmy();d.regions[id].army.infantry=10;}
@@ -1284,4 +1284,150 @@ test('AI traits: an expansionist starts most wars, rivals are preferred, the san
     delete d.sanctions.SA;
     Diplomacy.changeRelation(d, 'SA', 'YE', 200);
     for (let i = 0; i < 30; i++) { const p = ai.pickAiWar(); assert.ok(!p || !(p.attacker === 'SA' && p.target === 'YE')); }
+});
+
+test('bonds: modest sum, nothing to pay during the grace period, then even payments; limit and save', () => {
+    const { GameData, Credit, BOND } = engine();
+    const d = new GameData('PL');
+    const pl = d.countries.PL;
+    const tax = d.countryBalance('PL').tax;
+    const money = pl.money;
+    const r = d.act('issueBonds', tax * 2);
+    assert.equal(r.ok, true);
+    assert.equal(pl.money, money + r.amount);
+    assert.equal(d.countryBalance('PL').bonds, 0, 'в отсрочку не платим');
+    // лимит: больше BOND.WEEKS недельных налогов не выпустить
+    d.act('issueBonds', tax * 100);
+    assert.ok(Credit.bondsOwed(d, 'PL') <= Credit.bondLimit(d, 'PL') + 1e5);
+    assert.equal(d.act('issueBonds', tax).ok, false);
+    const back = GameData.restore(JSON.parse(JSON.stringify(d.serialize())));
+    assert.equal(Credit.bondsOwed(back, 'PL'), Credit.bondsOwed(d, 'PL'));
+    // через отсрочку — выплаты ровными долями, долг гасится
+    d.turn += BOND.GRACE;
+    const due = d.countryBalance('PL').bonds;
+    assert.ok(due > 0);
+    const owed = Credit.bondsOwed(d, 'PL');
+    d.applyEndOfTurn();
+    assert.equal(Credit.bondsOwed(d, 'PL'), owed - due);
+    for (let i = 0; i < BOND.TERM; i++) { d.turn++; d.applyEndOfTurn(); }
+    assert.equal(Credit.bondsOwed(d, 'PL'), 0, 'погашено');
+    const bad = d.serialize(); bad.credit = { PL: { bonds: [{ owed: -1, start: 1, pay: 1 }], imf: null, imfBan: 0 } };
+    assert.throws(() => GameData.restore(bad), /займы/);
+});
+
+test('IMF: bigger and softer for a victim of aggression, refuses the aggressor; tranche and broken conditions', () => {
+    const { GameData, Credit, IMF, Council } = engine();
+    const d = new GameData('UA', { scenario: 'war2024' });
+    const peace = new GameData('PL');
+    const calm = Credit.imfOffer(peace, 'PL');
+    assert.equal(calm.ok, true);
+    assert.deepEqual([...calm.conditions], ['noWar', 'tax', 'austerity']);
+    const victim = Credit.imfOffer(d, 'UA');
+    assert.equal(victim.ok, true);
+    assert.equal(victim.aggressor, 'RU');
+    assert.deepEqual([...victim.conditions], ['noWar'], 'жертве — мягче');
+    assert.equal(victim.weeks, IMF.VICTIM_WEEKS);
+    assert.equal(Credit.imfOffer(d, 'RU').ok, false, 'агрессору — нет');
+    // ООН признала агрессора — ещё больше
+    d.sanctions.RU = d.turn + 5;
+    assert.equal(Credit.imfOffer(d, 'UA').weeks, IMF.BRANDED_WEEKS);
+    // программа: первый транш сразу, выплаты — со следующего хода
+    const money = d.countries.UA.money;
+    const r = d.act('takeImf');
+    assert.equal(r.ok, true);
+    assert.equal(d.countries.UA.money, money + r.amount);
+    assert.ok(d.countryBalance('UA').imf > 0, 'платим сразу');
+    assert.equal(d.act('takeImf').ok, false, 'вторую не дают');
+    // второй транш через TRANCHE_TURNS ходов
+    d.turn += IMF.TRANCHE_TURNS;
+    const before = Credit.peek(d, 'UA').imf.left;
+    const { events } = d.applyEndOfTurn();
+    assert.ok(Credit.peek(d, 'UA').imf.left > before, 'второй транш пришёл');
+    assert.ok(events.some(e => e.for === 'UA' && e.message.includes('второй транш')));
+    // обычная страна: налог ниже порога — программа заморожена
+    peace.countries.PL.taxRate = 0.2;
+    peace.act('takeImf');
+    peace.countries.PL.taxRate = 0.05;
+    const inf = peace.countries.PL.influence;
+    const res = peace.applyEndOfTurn();
+    const p = Credit.peek(peace, 'PL').imf;
+    assert.equal(p.broken, true);
+    assert.equal(p.second, 0);
+    assert.ok(peace.countries.PL.influence < inf + 5);
+    assert.ok(res.events.some(e => e.for === 'PL' && e.message.includes('заморозил')));
+    assert.equal(Credit.imfOffer(peace, 'PL').ok, false);
+    // объявление войны нарушает «без новых войн»
+    const w = new GameData('PL');
+    w.act('takeImf');
+    w.countries.PL.influence = 100;
+    assert.equal(w.act('declareWar', 'PL', 'BY').ok, true);
+    assert.equal(Credit.peek(w, 'PL').imf.broken, true);
+    const back = GameData.restore(JSON.parse(JSON.stringify(w.serialize())));
+    assert.equal(Credit.peek(back, 'PL').imf.broken, true);
+});
+
+test('empty treasury: the first turn in the red only warns, desertion then scales with the hole', () => {
+    const { GameData } = engine();
+    const d = new GameData('PL');
+    const army = () => d.getCountryRegions('PL').reduce((s, r) => s + Object.values(r.army).reduce((a, b) => a + b, 0), 0);
+    d.countries.PL.money = -1e9;
+    const n = army();
+    const first = d.applyEndOfTurn();
+    assert.equal(army(), n, 'первый ход — только предупреждение');
+    assert.ok(first.events.some(e => e.type === 'bankrupt' && e.message.includes('Со следующего хода')));
+    d.countries.PL.money = -1e9;
+    d.applyEndOfTurn();
+    const lost = n - army();
+    assert.ok(lost > 0 && lost <= Math.ceil(n * 0.1) + d.getCountryRegions('PL').length * 3, `ушло ${lost} из ${n}`);
+    d.countries.PL.money = 1e9;
+    d.applyEndOfTurn();
+    d.countries.PL.money = -1;
+    const again = army();
+    d.applyEndOfTurn();
+    assert.equal(army(), again, 'после выхода из минуса счётчик сброшен');
+});
+
+test('victim of aggression: neighbours may help, a UN-branded aggressor brings a coalition and arms deliveries', () => {
+    const { GameData, World, Diplomacy } = engine();
+    const d = new GameData('UA', { scenario: 'war2024' });
+    // соседи без дружбы, но в ссоре с агрессором, иногда помогают
+    for (const cc of ['MD', 'RO', 'HU', 'SK', 'PL']) { d.relations[d.pairKey(cc, 'UA')] = 5; d.relations[d.pairKey(cc, 'RU')] = -30; }
+    let neighbour = false;
+    for (let i = 0; i < 10 && !neighbour; i++) { const ev = []; World.endTurn(d, ev); neighbour = ev.some(e => e.message.includes('Соседи тоже помогли')); }
+    assert.ok(neighbour, 'соседи помогли хотя бы раз');
+    // признанный агрессор: помощь больше, и приходит оружие
+    d.sanctions.RU = d.turn + 5;
+    const w = d.un.wars[d.pairKey('RU', 'UA')];
+    d.turn = w.start + 3;
+    const money = d.countries.UA.money;
+    const power = d.calculateMilitaryPower('UA');
+    const ev = [];
+    World.endTurn(d, ev);
+    assert.ok(d.countries.UA.money > money);
+    assert.ok(ev.some(e => e.message.includes('Коалиция против агрессора')));
+    assert.ok(ev.some(e => e.message.includes('Поставки оружия')), ev.map(e => e.message).join(' | '));
+    assert.ok(d.calculateMilitaryPower('UA') > power, 'армия жертвы выросла');
+});
+
+test('AI allies defend with troops: a neighbour sends a contingent to the front, a far ally an expedition; home after the war', () => {
+    const { GameData, AI, Diplomacy } = engine();
+    const d = new GameData('CZ');
+    const ai = new AI(d);
+    // Польша — сосед Германии; Португалия — далеко
+    Diplomacy.sign(d, 'PL', 'DE', 'alliance');
+    Diplomacy.sign(d, 'PT', 'DE', 'alliance');
+    d.startWar('CZ', 'DE');
+    for (const r of d.getCountryRegions('PL')) r.army = { ...d.emptyArmy(), infantry: 40, tanks: 10 };
+    d.countries.PT.money = 5e9;
+    for (const turn of [0, 1]) { d.turn = 10 + turn; ai.helpAllies(d.countries.PL, d.enemiesOf('PL')); ai.helpAllies(d.countries.PT, d.enemiesOf('PT')); }
+    const inDE = cc => d.garrisonsOf(cc).filter(g => d.regions[g.region].owner === 'DE');
+    assert.ok(inDE('PL').length > 0, 'Польша прислала войска');
+    assert.ok(inDE('PT').length > 0, 'Португалия — экспедицию');
+    const front = id => d.getNeighbors(id).some(n => d.regions[n]?.owner === 'CZ');
+    assert.ok(inDE('PL').every(g => front(g.region)), 'на фронт с Чехией');
+    // война кончилась — отзывают
+    d.makePeace('CZ', 'DE');
+    ai.helpAllies(d.countries.PL, []);
+    ai.helpAllies(d.countries.PT, []);
+    assert.equal(d.garrisonsOf('PL').length + d.garrisonsOf('PT').length, 0);
 });

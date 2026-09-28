@@ -132,6 +132,27 @@ summary {
     background: var(--ui-bg); border-color: var(--line); border-radius: var(--r);
 }
 #side-panel { border-radius: 0 var(--r) var(--r) 0; }
+/* закреплённая шапка карточки: метка, название при прокрутке, крестик */
+.panel-head {
+    /* липнет с учётом внутреннего отступа карточки — без щели сверху */
+    position: sticky; top: -20px; z-index: 3; background: inherit;
+    margin: -20px -20px 8px; padding: 14px 20px 8px;
+    border-bottom: 1px solid transparent; transition: border-color 0.15s;
+}
+.panel-head.scrolled { border-bottom-color: var(--line); }
+.panel-head-row { display: flex; align-items: center; gap: 10px; min-height: 36px; }
+.panel-head .badge { margin: 0; flex: 0 0 auto; }
+.panel-head-name {
+    flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    font-weight: 800; color: var(--text); opacity: 0; transition: opacity 0.15s;
+}
+.panel-head.scrolled .panel-head-name { opacity: 1; }
+#side-panel .panel-head .close-btn { position: static; margin-left: auto; flex: 0 0 auto; }
+#side-panel h2 { padding-right: 0; }
+@media (max-width: 768px) {
+    .panel-head { top: -6px; margin: -6px -16px 8px; padding: 0 16px 8px; }
+    .panel-head .sheet-handle { margin-bottom: 0; }
+}
 .modal { background: rgba(5, 6, 8, 0.8); }
 .modal-header { border-bottom-color: var(--line); }
 .modal-header h2, #summary-title { color: var(--text); font-weight: 800; letter-spacing: 0.02em; }
@@ -724,20 +745,52 @@ body.hotseat-handoff #ui-layer > :not(#hotseat-screen) { visibility: hidden; }
 .stat-val { font-weight: 700; font-size: 15px; color: var(--text); font-variant-numeric: tabular-nums; white-space: nowrap; }
 #glob-net { font-size: 0.85em; font-weight: 700; margin-left: 4px; font-variant-numeric: tabular-nums; }
 .res-status { text-align: left; }
+/* строка под значением: прирост казны, влияния, год, состояние ресурсов */
+.stat-sub { font-size: 0.85em; font-weight: 600; color: var(--text-3); font-variant-numeric: tabular-nums; white-space: nowrap; }
+#glob-influence-sub, #res-sub { display: none; }
+#glob-year { color: var(--text); font-weight: 700; font-size: 1em; }
+#res-sub.ok { color: var(--good); }
+#res-sub.import { color: var(--warn); }
+#res-sub.short { color: var(--accent-2); }
+@media (min-width: 769px) {
+    /* компьютер: показатель в одну строку — подпись, значение, пояснение */
+    #top-bar .stats { flex: 1 1 auto; min-width: 0; gap: 16px 18px; }
+    #action-bar { flex: 0 0 auto; }
+    /* тесно — пояснение переносится под значение, кнопки не уезжают за край */
+    .stat-item { display: inline-flex; flex-wrap: wrap; align-items: baseline; column-gap: 5px; min-width: 0; }
+    .stat-item > * { white-space: nowrap; }
+    .stat-item > span:first-child { margin-right: 0; }
+    #glob-net { margin-left: 0; }
+    .res-status { align-items: center; }
+}
+@media (min-width: 769px) and (max-width: 1239px) {
+    /* планшет и узкое окно: показатели — строкой сверху, кнопки — под ними */
+    #top-bar { flex-wrap: wrap; row-gap: 8px; }
+    #top-bar .stats { flex: 1 1 100%; justify-content: flex-start; gap: 8px 26px; }
+    #action-bar { margin-left: auto; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+}
 
 @media (max-width: 768px) {
-    /* четыре показателя — ровными колонками: подпись сверху, значение под ней */
+    /* четыре показателя — равными колонками с тонкими разделителями; в
+       каждой три строки одной высоты: подпись, значение, пояснение */
     #top-bar .stats {
-        display: grid; grid-template-columns: 1.15fr 0.8fr 0.95fr 1.25fr; gap: 6px;
-        width: 100%; align-items: start;
+        display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, 0.8fr) minmax(0, 1fr) minmax(0, 1.1fr); gap: 0;
+        width: 100%; align-items: stretch;
     }
-    .stat-item { min-width: 0; display: flex; flex-direction: column; align-items: flex-start; }
-    .stat-item > span:first-child { font-size: 10px; margin: 0 0 3px; }
-    .stat-val { font-size: 17px; line-height: 1.15; }
-    #glob-date { font-size: 15px; white-space: normal; }
-    #glob-net { margin-left: 0; font-size: 12px; margin-top: 2px; }
-    .res-dots { gap: 8px; margin-top: 1px; }
-    .res-dots i { font-size: 19px; }
+    .stat-item {
+        min-width: 0; display: grid; grid-template-rows: 14px 24px 16px; align-items: center; justify-items: start;
+        padding: 0 6px 0 9px; border-left: 1px solid var(--line); line-height: 1;
+    }
+    .stat-item:first-child { padding-left: 2px; border-left: 0; }
+    .stat-item > span:first-child { font-size: 10px; margin: 0; align-self: start; }
+    .stat-val { font-size: 17px; line-height: 24px; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+    #glob-date { font-size: 15px; letter-spacing: -0.01em; }
+    .stat-sub, #glob-net, #glob-year { display: block; margin: 0 !important; font-size: 11.5px !important; font-weight: 600; line-height: 16px; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+    #glob-influence-sub, #res-sub { display: block; }
+    #glob-year { color: var(--text-2); }
+    .res-status { display: grid; gap: 0; }
+    .res-dots { gap: 7px; margin: 0; height: 24px; align-items: center; }
+    .res-dots i { font-size: 17px; padding-bottom: 3px; }
 }
 
 /* ---------- окно «Финансы» ---------- */
@@ -784,3 +837,17 @@ body.hotseat-handoff #ui-layer > :not(#hotseat-screen) { visibility: hidden; }
 .fin-cash-end, .fin-cash-dot { fill: #7fb2ff; stroke: var(--s2); stroke-width: 2; pointer-events: none; }
 .fin-tip-parts { margin-top: 4px; padding-top: 4px; border-top: 1px solid var(--line); font-size: 0.9em; color: var(--text-2); }
 .fin-gov, .fin-open { width: 100%; min-height: 44px; margin-top: 12px; }
+.fin-block.loan + .fin-block, .fin-alert + .fin-block { margin-top: 10px; }
+.fin-block .cycle-line { margin-bottom: 0; }
+.loan-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 2px 10px; margin-bottom: 6px; }
+.loan-head b { font-size: 1rem; }
+.loan-head small { font-size: 0.75rem; color: var(--text-3); }
+.fin-block.loan .help-chips { margin-top: 8px; }
+.fin-block.loan .budget-row { gap: 12px; align-items: baseline; }
+.fin-block.loan .budget-row b { text-align: right; white-space: nowrap; }
+.fin-block.loan .hint { margin: 8px 0 0; }
+.imf-conds { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.imf-cond { font-size: 0.8rem; padding: 3px 8px; border-radius: 999px; background: var(--s3); color: var(--text-2); }
+.imf-cond.ok { background: var(--good-soft); color: var(--good); }
+.imf-cond.bad { background: var(--accent-soft); color: var(--accent-2); }
+.fin-alert { padding: 10px 12px; border-radius: var(--r); background: var(--accent-soft); color: var(--accent-2); border: 1px solid var(--accent-line); font-size: 0.9rem; line-height: 1.4; }
