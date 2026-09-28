@@ -66,7 +66,7 @@ const RELATIONS_2024 = [
     ['US', 'KP', -50], ['JP', 'KP', -40], ['KR', 'KP', -60], ['US', 'IR', -40], ['US', 'VE', -30], ['US', 'CU', -30],
     ['US', 'IL', 50], ['US', 'GB', 50], ['FR', 'DE', 45], ['US', 'JP', 45], ['US', 'KR', 45], ['US', 'SA', 25], ['US', 'TW', 30],
     ['IN', 'PK', -55], ['AZ', 'AM', -60], ['TR', 'AZ', 50], ['TR', 'AM', -30], ['GR', 'TR', -15], ['CY', 'TR', -30],
-    ['SA', 'IR', -45], ['IL', 'IR', -70], ['IL', 'SY', -45], ['IL', 'LB', -40], ['IL', 'EG', 10], ['SA', 'AE', 45], ['SA', 'BH', 40], ['SA', 'EG', 30],
+    ['SA', 'IR', -45], ['IL', 'IR', -70], ['IL', 'SY', -45], ['IL', 'LB', -40], ['IL', 'EG', 10], ['SA', 'AE', 45], ['SA', 'EG', 30],
     ['SA', 'YE', -40], ['IR', 'IQ', 25], ['IR', 'SY', 35], ['MA', 'DZ', -35], ['ET', 'ER', -35], ['EG', 'ET', -25], ['SD', 'SS', -30],
     ['VE', 'GY', -35], ['CO', 'VE', -25], ['RU', 'GE', -35], ['AF', 'PK', -20], ['RS', 'HR', -15], ['RW', 'CD', -35], ['CD', 'UG', -15],
     ['SO', 'ET', -15], ['TH', 'KH', -15], ['VN', 'KH', 10], ['BR', 'AR', 20], ['CL', 'BO', -15], ['PE', 'CL', -10],
@@ -142,7 +142,7 @@ class World {
             const scale = Math.min(1, (upkeep * (branded ? WORLD.BRANDED_CAP : WORLD.AID_CAP)) / total);
             let paid = 0;
             for (const x of donors) {
-                x.paid = Math.round(x.gift * scale);
+                x.paid = Math.floor(x.gift * scale);   // вниз — чтобы сумма не вышла за потолок
                 x.c.money -= x.paid;
                 paid += x.paid;
             }

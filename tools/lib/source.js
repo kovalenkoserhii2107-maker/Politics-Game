@@ -161,6 +161,8 @@ function load() {
             population: pops.get(cc) || 0,
             uninhabited: UNINHABITED.has(cc),
             sovereign: !!(meta && meta.independent),
+            // сухопутные соседи по справочнику (cca2): у островных стран — никого
+            borders: ((meta && meta.borders) || []).map(c3 => worldCountries.find(c => c.cca3 === c3)?.cca2).filter(Boolean),
         });
     }
     out.sort((a, b) => a.cc.localeCompare(b.cc));

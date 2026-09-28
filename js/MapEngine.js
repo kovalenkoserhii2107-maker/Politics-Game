@@ -444,8 +444,16 @@ class MapEngine {
     clampCamera() {
         const k = this.pxPerUnit;
         const halfW = this.rect.width / (2 * k), halfH = this.rect.height / (2 * k);
-        const cx = Math.min(Math.max(this.camX + halfW, 0), 1200);
-        const cy = Math.min(Math.max(this.camY + halfH, 40), 760);
+        // Суша — от −180° до 180° по долготе, по широте — до Огненной Земли
+        // (Антарктиды на карте нет). Край суши не отходит от края экрана
+        // дальше трети экрана (под панелями тоже должно быть видно карту);
+        // если весь мир меньше экрана — он посередине.
+        const fit = (c, lo, hi, half) => {
+            const a = lo + half * 0.7, b = hi - half * 0.7;
+            return a > b ? (lo + hi) / 2 : Math.min(Math.max(c, a), b);
+        };
+        const cx = fit(this.camX + halfW, 184, 1016, halfW);
+        const cy = fit(this.camY + halfH, 0, 540, halfH);
         this.camX = cx - halfW;
         this.camY = cy - halfH;
     }
@@ -1197,11 +1205,13 @@ class MapEngine {
         const player = this.data.playerCountry;
         const ns = 'http://www.w3.org/2000/svg';
         const fragment = document.createDocumentFragment();
+        const watched = typeof Navy !== 'undefined' ? Navy.watched(this.data, player) : new Set();
 
         for (const region of Object.values(this.data.regions)) {
             const power = this.data.calculateRegionMilitaryPower(region.id);
             const isOwner = region.owner === player;
-            const reconActive = region.reconActiveUntil && region.reconActiveUntil >= this.data.currentDate;
+            // флот у берега видит гарнизон так же, как шпионы
+            const reconActive = (region.reconActiveUntil && region.reconActiveUntil >= this.data.currentDate) || watched.has(region.id);
             let kind, label;
             if (isOwner) {
                 if (power <= 0) continue;

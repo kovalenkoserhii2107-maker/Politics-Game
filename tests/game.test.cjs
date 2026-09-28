@@ -1662,6 +1662,40 @@ test('navy fog: foreign fleets are seen near own coast and squadrons, by allies,
     assert.ok(!Navy.sight(d, 'UA').has(far), 'разведданные устарели');
 });
 
+test('map: no small island states or Antarctica; saves from the old map drop them and keep fleets in renumbered seas', () => {
+    const { GameData, Navy, SeasDB, RegionsDB } = engine();
+    const all = new Set(Object.values(RegionsDB).map(r => r.cc));
+    for (const cc of ['AQ', 'MT', 'SG', 'BM', 'BH', 'MV', 'NR']) assert.ok(!all.has(cc), `${cc} нет на карте`);
+    for (const cc of ['CY', 'JM', 'HK', 'VA', 'GB', 'JP']) assert.ok(all.has(cc), `${cc} остаётся`);
+    // сохранение с исчезнувшей страной: ключи, пары, записи и коды в списках уходят
+    const d = new GameData('IT');
+    const save = d.serialize();
+    save.countries.MT = [...save.countries.IT];
+    save.diplomacy = save.diplomacy || {};
+    save.test = { MT: 1, 'IT|MT': 2, keep: ['MT', 'IT'], list: [{ cc: 'MT' }, { cc: 'IT' }], rows: [['MT', 5], ['IT', 6]], regions: ['MT-1', 'IT-1'] };
+    GameData.purgeCountries(save);
+    assert.ok(!save.countries.MT && save.countries.IT);
+    assert.deepEqual(JSON.parse(JSON.stringify(save.test)), { keep: ['IT'], list: [{ cc: 'IT' }], rows: [['IT', 6]], regions: ['IT-1'] });
+    // флот в море со списанным номером переходит в зону на том же месте
+    const [old, to] = Object.entries(SeasDB.retired)[0];
+    const navy = { navy: { [old]: { IT: { corvette: 2 } }, [to]: { IT: { corvette: 1 } } }, yard: [], orders: [{ cc: 'IT', from: old, to, ships: { corvette: 1 } }], seen: {} };
+    Navy.remapZones(navy);
+    assert.equal(navy.navy[to].IT.corvette, 3);
+    assert.ok(!navy.navy[old]);
+    assert.equal(navy.orders.length, 0, 'поход «в себя» отброшен');
+    assert.ok(Navy.valid(navy));
+});
+
+test('navy: a fleet offshore sees the garrisons of the coast it watches', () => {
+    const { GameData, Navy } = engine();
+    const d = new GameData('TR');
+    const sea = Navy.seasOf('UA-1')[0];
+    assert.ok(!Navy.watched(d, 'TR').has('UA-1'));
+    Navy.add(d, sea, 'TR', { corvette: 1 });
+    assert.ok(Navy.watched(d, 'TR').has('UA-1'));
+    assert.ok(Navy.shore(sea).includes('UA-1'));
+});
+
 test('navy: blockade stops ports and cuts sea trade; a fleet offshore supports a landing attack', () => {
     const { GameData, Navy, Shipping, Economy } = engine();
     const d = new GameData('GE');
