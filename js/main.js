@@ -10,23 +10,21 @@ class GameCore {
         this.loop = new GameLoop(this.data, this.ui, this.map, this.ai);
 
         this.armyAction = { active: false, type: null, fromId: null, forces: {} };
-        this.fleetPick = null;      // эскадра, для которой выбирают море на карте
+        this.fleetPick = null;      // поход эскадры: { from, ships } — ждём касания моря
+        this.panelSea = null;       // открытая карточка моря
         this.panelRegion = null;
 
         document.addEventListener('mapBackground', () => this.ui.closePanel());
         document.addEventListener('straitClick', e => this.ui.showStraits(this.data, e.detail));
-        document.addEventListener('fleetClick', e => this.ui.showFleet(this.data, e.detail));
-        // море: где стоит флот — окно «Флот» на нём, иначе как пустое место карты
-        document.addEventListener('seaClick', e => {
-            if (this.data.navy[e.detail]) { this.ui.showFleet(this.data, e.detail); return; }
-            this.map.clearSelection();
-            this.ui.closePanel();
-        });
+        // море и значок флота — карточка моря, как у области
+        document.addEventListener('fleetClick', e => this.showSea(e.detail));
+        document.addEventListener('seaClick', e => this.showSea(e.detail));
         document.addEventListener('fleetTarget', e => this.fleetTo(e.detail));
         document.addEventListener('panelClosed', () => {
             this.map.clearSelection();
             this.cancelTargeting();
             this.panelRegion = null;
+            this.panelSea = null;
         });
         document.addEventListener('zoomLevelChanged', e => {
             this.ui.updateZoomMode(e.detail.isRegional);
@@ -164,6 +162,14 @@ class GameCore {
         if (action === 'open-diplo') { this.ui.hideModal('gov-modal'); this.openDiplomacy(); return; }
         if (action === 'open-straits') { this.ui.hideModal('finance-modal'); this.ui.hideModal('fleet-modal'); this.ui.showStraits(d); return; }
         if (action === 'open-fleet') { this.ui.showFleet(d, btn.dataset.region || null); return; }
+        if (action === 'open-strait') { this.ui.showStraits(d, btn.dataset.strait); return; }
+        if (action === 'sea-show') {
+            this.ui.hideModal('fleet-modal');
+            const z = Navy.zones()[btn.dataset.zone];
+            if (z) this.map.ensureVisible(z.x, z.y);
+            this.showSea(btn.dataset.zone);
+            return;
+        }
         if (d.gameOver) return;
         if (action.startsWith('rg-')) { this.regionsAction(action, btn); return; }
         if (['invest', 'cancel-project', 'integrate'].includes(action)) {
@@ -214,23 +220,32 @@ class GameCore {
             } else if (action === 'fleet-cancel') {
                 result = d.act('cancelShips', btn.dataset.region);
                 if (result.ok) this.ui.toast(`Стройка отменена, возвращено ${this.ui.money(result.refund)}`);
-            } else if (action === 'fleet-move') {
-                const fleet = Navy.fleet(d, btn.dataset.from, d.playerCountry) || {};
-                const busy = Navy.ordered(d, d.playerCountry, btn.dataset.from);
-                const ships = Object.fromEntries(Object.entries(fleet).map(([k, n]) => [k, n - (busy[k] || 0)]));
-                result = d.act('moveFleet', btn.dataset.from, btn.dataset.to, ships);
-                if (result.ok) this.ui.toast(`Эскадра выйдет в ${Navy.zones()[btn.dataset.to].name} в конце хода`);
-            } else if (action === 'fleet-pick') {
-                this.pickFleetTarget(btn.dataset.from);
-                return;
             } else if (action === 'fleet-unmove') {
                 result = d.act('cancelFleetMove', btn.dataset.from, btn.dataset.to);
             }
             if (!result || !result.ok) { if (result && result.reason) this.ui.toast(result.reason); return; }
-            this.ui.refreshFleet(d);
-            this.map.drawArmyMarkers();
-            this.loop.updateTopBarUI();
-            SaveGame.save(d);
+            this.afterFleetChange();
+            return;
+        }
+        // карточка моря: поход как марш войск — корабли, потом море на карте
+        if (action === 'sea-move' || action === 'sea-move-cancel') {
+            const box = document.getElementById('sea-move-box');
+            if (box) box.hidden = action === 'sea-move-cancel';
+            document.querySelector('.sea-move-btn')?.toggleAttribute('hidden', action === 'sea-move');
+            if (action === 'sea-move') box?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+            return;
+        }
+        if (action === 'sea-go') {
+            const ships = this.ui.readSteppers(document.getElementById('sea-move-inputs'));
+            if (!Object.values(ships).some(n => n > 0)) { this.ui.toast('Выберите хотя бы один корабль'); return; }
+            this.pickFleetTarget(btn.dataset.zone, ships);
+            return;
+        }
+        if (action === 'sea-spy') {
+            const result = d.act('seaRecon', btn.dataset.zone);
+            if (!result.ok) { this.ui.toast(result.reason); return; }
+            this.ui.toast('🔭 Разведка в плане: итог — после хода');
+            this.afterFleetChange();
             return;
         }
         if (action === 'strait-hostile' || action === 'strait-rule' || action === 'strait-unrule') {
@@ -827,6 +842,11 @@ class GameCore {
 
     cancelOrder(btn) {
         const index = parseInt(btn.dataset.orderIndex, 10), type = btn.dataset.type;
+        if (type === 'naval' || type === 'searecon') {
+            const result = type === 'naval' ? this.data.act('cancelFleetMove', btn.dataset.from, btn.dataset.to) : this.data.act('cancelSeaRecon', btn.dataset.zone);
+            if (result && result.ok) this.afterFleetChange();
+            return;
+        }
         // номер среди своих приказов — так команду можно повторить на сервере
         const list = this.data.orders[type] || [];
         const own = list.slice(0, index).filter(o => o.country === this.data.playerCountry).length;
@@ -843,11 +863,36 @@ class GameCore {
         const region = this.data.getRegion(regionId);
         if (!region) return;
         this.panelRegion = regionId;
+        this.panelSea = null;
         this.panelCountry = null;
         this.map.selectRegion(regionId);
         this.ui.showRegionInfo(region, this.data.getCountry(region.owner), this.data);
         this.updateActionButtons(regionId);
         this.map.ensureVisible(region.lx, region.ly);
+    }
+
+    // Карточка моря: что там, наша эскадра и её поход, чужие флоты, разведка.
+    showSea(zone) {
+        const z = Navy.zones()[zone];
+        if (!z) return;
+        this.cancelTargeting();
+        this.panelRegion = null;
+        this.panelCountry = null;
+        this.panelSea = zone;
+        this.map.selectSea(zone);
+        this.ui.showSeaInfo(zone, this.data);
+        this.map.ensureVisible(z.x, z.y);
+    }
+
+    // После приказа флоту: значки, стрелки, план хода, открытые окна.
+    afterFleetChange() {
+        const d = this.data;
+        this.ui.refreshFleet(d);
+        this.map.drawArmyMarkers();
+        this.ui.updateOrdersPanel(d);
+        this.loop.updateTopBarUI();
+        if (this.panelSea && document.getElementById('side-panel').classList.contains('active')) this.ui.showSeaInfo(this.panelSea, d);
+        SaveGame.save(d);
     }
 
     showCountry(countryId) {
@@ -1021,12 +1066,12 @@ class GameCore {
         this.ui.showModal('target-modal');
     }
 
-    // Поход эскадры по карте: подсветить моря в пределах хода, ждать касания.
-    pickFleetTarget(from) {
+    // Поход эскадры по карте: подсветить соседние моря, куда можно пройти, ждать касания.
+    pickFleetTarget(from, ships) {
         this.cancelTargeting();
         const targets = Navy.reachable(this.data, this.data.playerCountry, from);
-        if (!targets.size) { this.ui.toast('Отсюда за ход никуда не пройти'); return; }
-        this.fleetPick = from;
+        if (!targets.size) { this.ui.toast('Отсюда никуда не пройти: проливы закрыты'); return; }
+        this.fleetPick = { from, ships };
         this.ui.hideModal('fleet-modal');
         this.ui.closePanelKeepTargeting();
         this.map.setFleetTargets(targets);
@@ -1036,33 +1081,31 @@ class GameCore {
 
     // Моря для похода списком: соседние сверху, потом те, что в два перехода.
     showFleetTargetList() {
-        const d = this.data, from = this.fleetPick, zones = SeasDB.zones;
-        const near = new Set(zones[from].adj);
-        const ids = [...Navy.reachable(d, d.playerCountry, from)].sort((a, b) => (near.has(b) - near.has(a)) || zones[a].name.localeCompare(zones[b].name, 'ru'));
+        const d = this.data, from = this.fleetPick.from, zones = SeasDB.zones;
+        const sight = Navy.sight(d, d.playerCountry);
+        const ids = [...Navy.reachable(d, d.playerCountry, from)].sort((a, b) => zones[a].name.localeCompare(zones[b].name, 'ru'));
         document.getElementById('target-title').textContent = 'Куда идти эскадре';
-        document.getElementById('target-hint').textContent = `Из моря «${zones[from].name}». За ход — до ${NAVY.SPEED} морей.`;
+        document.getElementById('target-hint').textContent = `Из моря «${zones[from].name}» — в соседнее.`;
         document.getElementById('target-list').innerHTML = ids.map(id => {
             const strait = Navy.strait(from, id);
+            const foe = sight.has(id) ? Navy.enemyPower(d, id, d.playerCountry) : 0;
             return `<button class="target-row" type="button" data-fleet-to="${id}">
                 <span class="swatch" style="background:#2d5d86"></span>
-                <span><b>${this.ui.escape(zones[id].name)}</b><small>${near.has(id) ? 'соседнее море' : 'два перехода'}${strait ? ' · через пролив' : ''}</small></span>
-                <span class="odds move">⛴</span></button>`;
+                <span><b>${this.ui.escape(zones[id].name)}</b><small>${strait ? `через пролив ${this.ui.escape(STRAITS[strait].name)}` : 'соседнее море'}${foe ? ` · враг ⚔${foe}` : ''}</small></span>
+                <span class="odds ${foe ? 'low' : 'move'}">⛴</span></button>`;
         }).join('');
         this.ui.showModal('target-modal');
     }
 
     fleetTo(zone) {
-        const d = this.data, from = this.fleetPick;
-        if (!from) return;
-        const fleet = Navy.fleet(d, from, d.playerCountry) || {};
-        const busy = Navy.ordered(d, d.playerCountry, from);
-        const ships = Object.fromEntries(Object.entries(fleet).map(([k, n]) => [k, n - (busy[k] || 0)]));
-        const result = d.act('moveFleet', from, zone, ships);
+        const d = this.data, pick = this.fleetPick;
+        if (!pick) return;
+        const result = d.act('moveFleet', pick.from, zone, pick.ships);
         this.cancelTargeting();
         if (!result.ok) { this.ui.toast(result.reason); return; }
-        this.ui.toast(`Эскадра выйдет в «${Navy.zones()[zone].name}» в конце хода`);
-        this.map.drawArmyMarkers();
-        SaveGame.save(d);
+        this.ui.haptic(20);
+        this.ui.toast(`⛴ Поход в «${Navy.zones()[zone].name}» — в плане хода`);
+        this.afterFleetChange();
     }
 
     cancelTargeting() {
@@ -1263,6 +1306,8 @@ class GameCore {
 
     // --- клик по карте -----------------------------------------------------------------
     handleMapClick(regionId) {
+        // выбирали море для эскадры, а коснулись суши — выбор отменяется, как у войск
+        if (this.fleetPick) { this.cancelTargeting(); return; }
         if (this.armyAction.active) {
             const state = this.armyAction;
             const isMove = state.type === 'move';

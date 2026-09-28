@@ -1588,14 +1588,16 @@ test('navy: shipyard needs a port of the right level and tech; ships launch into
     assert.equal(d.countries.UA.money, money + 2 * SHIPS.patrol.cost);
 });
 
-test('navy: fleets sail up to two seas a turn, a closed strait bars the way, enemies fight, the weaker retreats', () => {
+test('navy: fleets sail to a neighbouring sea, a closed strait bars the way, enemies fight, the weaker retreats', () => {
     const { GameData, Navy, NAVY, SeasDB } = engine();
     const d = new GameData('GR');
     const [black, aegean] = straitSides(SeasDB, 'bosporus', 'Чёрное море');
     Navy.add(d, black, 'UA', { frigate: 2 });
     const far = Object.keys(SeasDB.zones).find(z => SeasDB.zones[z].sea === 'Каспийское море');
     assert.equal(d.act('moveFleet', black, far, { frigate: 1 }, 'UA').ok, false, 'в Каспий по морю не попасть');
-    assert.ok(Navy.reachable(d, 'UA', black).size >= SeasDB.zones[black].adj.length, 'за ход — дальше соседей');
+    assert.deepEqual([...Navy.reachable(d, 'UA', black)].sort(), [...SeasDB.zones[black].adj].sort(), 'за ход — только в соседнее море');
+    const beyond = SeasDB.zones[aegean].adj.find(z => !SeasDB.zones[black].adj.includes(z) && z !== black);
+    assert.equal(d.act('moveFleet', black, beyond, { frigate: 1 }, 'UA').ok, false, 'через море за ход не пройти');
     // Турция закрыла Босфор для всех — Украине не пройти, Турции — можно
     d.setStraitPolicy('bosporus', 'closed', 0, 'TR');
     assert.equal(Navy.canPass(d, 'UA', black, aegean), false);
@@ -1619,6 +1621,45 @@ test('navy: fleets sail up to two seas a turn, a closed strait bars the way, ene
     // подлодки опасны надводным кораблям без ПЛО и беспомощны против корветов
     assert.ok(Navy.damage({ sub: 4 }, { destroyer: 1 }) > Navy.damage({ sub: 4 }, { corvette: 4 }));
     assert.ok(Navy.damage({ corvette: 4 }, { sub: 4 }) > Navy.damage({ patrol: 4 }, { sub: 4 }));
+});
+
+test('navy fog: foreign fleets are seen near own coast and squadrons, by allies, or after paid reconnaissance', () => {
+    const { GameData, Navy, NAVY, SeasDB } = engine();
+    const d = new GameData('UA');
+    const zones = SeasDB.zones;
+    const home = Navy.seasOf('UA-1')[0];
+    const far = Object.keys(zones).find(z => zones[z].sea === 'Южно-Китайское море');
+    Navy.add(d, home, 'TR', { corvette: 1 });
+    Navy.add(d, far, 'CN', { destroyer: 3 });
+    let sight = Navy.sight(d, 'UA');
+    assert.ok(sight.has(home), 'у своего берега видно');
+    assert.ok(!sight.has(far), 'далеко — туман');
+    assert.equal(Navy.visible(d, 'UA', far).length, 0);
+    assert.equal(Navy.visible(d, 'UA', home).length, 1);
+    // своя эскадра видит своё море и соседние
+    const next = zones[home].adj[0];
+    Navy.add(d, home, 'UA', { patrol: 1 });
+    assert.ok(Navy.sight(d, 'UA').has(next));
+    // разведка: деньги списаны, отмена возвращает, успех открывает море на RECON_TURNS ходов
+    const ua = d.countries.UA;
+    ua.money = 1e6;
+    assert.equal(d.act('seaRecon', far).ok, true);
+    assert.equal(ua.money, 1e6 - NAVY.RECON_COST);
+    assert.equal(d.act('seaRecon', far).ok, false, 'дважды в одно море нельзя');
+    assert.equal(d.act('cancelSeaRecon', far).ok, true);
+    assert.equal(ua.money, 1e6);
+    assert.equal(d.act('seaRecon', far).ok, true);
+    assert.ok(Navy.reconChance(d, 'UA', far) < 90, 'сильный флот — шанс ниже');
+    d.navalRecon[0].prob = 100;
+    const { logs } = d.processOrders();
+    assert.ok(logs.some(l => l.for === 'UA' && /Разведка/.test(l.message) && /Китай/.test(l.message)));
+    assert.equal(Navy.intelUntil(d, 'UA', far), d.turn + NAVY.RECON_TURNS);
+    assert.ok(Navy.sight(d, 'UA').has(far));
+    // данные сохраняются и устаревают
+    const copy = GameData.restore(JSON.parse(JSON.stringify(d.serialize())));
+    assert.ok(Navy.sight(copy, 'UA').has(far));
+    d.turn += NAVY.RECON_TURNS + 1;
+    assert.ok(!Navy.sight(d, 'UA').has(far), 'разведданные устарели');
 });
 
 test('navy: blockade stops ports and cuts sea trade; a fleet offshore supports a landing attack', () => {

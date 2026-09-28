@@ -9,8 +9,9 @@
 // ограничен уровнем порта, объём заказа — корпусами (уровень × HULLS_PER_LEVEL).
 // Готовые корабли выходят в выбранное море порта.
 //
-// Эскадра — корабли страны в одном море. За ход идёт в соседнее море; через
-// пролив — если он для неё открыт (хозяину — всегда). Если в море
+// Эскадра — корабли страны в одном море. За ход идёт в соседнее море (как
+// марш войск в соседнюю область); через пролив — если он для неё открыт
+// (хозяину — всегда). Если в море
 // встретились воюющие страны — бой: урон по защите, у подлодок бонус против
 // надводных кораблей, пока у тех мало противолодочных сил. Слабая сторона
 // после боя отходит.
@@ -19,6 +20,10 @@
 // если во всех её морях враг сильнее флота хозяина и союзников: порт стоит,
 // морская торговля страны падает по доле блокированного берега. Флот у
 // берега поддерживает наступление на прибрежную область (обстрел).
+//
+// Туман на море: чужие флоты видны у своих берегов, в море со своей эскадрой
+// и по соседству с ней, там, где стоит союзный флот, и по данным разведки
+// (за деньги, с шансом успеха — как шпионы на суше).
 // =====================================================================
 const SHIPS = {
     patrol:    { name: 'Патрульный катер', icon: '🚤', attack: 2, defense: 3, asw: 1, shore: 0, cost: 80e3, upkeep: 15e3, turns: 1, port: 1, hull: 1 },
@@ -29,7 +34,7 @@ const SHIPS = {
 };
 
 const NAVY = {
-    SPEED: 2,               // морей за ход
+    SPEED: 1,               // морей за ход: только в соседнее
     HULLS_PER_LEVEL: 4,     // корпусов в одном заказе за уровень порта
     SUB_BONUS: 0.5,         // подлодка против надводных без прикрытия: +50%
     SUB_HUNT: 6,            // сколько противолодочных очков «закрывают» одну подлодку
@@ -40,10 +45,12 @@ const NAVY = {
     SHORE_PER: 0.01,        // обстрел: +1% к удару за очко огня с моря
     SHORE_MAX: 0.25,
     AI_SHARE: 0.12,         // ИИ держит флот такой доли силы армии (× характер; на войне — вдвое)
+    RECON_COST: 50e3,       // морская разведка
+    RECON_TURNS: 4,         // сколько ходов держатся её данные
 };
 
 class Navy {
-    static init(d) { d.navy = {}; d.shipyard = []; d.navalOrders = []; d.blockSeen = {}; }
+    static init(d) { d.navy = {}; d.shipyard = []; d.navalOrders = []; d.blockSeen = {}; d.seaIntel = {}; d.navalRecon = []; }
 
     static emptyFleet() { return Object.fromEntries(Object.keys(SHIPS).map(k => [k, 0])); }
 
@@ -120,6 +127,56 @@ class Navy {
         let best = null, bp = 0;
         for (const [x, ships] of Object.entries(d.navy[zone] || {})) { const p = Navy.power(ships); if (p > bp) { bp = p; best = x; } }
         return best;
+    }
+
+    // --- туман ----------------------------------------------------------------
+    // Моря, где страна видит чужие флоты: у своих берегов, со своей эскадрой
+    // и рядом с ней, где стоит союзный флот, и по свежей разведке.
+    static sight(d, cc) {
+        const out = new Set();
+        for (const r of d.getCountryRegions(cc)) for (const z of Navy.seasOf(r.id)) out.add(z);
+        for (const [zone, byCc] of Object.entries(d.navy)) {
+            if (byCc[cc]) { out.add(zone); for (const n of Navy.zones()[zone]?.adj || []) out.add(n); }
+            else if (Object.keys(byCc).some(x => Diplomacy.isAllied(d, x, cc))) out.add(zone);
+        }
+        for (const [zone, until] of Object.entries(d.seaIntel?.[cc] || {})) if (until >= d.turn) out.add(zone);
+        return out;
+    }
+
+    // Флоты в море глазами страны: свои и союзные — всегда, прочие — если видно.
+    static visible(d, cc, zone, sight = Navy.sight(d, cc)) {
+        const seen = sight.has(zone);
+        return Object.entries(d.navy[zone] || {}).filter(([x]) => x === cc || seen || Diplomacy.isAllied(d, x, cc));
+    }
+
+    // Шанс разведки: чем сильнее чужие флоты в море, тем труднее.
+    static reconChance(d, cc, zone) {
+        let p = 0;
+        for (const [x, ships] of Object.entries(d.navy[zone] || {})) if (x !== cc) p += Navy.power(ships);
+        return Math.max(25, 90 - Math.floor(p / 4));
+    }
+
+    static intelUntil(d, cc, zone) {
+        const until = d.seaIntel?.[cc]?.[zone];
+        return until !== undefined && until >= d.turn ? until : null;
+    }
+
+    static queueRecon(d, cc, zone) {
+        const c = d.countries[cc];
+        if (d.gameOver || !c || !Navy.zones()[zone]) return { ok: false, reason: 'Нельзя' };
+        if (d.navalRecon.some(o => o.cc === cc && o.zone === zone)) return { ok: false, reason: 'Разведка уже в плане' };
+        if (c.money < NAVY.RECON_COST) return { ok: false, reason: `Недостаточно средств для разведки (${NAVY.RECON_COST / 1e3}K)` };
+        c.money -= NAVY.RECON_COST;
+        d.navalRecon.push({ cc, zone, cost: NAVY.RECON_COST, prob: Navy.reconChance(d, cc, zone) });
+        return { ok: true };
+    }
+
+    static cancelRecon(d, cc, zone) {
+        const i = d.navalRecon.findIndex(o => o.cc === cc && o.zone === zone);
+        if (i < 0) return { ok: false, reason: 'Нечего отменять' };
+        const [o] = d.navalRecon.splice(i, 1);
+        d.countries[cc].money += o.cost;
+        return { ok: true, refund: o.cost };
     }
 
     // --- блокада --------------------------------------------------------------
@@ -203,7 +260,7 @@ class Navy {
     static move(d, cc, from, to, ships) {
         const fleet = Navy.fleet(d, from, cc);
         if (d.gameOver || !fleet) return { ok: false, reason: 'Здесь нет вашего флота' };
-        if (!Navy.reachable(d, cc, from).has(to)) return { ok: false, reason: `Туда не дойти за ход: до ${NAVY.SPEED} морей, через открытые проливы` };
+        if (!Navy.reachable(d, cc, from).has(to)) return { ok: false, reason: 'Туда не дойти за ход: только в соседнее море, через открытые проливы' };
         const busy = Navy.ordered(d, cc, from);
         const sending = {};
         let total = 0;
@@ -298,6 +355,21 @@ class Navy {
                 Navy.battle(d, zone, pair.a, pair.b, logs);
             }
         }
+
+        // 4. разведка — уже после походов и боёв: данные о том, что там сейчас
+        for (const o of d.navalRecon) {
+            if (!d.countries[o.cc]?.alive) continue;
+            if (Math.random() * 100 > o.prob) {
+                if (d.isHuman(o.cc)) logs.push({ for: o.cc, success: false, message: `🔭 Разведка в ${zname(o.zone)} не удалась: разведчиков заметили и отогнали.` });
+                continue;
+            }
+            (d.seaIntel[o.cc] || (d.seaIntel[o.cc] = {}))[o.zone] = d.turn + NAVY.RECON_TURNS;
+            if (!d.isHuman(o.cc)) continue;
+            const seen = Object.entries(d.navy[o.zone] || {}).filter(([x]) => x !== o.cc);
+            const list = seen.map(([x, s]) => `${name(x)} — ${Object.entries(s).filter(([, n]) => n).map(([k, n]) => `${n} ${SHIPS[k].icon}`).join(' ')} (сила ${Navy.power(s)})`).join('; ');
+            logs.push({ for: o.cc, success: true, message: `🔭 Разведка в ${zname(o.zone)}: ${list || 'чужих флотов нет'}. Данные — на ${NAVY.RECON_TURNS} хода.` });
+        }
+        d.navalRecon = [];
         return logs;
     }
 
@@ -366,6 +438,10 @@ class Navy {
 
     // Мёртвые страны теряют флот; игроку — о блокаде и её снятии.
     static endTurn(d, events) {
+        for (const [cc, zones] of Object.entries(d.seaIntel)) {
+            for (const [z, until] of Object.entries(zones)) if (until < d.turn) delete zones[z];
+            if (!Object.keys(zones).length) delete d.seaIntel[cc];
+        }
         for (const zone of Object.keys(d.navy)) for (const cc of Object.keys(d.navy[zone])) {
             if (!d.countries[cc]?.alive || !d.regionsByCountry[cc]?.length) { delete d.navy[zone][cc]; Navy.tidy(d, zone, cc); }
         }
@@ -467,7 +543,8 @@ class Navy {
 
     // --- сохранение ------------------------------------------------------------
     static serialize(d) {
-        return { navy: structuredClone(d.navy), yard: structuredClone(d.shipyard), orders: structuredClone(d.navalOrders), seen: { ...d.blockSeen } };
+        return { navy: structuredClone(d.navy), yard: structuredClone(d.shipyard), orders: structuredClone(d.navalOrders), seen: { ...d.blockSeen },
+            intel: structuredClone(d.seaIntel), recon: structuredClone(d.navalRecon) };
     }
 
     static valid(x) {
@@ -478,12 +555,15 @@ class Navy {
         if (!obj(x) || !obj(x.navy) || !Array.isArray(x.yard) || !Array.isArray(x.orders) || !obj(x.seen)) return false;
         return Object.entries(x.navy).every(([z, byCc]) => zone(z) && obj(byCc) && Object.entries(byCc).every(([cc, s]) => CountriesDB[cc] && ships(s)))
             && x.yard.every(o => obj(o) && CountriesDB[o.cc] && RegionsDB[o.region] && SHIPS[o.type] && count(o.n) && count(o.left) && count(o.cost) && zone(o.zone))
-            && x.orders.every(o => obj(o) && CountriesDB[o.cc] && zone(o.from) && zone(o.to) && ships(o.ships));
+            && x.orders.every(o => obj(o) && CountriesDB[o.cc] && zone(o.from) && zone(o.to) && ships(o.ships))
+            && (x.intel === undefined || (obj(x.intel) && Object.entries(x.intel).every(([cc, zs]) => CountriesDB[cc] && obj(zs) && Object.entries(zs).every(([z, t]) => zone(z) && Number.isSafeInteger(t)))))
+            && (x.recon === undefined || (Array.isArray(x.recon) && x.recon.every(o => obj(o) && CountriesDB[o.cc] && zone(o.zone) && count(o.cost) && Number.isFinite(o.prob) && o.prob >= 0 && o.prob <= 100)));
     }
 
     static restore(d, x) {
         d.navy = structuredClone(x.navy); d.shipyard = structuredClone(x.yard);
         d.navalOrders = structuredClone(x.orders); d.blockSeen = { ...x.seen };
+        d.seaIntel = structuredClone(x.intel || {}); d.navalRecon = structuredClone(x.recon || []);
     }
 }
 

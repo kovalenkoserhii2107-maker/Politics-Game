@@ -431,8 +431,33 @@ class UIManager {
     }
 
     resetPanelSections() {
+        this.panel.classList.remove('sea-card');
         document.getElementById('recruit-panel').style.display = 'none';
         document.getElementById('army-action-panel').style.display = 'none';
+    }
+
+    // --- карточка моря -----------------------------------------------------------
+    // Та же шторка, что у области: без экономики и приказов войскам, зато с
+    // эскадрой, чужими флотами и разведкой (FleetUI.seaCard).
+    showSeaInfo(zone, data) {
+        const z = Navy.zones()[zone];
+        if (!z) return;
+        this.badge.className = 'badge sea';
+        this.badge.textContent = Navy.fleet(data, zone, data.playerCountry) ? 'Ваша эскадра' : 'Море';
+        this.headLoyalty = null;
+        document.getElementById('panel-title').textContent = z.name;
+        document.getElementById('panel-owner-wrap').style.display = 'none';
+        const card = FleetUI.seaCard(data, zone, this);
+        document.getElementById('panel-tags').innerHTML = card.tags;
+        document.getElementById('region-army-container').innerHTML = card.html;
+        const inputs = document.getElementById('sea-move-inputs');
+        if (inputs) this.bindSteppers(inputs);
+        document.getElementById('diplo-actions').innerHTML = '';
+        document.getElementById('development-panel').innerHTML = '';
+        document.getElementById('action-buttons-container').style.display = 'none';
+        this.resetPanelSections();
+        this.panel.classList.add('sea-card');
+        this.openPanel();
     }
 
     // --- карточка страны ---------------------------------------------------------
@@ -648,6 +673,19 @@ class UIManager {
                     <span>${icon} ${this.escape(label(order))}</span>
                     <button class="cancel-order-btn" data-type="${key}" data-order-index="${index}" title="Отменить приказ">×</button></li>`);
             }
+        }
+        // флот: походы эскадр и морская разведка
+        const zones = Navy.zones(), cc = data.playerCountry;
+        for (const o of data.navalOrders.filter(x => x.cc === cc)) {
+            const what = Object.entries(o.ships).map(([k, n]) => `${n} ${SHIPS[k].icon}`).join(' ');
+            items.push(`<li class="order order-sea">
+                <span>⛴ ${this.escape(`${zones[o.from]?.name} ➔ ${zones[o.to]?.name}`)} (${what})</span>
+                <button class="cancel-order-btn" data-type="naval" data-from="${o.from}" data-to="${o.to}" title="Отменить поход">×</button></li>`);
+        }
+        for (const o of data.navalRecon.filter(x => x.cc === cc)) {
+            items.push(`<li class="order order-recon">
+                <span>🔭 ${this.escape(`Разведка: ${zones[o.zone]?.name}`)}</span>
+                <button class="cancel-order-btn" data-type="searecon" data-zone="${o.zone}" title="Отменить разведку">×</button></li>`);
         }
         if (!items.length) { panel.style.display = 'none'; list.innerHTML = ''; return; }
         list.innerHTML = items.join('');
