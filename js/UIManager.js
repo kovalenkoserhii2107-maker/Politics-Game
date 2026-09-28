@@ -17,12 +17,7 @@ class UIManager {
         };
         bind('close-panel-btn', () => this.closePanel());
         // карточку пролистали — в закреплённой шапке появляется название
-        const head = document.getElementById('panel-head');
-        this.panel.addEventListener('scroll', () => {
-            const scrolled = this.panel.scrollTop > 40;
-            if (scrolled) document.getElementById('panel-head-name').textContent = document.getElementById('panel-title').textContent;
-            head.classList.toggle('scrolled', scrolled);
-        }, { passive: true });
+        this.panel.addEventListener('scroll', () => this.syncPanelHead(), { passive: true });
         bind('close-campaign-btn', () => this.hideModal('campaign-modal'));
         bind('close-stats-btn', () => this.hideModal('stats-modal'));
         bind('close-regions-btn', () => this.hideModal('regions-modal'));
@@ -444,6 +439,7 @@ class UIManager {
         const isPlayer = country.id === data.playerCountry;
         this.badge.className = 'badge country';
         this.badge.textContent = isPlayer ? 'Ваша страна' : 'Страна';
+        this.headLoyalty = null;
 
         document.getElementById('panel-title').textContent = country.name;
         document.getElementById('panel-owner-wrap').style.display = 'none';
@@ -489,6 +485,7 @@ class UIManager {
 
         this.badge.className = 'badge region';
         this.badge.textContent = isOwner ? 'Ваша область' : 'Область';
+        this.headLoyalty = region.loyalty;
         document.getElementById('panel-title').textContent = region.name;
         document.getElementById('panel-owner-wrap').style.display = 'block';
         document.getElementById('panel-owner').textContent = country.name;
@@ -541,7 +538,22 @@ class UIManager {
         this.openPanel();
     }
 
-    openPanel() { this.panel.classList.add('active'); document.body.classList.add('sheet-open'); }
+    openPanel() { this.panel.classList.add('active'); document.body.classList.add('sheet-open'); this.syncPanelHead(); }
+
+    // Закреплённая шапка: название (и у области — лояльность) текущей
+    // карточки. Обновляется при каждом открытии, а не только при прокрутке:
+    // иначе после перехода к другой области висело старое название.
+    syncPanelHead() {
+        const head = document.getElementById('panel-head');
+        head.classList.toggle('scrolled', this.panel.scrollTop > 40);
+        const name = document.getElementById('panel-title').textContent;
+        const loyalty = this.headLoyalty;
+        const pill = loyalty === null || loyalty === undefined ? ''
+            : ` <span class="head-loyal ${loyalty < 0.6 ? 'low' : loyalty < 0.8 ? 'mid' : 'ok'}" title="Лояльность">${Math.round(loyalty * 100)}%</span>`;
+        const html = `<span class="head-title">${this.escape(name)}</span>${pill}`;
+        const el = document.getElementById('panel-head-name');
+        if (el.innerHTML !== html) el.innerHTML = html;
+    }
 
     closePanel() {
         this.panel.classList.remove('active');

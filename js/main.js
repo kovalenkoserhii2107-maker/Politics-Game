@@ -1908,10 +1908,11 @@ class GameCore {
     else ready();
 })();
 
-// iOS: у приложения с домашнего экрана при прозрачной строке статуса окно
-// бывает короче экрана на высоту этой строки, а рисуется от самого верха —
-// внизу остаётся пустая полоса, и нижняя панель висит над ней. Меряем зазор
-// и опускаем панель в него (--vp-fix). В браузере и на Android зазора нет.
+// iOS 26: у приложения с домашнего экрана при прозрачной строке статуса окно
+// короче экрана на высоту этой строки (ошибка WebKit 301108), а рисуется от
+// самого верха — внизу остаётся полоса, куда рисовать нельзя вовсе. «Полоска
+// домой» оказывается в ней же, поэтому отступ под кнопками не нужен: панель
+// встаёт к самому краю окна (html.ios-gap). В браузере и на Android зазора нет.
 function fitStandaloneViewport() {
     let gap = 0;
     if (navigator.standalone === true) {
@@ -1920,7 +1921,7 @@ function fitStandaloneViewport() {
         gap = full - window.innerHeight;
         if (!(gap > 0 && gap <= 80)) gap = 0;     // клавиатура и прочее — не наш случай
     }
-    document.documentElement.style.setProperty('--vp-fix', gap + 'px');
+    document.documentElement.classList.toggle('ios-gap', gap > 0);
 }
 fitStandaloneViewport();
 window.addEventListener('resize', fitStandaloneViewport);
