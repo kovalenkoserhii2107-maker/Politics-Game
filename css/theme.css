@@ -132,6 +132,27 @@ summary {
     background: var(--ui-bg); border-color: var(--line); border-radius: var(--r);
 }
 #side-panel { border-radius: 0 var(--r) var(--r) 0; }
+/* закреплённая шапка карточки: метка, название при прокрутке, крестик */
+.panel-head {
+    /* липнет с учётом внутреннего отступа карточки — без щели сверху */
+    position: sticky; top: -20px; z-index: 3; background: inherit;
+    margin: -20px -20px 8px; padding: 14px 20px 8px;
+    border-bottom: 1px solid transparent; transition: border-color 0.15s;
+}
+.panel-head.scrolled { border-bottom-color: var(--line); }
+.panel-head-row { display: flex; align-items: center; gap: 10px; min-height: 36px; }
+.panel-head .badge { margin: 0; flex: 0 0 auto; }
+.panel-head-name {
+    flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    font-weight: 800; color: var(--text); opacity: 0; transition: opacity 0.15s;
+}
+.panel-head.scrolled .panel-head-name { opacity: 1; }
+#side-panel .panel-head .close-btn { position: static; margin-left: auto; flex: 0 0 auto; }
+#side-panel h2 { padding-right: 0; }
+@media (max-width: 768px) {
+    .panel-head { top: -6px; margin: -6px -16px 8px; padding: 0 16px 8px; }
+    .panel-head .sheet-handle { margin-bottom: 0; }
+}
 .modal { background: rgba(5, 6, 8, 0.8); }
 .modal-header { border-bottom-color: var(--line); }
 .modal-header h2, #summary-title { color: var(--text); font-weight: 800; letter-spacing: 0.02em; }

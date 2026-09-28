@@ -16,6 +16,13 @@ class UIManager {
             if (el) el.addEventListener('click', handler);
         };
         bind('close-panel-btn', () => this.closePanel());
+        // карточку пролистали — в закреплённой шапке появляется название
+        const head = document.getElementById('panel-head');
+        this.panel.addEventListener('scroll', () => {
+            const scrolled = this.panel.scrollTop > 40;
+            if (scrolled) document.getElementById('panel-head-name').textContent = document.getElementById('panel-title').textContent;
+            head.classList.toggle('scrolled', scrolled);
+        }, { passive: true });
         bind('close-campaign-btn', () => this.hideModal('campaign-modal'));
         bind('close-stats-btn', () => this.hideModal('stats-modal'));
         bind('close-regions-btn', () => this.hideModal('regions-modal'));
