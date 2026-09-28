@@ -527,6 +527,7 @@ class UIManager {
         const seas = Navy.seasOf(region.id);
         if (seas.length) tags.push(this.tag(`🌊 ${seas.map(z => Navy.zones()[z].name).join(', ')}`, ''));
         if (Navy.blockaded(data, region)) tags.push(this.tag('⚓ Блокада с моря: порт стоит', 'war'));
+        if (region.owner !== player && Navy.watched(data, player).has(region.id)) tags.push(this.tag('⛴ Наш флот у берега: гарнизон виден'));
         if (data.revolts[region.id]) tags.push(this.tag('🔥 Восстание', 'war'));
         else if ((region.unrest || 0) >= REVOLT.WARN) tags.push(this.tag(`⚠️ Недовольство ${Math.round(region.unrest * 100)}%`, 'truce'));
         if (isOwner && (region.development.port || 0) > 0 && seas.length) tags.push(`<button class="mini-btn panel-yard" type="button" data-action="open-fleet" data-region="${region.id}">⚓ Верфь · порт ${region.development.port}</button>`);
@@ -535,7 +536,8 @@ class UIManager {
         this.renderDevelopment(region, data);
 
         const isNeighbor = data.isNeighborToPlayer(region.id);
-        const reconActive = region.reconActiveUntil && region.reconActiveUntil >= data.currentDate;
+        const offshore = !isOwner && Navy.watched(data, player).has(region.id);
+        const reconActive = (region.reconActiveUntil && region.reconActiveUntil >= data.currentDate) || offshore;
         const atWar = data.isAtWar(player, region.owner);
         const allied = Diplomacy.isAllied(data, player, region.owner);
         const canSeePower = isOwner || isNeighbor || reconActive || atWar || allied;

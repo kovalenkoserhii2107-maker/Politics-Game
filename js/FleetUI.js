@@ -91,17 +91,6 @@ class FleetUI {
             <button class="mini-btn fin-gov" type="button" data-action="open-straits">⚓ Судоходство и проливы</button>`;
     }
 
-    // Прибрежные области каждого моря (один раз на игру).
-    static shore(zone) {
-        if (!FleetUI.shoreMap) {
-            FleetUI.shoreMap = {};
-            for (const [id, c] of Object.entries((typeof SeasDB !== 'undefined' && SeasDB.coast) || {})) {
-                for (const z of c.seas) (FleetUI.shoreMap[z] || (FleetUI.shoreMap[z] = [])).push(id);
-            }
-        }
-        return FleetUI.shoreMap[zone] || [];
-    }
-
     static seaCard(data, zone, ui) {
         const cc = data.playerCountry;
         const zones = Navy.zones(), z = zones[zone];
@@ -110,7 +99,7 @@ class FleetUI {
         const ships = s => Object.entries(s).filter(([, n]) => n).map(([k, n]) => `<span class="fl-ship" title="${SHIPS[k].name}">${SHIPS[k].icon}${n}</span>`).join('') || '—';
         const sight = Navy.sight(data, cc);
         const seen = sight.has(zone);
-        const shore = FleetUI.shore(zone).map(id => data.regions[id]).filter(Boolean);
+        const shore = Navy.shore(zone).map(id => data.regions[id]).filter(Boolean);
         const owners = [...new Set(shore.map(r => r.owner))];
 
         // --- метки: море, берега, кто держит, разведка, проливы

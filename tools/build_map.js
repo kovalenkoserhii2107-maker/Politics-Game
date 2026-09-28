@@ -10,7 +10,9 @@
 // сторонами, обрезанной по границе государства; число областей зависит от
 // площади страны (Молдова — 2, совсем малые — 1). Куски мельче 30% средней
 // площади области присоединяются к соседу с самой длинной общей границей.
-// Острова меньше 2500 км² убираются (lib/source.js).
+// Острова меньше 2500 км² убираются (lib/source.js). Малые островные страны
+// и территории (без сухопутной границы, меньше 5000 км²) и необитаемые
+// земли вроде Антарктиды на карту не попадают вовсе.
 // На выходе — js/data/*.js, которые игра грузит напрямую, и таблица
 // переноса сохранений с прежней карты (RegionsRemap).
 // =====================================================================
@@ -468,7 +470,7 @@ function mainlandBox(mp) {
 
 // --- ресурсы (детерминированно от id) --------------------------------
 const OIL = { RU: 4, KZ: 3, IQ: 5, IR: 5, SA: 6, KW: 5, QA: 5, AZ: 4, NO: 4, OM: 3, LY: 4, DZ: 3, TM: 3, VE: 5, NG: 4, US: 3, CA: 3, AE: 5, BR: 2, MX: 2, AO: 3, EC: 2, CO: 2 };
-const INDUSTRIAL = new Set(['DE', 'GB', 'RU', 'CN', 'JP', 'KR', 'IT', 'PL', 'CZ', 'SE', 'NL', 'BE', 'AT', 'US', 'FR', 'CH', 'TW', 'SG', 'UA', 'IN', 'TR', 'ES', 'CA', 'MX', 'BR', 'TH', 'MY', 'ID', 'VN']);
+const INDUSTRIAL = new Set(['DE', 'GB', 'RU', 'CN', 'JP', 'KR', 'IT', 'PL', 'CZ', 'SE', 'NL', 'BE', 'AT', 'US', 'FR', 'CH', 'TW', 'UA', 'IN', 'TR', 'ES', 'CA', 'MX', 'BR', 'TH', 'MY', 'ID', 'VN']);
 
 // Прежняя нарезка (текущий js/data/RegionsDB.js): cc → [{id, x, y}].
 function loadPreviousRegions() {
@@ -576,6 +578,7 @@ function main() {
     console.log('Загружаем Natural Earth 1:50m…');
     const countries = source.load();
     reassignCrimea(countries);
+    dropIslandStates(countries);
 
     console.log('Индексируем города…');
     const cityIndex = buildCityIndex();
@@ -656,6 +659,24 @@ function main() {
     writeRemap(previousMap, regions);
 
     console.log(`Готово за ${((Date.now() - started) / 1000).toFixed(1)} с.`);
+}
+
+// Малые островные страны и территории — пылинки посреди моря, по которым не
+// попасть пальцем, а значки их гарнизонов висят над пустой водой. Убираем
+// тех, у кого нет сухопутной границы с крупной страной и площадь меньше
+// ISLAND_STATE_KM2 (Мальта, Бахрейн, Сингапур, Карибские и Тихоокеанские
+// острова), и необитаемые земли — Антарктиду и острова вокруг неё.
+const ISLAND_STATE_KM2 = 5000;
+function dropIslandStates(countries) {
+    const small = new Set(countries.filter(c => c.areaKm2 < ISLAND_STATE_KM2).map(c => c.cc));
+    const known = new Set(countries.map(c => c.cc));
+    // сухопутная граница засчитывается, только если сосед сам не малый остров
+    // (Синт-Мартен и Сен-Мартен делят один остров)
+    const keep = c => !c.uninhabited && (!small.has(c.cc) || c.borders.some(b => known.has(b) && !small.has(b)));
+    const dropped = countries.filter(c => !keep(c));
+    const kept = countries.filter(keep);
+    countries.splice(0, countries.length, ...kept);
+    console.log(`  вне карты: ${dropped.length} — ${dropped.map(c => c.cc).join(' ')}`);
 }
 
 // Natural Earth относит Крым к России; исходная карта игры — к Украине.
@@ -1219,9 +1240,62 @@ function writeOutput(countries, regions, perCountry, neighbors, cityIndex) {
 // Морские зоны (tools/lib/seas.js) и порты на старте (tools/data/ports.json)
 // → js/data/SeasDB.js. Порт — в области, где город (или в ближайшей
 // прибрежной области той же страны); уровень — по месту в рейтинге.
+// Прежние морские зоны (js/data/SeasDB.js) — чтобы номера зон не менялись
+// от перегенерации: по ним в сохранениях стоят флоты.
+function loadPreviousSeas() {
+    const file = path.join(OUT_DIR, 'SeasDB.js');
+    if (!fs.existsSync(file)) return null;
+    const ctx = {};
+    require('vm').createContext(ctx);
+    require('vm').runInContext(fs.readFileSync(file, 'utf8') + ';globalThis.S=SeasDB;', ctx);
+    return ctx.S;
+}
+
+// Номер зоны — от прежней зоны, чья точка подписи попала в новую; новые
+// зоны получают следующие свободные номера. Прежние номера, которым не
+// досталось зоны, уходят в retired: «старый номер → зона на том месте» —
+// игра по ней переносит флоты из старых сохранений.
+function stableZoneIds(seas, prev) {
+    const num = id => Number(id.slice(1));
+    const ids = Object.keys(seas.zones).sort((a, b) => num(a) - num(b));
+    if (!prev || !prev.zones) return { rename: Object.fromEntries(ids.map(id => [id, id])), retired: {} };
+    const at = p => seas.zoneAt(G.xToLon(p.x), G.yToLat(p.y));
+    const nearest = p => ids.reduce((best, id) => {
+        const z = seas.zones[id], b = seas.zones[best];
+        return Math.hypot(z.x - p.x, z.y - p.y) < Math.hypot(b.x - p.x, b.y - p.y) ? id : best;
+    });
+    const owner = {};
+    const prevIds = Object.keys(prev.zones).sort((a, b) => num(a) - num(b));
+    for (const pid of prevIds) {
+        const nid = at(prev.zones[pid]);
+        if (nid && !(nid in owner)) owner[nid] = pid;
+    }
+    let next = Math.max(...prevIds.map(num), ...Object.values(prev.retired || {}).map(num), ...Object.keys(prev.retired || {}).map(num)) + 1;
+    const rename = {};
+    for (const id of ids) rename[id] = owner[id] || `s${next++}`;
+    const used = new Set(Object.values(rename));
+    const retired = {};
+    for (const pid of prevIds) if (!used.has(pid)) retired[pid] = rename[at(prev.zones[pid]) || nearest(prev.zones[pid])];
+    // списанные раньше номера ведут туда же, куда их прежняя зона
+    for (const [old, to] of Object.entries(prev.retired || {})) retired[old] = used.has(to) ? to : retired[to];
+    return { rename, retired };
+}
+
+function renameZones(seas, rename) {
+    const zones = {};
+    for (const [id, z] of Object.entries(seas.zones)) zones[rename[id]] = { ...z, adj: z.adj.map(n => rename[n]) };
+    const straits = {};
+    for (const [key, sid] of Object.entries(seas.straits)) straits[key.split('|').map(n => rename[n]).sort().join('|')] = sid;
+    const coast = {};
+    for (const [rid, c] of Object.entries(seas.coast)) coast[rid] = { ...c, seas: c.seas.map(n => rename[n]) };
+    return { ...seas, zones, straits, coast };
+}
+
 function writeSeas(regions) {
     const spec = JSON.parse(fs.readFileSync(path.join(__dirname, 'data', 'seas.json'), 'utf8'));
-    const seas = buildSeas(regions, spec);
+    const built = buildSeas(regions, spec);
+    const { rename, retired } = stableZoneIds(built, loadPreviousSeas());
+    const seas = renameZones(built, rename);
     const list = JSON.parse(fs.readFileSync(path.join(__dirname, 'data', 'ports.json'), 'utf8'));
     const ports = [];
     const misses = [];
@@ -1243,10 +1317,10 @@ function writeSeas(regions) {
     list.top.forEach((p, i) => place(p, i < 3 ? 4 : i < 20 ? 2 : 1));
     list.extra.forEach(p => place(p, 1));
     fs.writeFileSync(path.join(OUT_DIR, 'SeasDB.js'),
-        HEADER + `const SeasDB = ${JSON.stringify({ zones: seas.zones, borders: seas.borders, straits: seas.straits, marks: seas.marks, coast: seas.coast, ports })};\n\n`
+        HEADER + `const SeasDB = ${JSON.stringify({ zones: seas.zones, borders: seas.borders, straits: seas.straits, marks: seas.marks, coast: seas.coast, ports, retired })};\n\n`
         + 'if (typeof module !== \'undefined\' && module.exports) module.exports = { SeasDB };\n');
     const lonely = Object.entries(seas.zones).filter(([, z]) => !z.adj.length).map(([id, z]) => `${id} ${z.name}`);
-    console.log(`  морских зон: ${seas.stats.zones} (своих ${seas.stats.auto}), прибрежных областей: ${Object.keys(seas.coast).length}, портов: ${ports.length}`
+    console.log(`  морских зон: ${seas.stats.zones} (своих ${seas.stats.auto}), списано номеров: ${Object.keys(retired).length}, прибрежных областей: ${Object.keys(seas.coast).length}, портов: ${ports.length}`
         + `${misses.length ? `, не нашлось: ${misses.join(', ')}` : ''}${lonely.length ? `, зоны без соседей: ${lonely.join('; ')}` : ''}`);
 }
 

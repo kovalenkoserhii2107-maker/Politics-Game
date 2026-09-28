@@ -1969,6 +1969,7 @@ class GameData {
     // расчёте для страны с долгами без областей) — в сохранении это null.
     static repairSave(save) {
         if (!save || typeof save !== 'object' || !save.countries || typeof save.countries !== 'object') return save;
+        if (save.navy) Navy.remapZones(save.navy);
         for (const c of Object.values(save.countries)) {
             if (!Array.isArray(c)) continue;
             if (c[0] === null) c[0] = 0;
@@ -2187,6 +2188,7 @@ class GameData {
         if (!isObj(game) || !isObj(game.regions) || !Array.isArray(game.units)) return game;
         const heir = id => remap.heirs[id] || id;
         const source = id => remap.sources[id] || id;
+        GameData.purgeCountries(game);
         const old = game.regions;
         const units = game.units.length;
         const plus = (a, b) => a.map((n, i) => n + (Number.isSafeInteger(b[i]) ? b[i] : 0));
@@ -2268,6 +2270,35 @@ class GameData {
         if (isObj(game.seats)) for (const seat of Object.values(game.seats)) if (isObj(seat)) seat.decisions = decisions(seat.decisions);
         // приказы хода отдавались по прежним областям
         game.orders = { recruitment: [], recon: [], movements: [], attacks: [] };
+        return game;
+    }
+
+    // Страны, которых больше нет на карте (убрали малые острова), — вон из
+    // партии: ключи с их кодом («MT», «MT|IT», «MT-1»), записи, где они
+    // стоят значением поля или первым элементом, и их коды в списках.
+    static purgeCountries(game) {
+        if (!game || typeof game !== 'object' || !game.countries || typeof game.countries !== 'object') return game;
+        const gone = new Set(Object.keys(game.countries).filter(cc => !CountriesDB[cc]));
+        if (!gone.size) return game;
+        const dead = v => typeof v === 'string' && (gone.has(v) || v.split('|').some(p => gone.has(p)) || gone.has(v.split('-')[0]) && /^[A-Z]{2}-\d+$/.test(v));
+        const refers = v => dead(v) || (Array.isArray(v) && dead(v[0]))
+            || (!!v && typeof v === 'object' && !Array.isArray(v) && Object.values(v).some(dead));
+        const walk = node => {
+            if (Array.isArray(node)) {
+                for (let i = node.length - 1; i >= 0; i--) {
+                    if (refers(node[i])) node.splice(i, 1);
+                    else walk(node[i]);
+                }
+            } else if (node && typeof node === 'object') {
+                for (const key of Object.keys(node)) {
+                    if (dead(key)) delete node[key];
+                    else walk(node[key]);
+                }
+            }
+        };
+        // области и страны — ключи; остальное — по всему сохранению, кроме
+        // истории ходов (там только тексты отчётов)
+        for (const [key, value] of Object.entries(game)) if (key !== 'history' && key !== 'chronicle') walk(value);
         return game;
     }
 

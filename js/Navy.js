@@ -23,7 +23,8 @@
 //
 // Туман на море: чужие флоты видны у своих берегов, в море со своей эскадрой
 // и по соседству с ней, там, где стоит союзный флот, и по данным разведки
-// (за деньги, с шансом успеха — как шпионы на суше).
+// (за деньги, с шансом успеха — как шпионы на суше). Эскадра видит и берег
+// своего моря: гарнизоны прибрежных областей открыты.
 // =====================================================================
 const SHIPS = {
     patrol:    { name: 'Патрульный катер', icon: '🚤', attack: 2, defense: 3, asw: 1, shore: 0, cost: 80e3, upkeep: 15e3, turns: 1, port: 1, hull: 1 },
@@ -127,6 +128,25 @@ class Navy {
         let best = null, bp = 0;
         for (const [x, ships] of Object.entries(d.navy[zone] || {})) { const p = Navy.power(ships); if (p > bp) { bp = p; best = x; } }
         return best;
+    }
+
+    // Прибрежные области моря (таблица строится один раз на игру).
+    static shore(zone) {
+        if (!Navy.shoreMap) {
+            Navy.shoreMap = {};
+            for (const [id, c] of Object.entries((typeof SeasDB !== 'undefined' && SeasDB.coast) || {})) {
+                for (const z of c.seas) (Navy.shoreMap[z] || (Navy.shoreMap[z] = [])).push(id);
+            }
+        }
+        return Navy.shoreMap[zone] || [];
+    }
+
+    // Области, за берегом которых следит наш флот: гарнизон виден, как
+    // после разведки.
+    static watched(d, cc) {
+        const out = new Set();
+        for (const f of Navy.fleets(d, cc)) for (const id of Navy.shore(f.zone)) out.add(id);
+        return out;
     }
 
     // --- туман ----------------------------------------------------------------
@@ -558,6 +578,32 @@ class Navy {
             && x.orders.every(o => obj(o) && CountriesDB[o.cc] && zone(o.from) && zone(o.to) && ships(o.ships))
             && (x.intel === undefined || (obj(x.intel) && Object.entries(x.intel).every(([cc, zs]) => CountriesDB[cc] && obj(zs) && Object.entries(zs).every(([z, t]) => zone(z) && Number.isSafeInteger(t)))))
             && (x.recon === undefined || (Array.isArray(x.recon) && x.recon.every(o => obj(o) && CountriesDB[o.cc] && zone(o.zone) && count(o.cost) && Number.isFinite(o.prob) && o.prob >= 0 && o.prob <= 100)));
+    }
+
+    // Номера морских зон, которых больше нет на карте (SeasDB.retired: старый
+    // номер → зона на том же месте), — в сохранении заменяем на новые.
+    static remapZones(x) {
+        const retired = (typeof SeasDB !== 'undefined' && SeasDB.retired) || {};
+        const to = z => retired[z] || z;
+        if (!x || typeof x !== 'object' || !Object.keys(retired).length) return x;
+        if (x.navy && typeof x.navy === 'object') {
+            const navy = {};
+            for (const [z, byCc] of Object.entries(x.navy)) {
+                const into = navy[to(z)] || (navy[to(z)] = {});
+                for (const [cc, ships] of Object.entries(byCc || {})) {
+                    const f = into[cc] || (into[cc] = {});
+                    for (const [k, n] of Object.entries(ships || {})) f[k] = (f[k] || 0) + n;
+                }
+            }
+            x.navy = navy;
+        }
+        if (Array.isArray(x.yard)) for (const o of x.yard) if (o) o.zone = to(o.zone);
+        if (Array.isArray(x.orders)) x.orders = x.orders.filter(o => o && to(o.from) !== to(o.to)).map(o => ({ ...o, from: to(o.from), to: to(o.to) }));
+        if (x.intel && typeof x.intel === 'object') for (const zs of Object.values(x.intel)) {
+            for (const z of Object.keys(zs || {})) if (retired[z]) { zs[to(z)] = Math.max(zs[to(z)] || 0, zs[z]); delete zs[z]; }
+        }
+        if (Array.isArray(x.recon)) x.recon = x.recon.map(o => ({ ...o, zone: to(o.zone) }));
+        return x;
     }
 
     static restore(d, x) {
