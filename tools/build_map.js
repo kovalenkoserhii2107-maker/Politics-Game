@@ -651,6 +651,7 @@ function main() {
     console.log('Записываем js/data/…');
     writeOutput(countries, regions, perCountry, neighbors, cityIndex);
     writeBorders(buildBorders(regions));
+    writeSeas(regions);
     writeRemap(previousMap, regions);
 
     console.log(`Готово за ${((Date.now() - started) / 1000).toFixed(1)} с.`);
@@ -1016,7 +1017,10 @@ function addSeaLinks(regions, links) {
         return true;
     }));
     // длина береговой линии области, км: по ней игра решает, где строить порт
-    coastal.forEach((list, i) => { regions[i].coastKm = Math.round(list.reduce((sum, p) => sum + p[2] / pxPerKm(p[1]), 0)); });
+    coastal.forEach((list, i) => {
+        regions[i].coastKm = Math.round(list.reduce((sum, p) => sum + p[2] / pxPerKm(p[1]), 0));
+        regions[i].coastPts = list;     // для морских зон (writeSeas)
+    });
     const coastGrid = new Map();
     coastal.forEach((list, i) => {
         for (const p of list) {
@@ -1209,6 +1213,62 @@ function writeOutput(countries, regions, perCountry, neighbors, cityIndex) {
         + 'if (typeof module !== \'undefined\' && module.exports) module.exports = { CitiesDB };\n');
 
     report(countries, regions, perCountry, neighbors, cityRows.length);
+}
+
+// Морские зоны для флота (tools/data/seas.json → js/data/SeasDB.js).
+// Береговая точка области относится к зоне ближайшей опорной точки
+// (расстояние по сфере в градусах, с учётом линии перемены дат). Область
+// выходит в зону, если на неё приходится хотя бы 12% её берега (и в
+// самую большую — всегда).
+function writeSeas(regions) {
+    const spec = JSON.parse(fs.readFileSync(path.join(__dirname, 'data', 'seas.json'), 'utf8'));
+    const seeds = [];
+    for (const [id, z] of Object.entries(spec.zones)) for (const [lon, lat] of z.seeds) seeds.push({ id, lon, lat });
+    const nearest = (lon, lat) => {
+        let best = null, bd = Infinity;
+        const c = Math.cos(lat * Math.PI / 180);
+        for (const s of seeds) {
+            let dl = Math.abs(lon - s.lon);
+            if (dl > 180) dl = 360 - dl;
+            const d = (dl * c) ** 2 + (lat - s.lat) ** 2;
+            if (d < bd) { bd = d; best = s.id; }
+        }
+        return best;
+    };
+    const coast = {};
+    const used = new Set();
+    for (const r of regions) {
+        if (!r.coastPts || (r.coastKm || 0) < 10) continue;
+        const share = {};
+        let total = 0;
+        for (const [x, y, len] of r.coastPts) {
+            const z = nearest(G.xToLon(x), G.yToLat(y));
+            share[z] = (share[z] || 0) + len;
+            total += len;
+        }
+        const list = Object.entries(share).sort((a, b) => b[1] - a[1]);
+        const seas = list.filter(([, v], k) => k === 0 || v / total >= 0.12).map(([z]) => z);
+        coast[r.id] = seas;
+        seas.forEach(z => used.add(z));
+    }
+    const zones = {};
+    for (const [id, z] of Object.entries(spec.zones)) {
+        const [lon, lat] = z.seeds[0];
+        zones[id] = { name: z.name, x: +G.lonToX(lon).toFixed(1), y: +G.latToY(lat).toFixed(1), adj: [] };
+    }
+    const straits = {};
+    for (const [a, b, strait] of spec.edges) {
+        if (!zones[a] || !zones[b]) throw new Error(`seas.json: нет зоны ${zones[a] ? b : a}`);
+        zones[a].adj.push(b); zones[b].adj.push(a);
+        if (strait) straits[[a, b].sort().join('|')] = strait;
+    }
+    const empty = Object.keys(zones).filter(id => !used.has(id));
+    fs.writeFileSync(path.join(OUT_DIR, 'SeasDB.js'),
+        HEADER + `const SeasDB = ${JSON.stringify({ zones, straits, coast })};
+
+`
+        + 'if (typeof module !== \'undefined\' && module.exports) module.exports = { SeasDB };\n');
+    console.log(`  морских зон: ${Object.keys(zones).length}, прибрежных областей: ${Object.keys(coast).length}${empty.length ? `, зоны без берегов: ${empty.join(', ')}` : ''}`);
 }
 
 // Линии границ: [область, соседняя, путь] — путь в относительных

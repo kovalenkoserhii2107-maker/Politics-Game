@@ -774,6 +774,7 @@ body.hotseat-handoff #ui-layer > :not(#hotseat-screen) { visibility: hidden; }
     #top-bar { flex-wrap: wrap; row-gap: 8px; }
     #top-bar .stats { flex: 1 1 100%; justify-content: flex-start; gap: 8px 26px; }
     #action-bar { margin-left: auto; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+    #action-bar .top-btn { padding: 8px 11px; }
 }
 
 @media (max-width: 768px) {
@@ -863,3 +864,19 @@ body.hotseat-handoff #ui-layer > :not(#hotseat-screen) { visibility: hidden; }
 .strait-card { margin-top: 10px; }
 .strait-card.mine { border-color: var(--line-2); box-shadow: inset 3px 0 0 #7fb2ff; }
 .strait-card .chip.on { background: var(--light); color: var(--ink); }
+
+/* ---------- окно «Флот» ---------- */
+#fleet-modal .modal-content { min-width: 0; }
+.fl-squad.focus { box-shadow: inset 3px 0 0 var(--good); }
+.fl-ships { display: flex; flex-wrap: wrap; gap: 6px 12px; font-size: 1.05rem; font-variant-numeric: tabular-nums; margin: 4px 0; }
+.fl-ship { white-space: nowrap; }
+.fl-go { font-size: 0.8rem; color: var(--text-3); margin-top: 8px; }
+.fl-sea { display: flex; align-items: center; gap: 8px; font-size: 0.85rem; color: var(--text-2); margin: 4px 0; }
+.fl-sea select { flex: 1; min-width: 0; background: var(--s3); color: var(--text); border: 1px solid var(--line); border-radius: var(--r); padding: 6px; }
+.fl-types { display: flex; flex-direction: column; margin-top: 6px; }
+.fl-type { display: flex; align-items: center; gap: 8px; padding: 6px 0; border-bottom: 1px dashed var(--line); }
+.fl-type:last-child { border-bottom: 0; }
+.fl-type-name { flex: 1; min-width: 0; font-weight: 600; }
+.fl-type-name small { display: block; font-weight: 400; font-size: 0.78rem; color: var(--text-3); margin-top: 2px; }
+.fl-type.off .fl-type-name { color: var(--text-3); }
+.fl-type .chip { flex: 0 0 auto; min-width: 48px; }

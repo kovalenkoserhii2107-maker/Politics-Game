@@ -86,6 +86,7 @@ class GameData {
         Council.init(this);
         Credit.init(this);          // облигации и программы МВФ
         Shipping.init(this);        // режимы проливов
+        Navy.init(this);            // военный флот в морях
         this.diploEvents = [];      // что случилось в дипломатии между отчётами хода
         // Страны под управлением людей. В одиночной игре — только игрок; в
         // сетевой — все участники. Задания, решения и журнал каждого, кроме
@@ -1185,7 +1186,9 @@ class GameData {
     // --- разрешение хода ------------------------------------------------------------
     processOrders() {
         // Отчёты адресованы людям: у каждого записи с for === его страна.
-        const logs = [];
+        // Сначала море: верфи, походы, морские бои — флот у берега уже на
+        // месте, когда начнётся наступление на суше.
+        const logs = Navy.resolve(this);
         const mine = order => this.isHuman(order.country);
 
         // 1. Разведка
@@ -1299,9 +1302,10 @@ class GameData {
         for (const o of this.orders.attacks) if (o.country === cc && o.to === targetId) add(o.from, o.forces);
         if (extra) add(fromId, extra);
         const flank = GameData.flankBonus(directions.size);
-        const attack = this.sidePower(forces, cc, 'baseAttack', target.army) * (1 + flank);
+        const shore = Navy.shoreBonus(this, target, [cc]);
+        const attack = this.sidePower(forces, cc, 'baseAttack', target.army) * (1 + flank) * (1 + shore);
         const needed = this.defensePower(target, forces) * RULES.ATTACK_ADVANTAGE;
-        return { attack, needed, ratio: attack / Math.max(1, needed), directions: directions.size, flank };
+        return { attack, needed, ratio: attack / Math.max(1, needed), directions: directions.size, flank, shore };
     }
 
     resolveBattle(allOrders) {
@@ -1348,6 +1352,8 @@ class GameData {
         const operation = (this.operations || []).find(o => o.target === target.id && o.turn === this.turn
             && coalition.some(cc => cc === o.by || Diplomacy.isAllied(this, cc, o.by)));
         if (operation) powerAtt *= 1 + RULES.OPERATION_BONUS;
+        const shore = Navy.shoreBonus(this, target, coalition);
+        powerAtt *= 1 + shore;
         // область достаётся тому, кто вложил в удар больше сил
         const attacker = coalition.reduce((a, b) => (powerOf[b] > powerOf[a] ? b : a));
         const isCapital = this.countries[defender].capital === target.id;
@@ -1409,6 +1415,7 @@ class GameData {
         if (flank) extra.push(`Удар с ${directions} направлений: +${Math.round(flank * 100)}%.`);
         if (helpers.length) extra.push(`В обороне помогали войска: ${helpers.map(g => this.countries[g.cc].name).join(', ')}.`);
         if (operation) extra.push(`По плану операции: +${Math.round(RULES.OPERATION_BONUS * 100)}%.`);
+        if (shore) extra.push(`Огонь флота с моря: +${Math.round(shore * 100)}%.`);
         let message;
 
         if (success) {
@@ -1576,7 +1583,7 @@ class GameData {
         let tax = 0, upkeep = 0, social = 0;
         if (!country || !this.regionsByCountry[countryId]?.length) {
             // interest обязателен: без него расходы страны с долгами — NaN
-            return { income: 0, expense: 0, tax, sales: 0, purchases: 0, upkeep, social, interest: 0, bonds: 0, imf: 0, shipping: 0, tolls: 0, transit: 0, trade: { lines: {} } };
+            return { income: 0, expense: 0, tax, sales: 0, purchases: 0, upkeep, social, interest: 0, bonds: 0, imf: 0, shipping: 0, tolls: 0, transit: 0, navy: 0, trade: { lines: {} } };
         }
         const policy = POLICIES[country.policy] || POLICIES.balanced;
         for (const region of this.getCountryRegions(countryId)) {
@@ -1603,9 +1610,10 @@ class GameData {
         const shipping = Shipping.freight(this, countryId);
         const tolls = country.lastTolls || 0;
         const transit = Math.round((trade.sales + trade.purchases) * Shipping.feeRate(this, countryId));
+        const navy = Navy.upkeep(this, countryId);
         return {
-            income: tax + sales + shipping + tolls, expense: upkeep + social + purchases + interest + bonds + imf + transit,
-            tax, sales, purchases, upkeep, social, interest, bonds, imf, shipping, tolls, transit, trade, tradeBonus: bonus,
+            income: tax + sales + shipping + tolls, expense: upkeep + social + purchases + interest + bonds + imf + transit + navy,
+            tax, sales, purchases, upkeep, social, interest, bonds, imf, shipping, tolls, transit, navy, trade, tradeBonus: bonus,
         };
     }
 
@@ -1629,6 +1637,12 @@ class GameData {
         if (this.gameOver) return { ok: false, reason: 'Нельзя' };
         return Shipping.setPolicy(this, id, countryId, mode, fee);
     }
+
+    // --- флот ----------------------------------------------------------------
+    buildShips(regionId, type, n, zone, countryId = this.playerCountry) { return Navy.build(this, countryId, regionId, type, n, zone); }
+    cancelShips(regionId, countryId = this.playerCountry) { return this.gameOver ? { ok: false } : Navy.cancelBuild(this, countryId, regionId); }
+    moveFleet(from, to, ships, countryId = this.playerCountry) { return Navy.move(this, countryId, from, to, ships); }
+    cancelFleetMove(from, to, countryId = this.playerCountry) { return Navy.cancelMove(this, countryId, from, to); }
 
     issueBonds(amount, countryId = this.playerCountry) { return Credit.issueBonds(this, countryId, amount); }
     takeImf(countryId = this.playerCountry) { return Credit.takeImf(this, countryId); }
@@ -1674,6 +1688,7 @@ class GameData {
         }
         const straits = Shipping.settle(this, volume);
         Shipping.endTurn(this, events);
+        Navy.endTurn(this, events);
 
         for (const country of Object.values(this.countries)) {
             if (!country.alive) continue;
@@ -1689,7 +1704,7 @@ class GameData {
             balance.tolls = straits.tolls[country.id] || 0;
             balance.transit = straits.transit[country.id] || 0;
             balance.income = balance.tax + balance.sales + balance.shipping + balance.tolls;
-            balance.expense = balance.upkeep + balance.social + balance.purchases + balance.interest + balance.bonds + balance.imf + balance.transit;
+            balance.expense = balance.upkeep + balance.social + balance.purchases + balance.interest + balance.bonds + balance.imf + balance.transit + balance.navy;
             balances[country.id] = balance;
             const net = Math.round(balance.income - balance.expense);
             country.lastNetIncome = Number.isFinite(net) ? net : 0;
@@ -1914,6 +1929,7 @@ class GameData {
             nuclear: Nuclear.serialize(this),
             credit: Credit.serialize(this),
             shipping: Shipping.serialize(this),
+            navy: Navy.serialize(this),
             chronicle: this.chronicle ? structuredClone(this.chronicle) : undefined,
             diplomacy: Diplomacy.serialize(this),
             missions: this.missions.map(m => ({ ...m, reward: { ...m.reward } })),
@@ -1995,6 +2011,7 @@ class GameData {
         if (save.nuclear !== undefined && !Nuclear.valid(save.nuclear)) fail('ядерное оружие');
         if (save.credit !== undefined && !Credit.valid(save.credit)) fail('займы');
         if (save.shipping !== undefined && !Shipping.valid(save.shipping)) fail('проливы');
+        if (save.navy !== undefined && !Navy.valid(save.navy)) fail('флот');
         if (save.traits !== undefined && !World.valid(save.traits)) fail('характеры стран');
         if (save.garrisons !== undefined && (!save.garrisons || typeof save.garrisons !== 'object' || !Object.entries(save.garrisons).every(([id, byCountry]) =>
             RegionsDB[id] && byCountry && typeof byCountry === 'object' && Object.entries(byCountry).every(([cc, army]) =>
@@ -2131,6 +2148,7 @@ class GameData {
         if (save.nuclear) Nuclear.restore(data, save.nuclear); else Nuclear.init(data);
         if (save.credit) Credit.restore(data, save.credit); else Credit.init(data);
         if (save.shipping) Shipping.restore(data, save.shipping); else Shipping.init(data);
+        if (save.navy) Navy.restore(data, save.navy); else Navy.init(data);
         // хроника: у старых партий графики начинаются с момента загрузки
         if (save.chronicle) data.chronicle = structuredClone(save.chronicle);
         else Score.initChronicle(data);
@@ -2349,5 +2367,5 @@ GameData.COMMANDS = {
     setTrade: 0, research: 0, startResearch: 0, cancelResearch: 0, setPolicy: 0, setTaxRate: 0,
     declareWar: 0, proposePeace: -1, diplomacyAction: -1, answerDecision: -1,
     nuclearBuild: 1, nuclearCancel: 0, nuclearStrike: 2,
-    claimMission: -1, skipMission: -1, transfer: -1, cedeRegion: -1, borrow: 1, repay: 1, issueBonds: 1, takeImf: 0, setStraitPolicy: 3, suppressRevolt: -1, appeaseRevolt: -1, proposeTrade: -1, giveTroops: 3, planOperation: -1,
+    claimMission: -1, skipMission: -1, transfer: -1, cedeRegion: -1, borrow: 1, repay: 1, issueBonds: 1, takeImf: 0, setStraitPolicy: 3, buildShips: 4, cancelShips: 1, moveFleet: 3, cancelFleetMove: 2, suppressRevolt: -1, appeaseRevolt: -1, proposeTrade: -1, giveTroops: 3, planOperation: -1,
 };

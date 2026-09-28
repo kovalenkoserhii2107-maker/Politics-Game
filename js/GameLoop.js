@@ -464,7 +464,9 @@ class GameLoop {
         this.ui.updateResourceStatus(this.data);
         this.ui.updateScienceBadge(this.data);
         const date = this.data.currentDate;
-        document.getElementById('glob-date').textContent = `${date.getDate()} ${this.monthNames[date.getMonth()]}`;
+        // на телефоне колонка узкая: «22 янв» вместо «22 Января»
+        const month = window.innerWidth <= 768 ? GameLoop.MONTHS_SHORT[date.getMonth()] : this.monthNames[date.getMonth()];
+        document.getElementById('glob-date').textContent = `${date.getDate()} ${month}`;
         document.getElementById('glob-year').textContent = date.getFullYear();
 
         const ready = Missions.readyCount(this.data);
@@ -481,3 +483,5 @@ class GameLoop {
         }
     }
 }
+
+GameLoop.MONTHS_SHORT = ['янв', 'фев', 'мар', 'апр', 'мая', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];

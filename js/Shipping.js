@@ -93,9 +93,9 @@ class Shipping {
     // --- порты ----------------------------------------------------------------
     static coastal(region) { return !!region && (RegionsDB[region.id]?.coast || 0) >= SHIPPING.COAST_MIN; }
 
-    // Порт работает: область своя по праву, не восстала, не заражена.
+    // Порт работает: область не восстала, не заражена и не блокирована с моря.
     static portActive(d, region) {
-        return (region.development.port || 0) > 0 && !d.revolts[region.id] && !Nuclear.fallout(d, region.id);
+        return (region.development.port || 0) > 0 && !d.revolts[region.id] && !Nuclear.fallout(d, region.id) && !Navy.blockaded(d, region);
     }
 
     static portLevels(d, cc) {

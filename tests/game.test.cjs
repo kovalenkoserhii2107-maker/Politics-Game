@@ -3,8 +3,8 @@ const assert=require('node:assert/strict');
 const fs=require('node:fs'),path=require('node:path'),vm=require('node:vm');
 function engine(){
  const values=new Map();let seed=123456;const math=Object.create(Math);math.random=()=>{seed=(Math.imul(seed,1664525)+1013904223)>>>0;return seed/4294967296;};const context=vm.createContext({console,Date,Math:math,structuredClone,localStorage:{setItem:(k,v)=>values.set(k,v),getItem:k=>values.get(k)||null,removeItem:k=>values.delete(k),key:i=>[...values.keys()][i]??null,get length(){return values.size;}}});
- for(const file of ['data/CountriesDB','data/RegionsDB','data/NeighborsDB','data/CitiesDB','UnitsDB','Tech','Economy','Diplomacy','Missions','Score','Events','Unrest','Trade','Council','Nuclear','World','Credit','Shipping','GameData','AI','Finance','GameLoop'])vm.runInContext(fs.readFileSync(path.join(__dirname,'../js',file+'.js'),'utf8'),context);
- return Object.assign(vm.runInContext('({Credit,BOND,IMF,Shipping,SHIPPING,STRAITS,GameData,AI,SaveGame,GameLoop,RegionsDB,UnitsDB,DEVELOPMENT,POLICIES,Economy,RESOURCES,ECONOMY,Tech,TECH_TREE,MODERNIZATION,Diplomacy,DIPLOMACY,Missions,MISSION_KINDS,MISSION_RULES,Score,GOALS,Events,EVENTS,DEBT,CYCLES,INFRA,Unrest,REVOLT,Trade,Council,COUNCIL,RULES,Nuclear,NUCLEAR,World,WORLD,TRAITS})',context),{localStorage:context.localStorage});
+ for(const file of ['data/CountriesDB','data/RegionsDB','data/NeighborsDB','data/CitiesDB','data/SeasDB','UnitsDB','Tech','Economy','Diplomacy','Missions','Score','Events','Unrest','Trade','Council','Nuclear','World','Credit','Shipping','Navy','GameData','AI','Finance','GameLoop'])vm.runInContext(fs.readFileSync(path.join(__dirname,'../js',file+'.js'),'utf8'),context);
+ return Object.assign(vm.runInContext('({Credit,BOND,IMF,Shipping,SHIPPING,STRAITS,Navy,NAVY,SHIPS,GameData,AI,SaveGame,GameLoop,RegionsDB,UnitsDB,DEVELOPMENT,POLICIES,Economy,RESOURCES,ECONOMY,Tech,TECH_TREE,MODERNIZATION,Diplomacy,DIPLOMACY,Missions,MISSION_KINDS,MISSION_RULES,Score,GOALS,Events,EVENTS,DEBT,CYCLES,INFRA,Unrest,REVOLT,Trade,Council,COUNCIL,RULES,Nuclear,NUCLEAR,World,WORLD,TRAITS})',context),{localStorage:context.localStorage});
 }
 test('casualties are invariant under splitting an attack into orders',()=>{
  const {GameData}=engine();const fight=split=>{const d=new GameData('UA',{scenario:'war2024'});for(const id of ['UA-2','RU-62']){d.regions[id].army=d.emptyArmy();d.regions[id].army.infantry=10;}
@@ -1502,4 +1502,93 @@ test('straits: keepers charge fees or close; dependents pay, lose trade and grow
     for (let t = 0; t < 6; t++) { w.turn = t; Shipping.planAI(w); }
     assert.equal(Shipping.policy(w, 'suez', 'EG').mode, 'hostile');
     assert.equal(Shipping.passage(w, 'suez', 'IL').blocked, true);
+});
+
+test('navy: shipyard needs a port of the right level and tech; ships launch into the chosen sea; upkeep counted', () => {
+    const { GameData, Navy, SHIPS } = engine();
+    const d = new GameData('TR');
+    d.countries.TR.money = 1e9;
+    const port = d.regions['TR-3'];
+    assert.equal(d.act('buildShips', port.id, 'corvette', 1, 'black').ok, false, 'без порта нельзя');
+    port.development.port = 2;
+    assert.equal(d.act('buildShips', port.id, 'destroyer', 1, 'black').reason, 'Нужен порт 3-го уровня');
+    assert.match(d.act('buildShips', port.id, 'sub', 1, 'black').reason, /Подводные лодки/);
+    const r = d.act('buildShips', port.id, 'corvette', 3, 'black');
+    assert.equal(r.ok, true);
+    assert.equal(d.act('buildShips', port.id, 'patrol', 1, 'black').reason, 'Верфь занята');
+    for (let i = 0; i < SHIPS.corvette.turns; i++) d.processOrders();
+    assert.equal(Navy.fleet(d, 'black', 'TR').corvette, 3);
+    assert.equal(d.countryBalance('TR').navy, 3 * SHIPS.corvette.upkeep);
+    // отмена возвращает деньги
+    d.act('buildShips', port.id, 'patrol', 2, 'aegean');
+    const money = d.countries.TR.money;
+    assert.equal(d.act('cancelShips', port.id).ok, true);
+    assert.equal(d.countries.TR.money, money + 2 * SHIPS.patrol.cost);
+});
+
+test('navy: fleets move to adjacent seas, straits can bar the way, enemies fight, the weaker retreats', () => {
+    const { GameData, Navy } = engine();
+    const d = new GameData('GR');
+    Navy.add(d, 'black', 'UA', { frigate: 2 });
+    assert.equal(d.act('moveFleet', 'black', 'emed', { frigate: 1 }, 'UA').ok, false, 'не соседнее море');
+    // Турция закрыла Босфор для всех — Украине не пройти, Турции — можно
+    d.setStraitPolicy('bosporus', 'closed', 0, 'TR');
+    assert.equal(Navy.canPass(d, 'UA', 'black', 'aegean'), false);
+    assert.equal(Navy.canPass(d, 'TR', 'black', 'aegean'), true);
+    d.setStraitPolicy('bosporus', 'open', 0, 'TR');
+    assert.equal(d.act('moveFleet', 'black', 'aegean', { frigate: 2 }, 'UA').ok, true);
+    d.processOrders();
+    assert.equal(Navy.fleet(d, 'aegean', 'UA').frigate, 2);
+    assert.equal(Navy.fleet(d, 'black', 'UA'), null);
+    // бой: сильный флот против слабого
+    Navy.add(d, 'aegean', 'TR', { destroyer: 6, corvette: 4 });
+    d.startWar('TR', 'UA');
+    const logs = d.processOrders().logs;
+    assert.equal(Navy.fleet(d, 'aegean', 'UA'), null, 'слабый отступил или погиб');
+    assert.ok(Navy.fleet(d, 'aegean', 'TR'));
+    // подлодки опасны надводным кораблям без ПЛО и беспомощны против корветов
+    assert.ok(Navy.damage({ sub: 4 }, { destroyer: 1 }) > Navy.damage({ sub: 4 }, { corvette: 4 }));
+    assert.ok(Navy.damage({ corvette: 4 }, { sub: 4 }) > Navy.damage({ patrol: 4 }, { sub: 4 }));
+});
+
+test('navy: blockade stops ports and cuts sea trade; a fleet offshore supports a landing attack', () => {
+    const { GameData, Navy, Shipping, Economy } = engine();
+    const d = new GameData('GE');
+    const odesa = d.regions['UA-1'];
+    odesa.development.port = 3;
+    assert.ok(Shipping.portActive(d, odesa));
+    const reach = Economy.reach(d, 'UA');
+    d.startWar('TR', 'UA');
+    Navy.add(d, 'black', 'TR', { destroyer: 4 });
+    assert.equal(Navy.blockaded(d, odesa), true);
+    assert.equal(Shipping.portActive(d, odesa), false, 'порт стоит');
+    assert.ok(Navy.blockadeShare(d, 'UA') > 0);
+    assert.ok(Economy.reach(d, 'UA') < reach, 'морская торговля упала');
+    // свой флот сильнее — блокады нет
+    Navy.add(d, 'black', 'UA', { destroyer: 6 });
+    assert.equal(Navy.blockaded(d, odesa), false);
+    // огонь с моря помогает наступлению на прибрежную область
+    Navy.take(d, 'black', 'UA', { destroyer: 6 });
+    assert.ok(Navy.shoreBonus(d, odesa, ['TR']) > 0);
+    assert.equal(Navy.shoreBonus(d, d.regions['UA-6'], ['TR']), 0, 'Киев с моря не достать');
+    // сохранение
+    d.act('moveFleet', 'black', 'aegean', { destroyer: 1 }, 'TR');
+    const back = GameData.restore(JSON.parse(JSON.stringify(d.serialize())));
+    assert.equal(Navy.fleet(back, 'black', 'TR').destroyer, 4);
+    assert.equal(back.navalOrders.length, 1);
+    const bad = d.serialize(); bad.navy.navy.atlantis = {};
+    assert.throws(() => GameData.restore(bad), /флот/);
+});
+
+test('navy AI: a coastal country at war builds ships at its port and sails to the enemy coast', () => {
+    const { GameData, AI, Navy } = engine();
+    const d = new GameData('IS');
+    const ai = new AI(d);
+    for (const r of d.getCountryRegions('TR')) if (Navy.seasOf(r.id).length) r.development.port = 3;
+    d.countries.TR.money = 5e9;
+    d.startWar('TR', 'GR');
+    for (let t = 0; t < 12; t++) { d.turn = t; Navy.planAI(d, ai); d.processOrders(); }
+    assert.ok(Navy.totalPower(d, 'TR') > 0, 'Турция построила флот');
+    const greek = new Set(d.getCountryRegions('GR').flatMap(r => Navy.seasOf(r.id)));
+    assert.ok(Navy.fleets(d, 'TR').some(f => greek.has(f.zone)), 'флот у греческих берегов');
 });
