@@ -100,7 +100,7 @@ class MapEngine {
         // Наконечники стрел приказов. markerUnits=strokeWidth — наконечник
         // масштабируется вместе с линией, толщина которой постоянна на экране.
         const defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
-        defs.innerHTML = [['attack', '#ff3b2f'], ['move', '#eceef1']].map(([kind, color]) =>
+        defs.innerHTML = [['attack', '#ff3b2f'], ['move', '#eceef1'], ['sea', '#7fc4ff']].map(([kind, color]) =>
             `<marker id="arrow-${kind}" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="3.2" markerHeight="3.2" orient="auto" markerUnits="strokeWidth">`
             + `<path d="M0,0 L10,5 L0,10 z" fill="${color}"/></marker>`).join('');
         this.svg.insertBefore(defs, this.svg.firstChild);
@@ -140,6 +140,7 @@ class MapEngine {
 
     // --- выделение ---------------------------------------------------
     clearSelection() {
+        if (this.selectedSea) { this.seaZones.get(this.selectedSea)?.classList.remove('selected'); this.selectedSea = null; }
         for (const id of this.selection) {
             const path = this.paths.get(id);
             if (path) path.classList.remove('selected-region', 'selected-country');
@@ -153,6 +154,14 @@ class MapEngine {
         if (!path) return;
         path.classList.add('selected-region');
         this.selection.add(regionId);
+    }
+
+    selectSea(zone) {
+        this.clearSelection();
+        const path = this.seaZones.get(zone);
+        if (!path) return;
+        path.classList.add('selected');
+        this.selectedSea = zone;
     }
 
     selectCountry(countryId) {
@@ -1113,8 +1122,20 @@ class MapEngine {
         }
         const ns = 'http://www.w3.org/2000/svg';
         const fragment = document.createDocumentFragment();
-        for (const { kind, from, to } of arrows.values()) {
-            const a = this.data.getRegion(from), b = this.data.getRegion(to);
+        // походы эскадр — голубые стрелки между центрами морей
+        const zones = typeof Navy !== 'undefined' ? Navy.zones() : {};
+        for (const o of this.data.navalOrders || []) {
+            if (o.cc !== this.data.playerCountry || !zones[o.from] || !zones[o.to]) continue;
+            const id = `sea:${o.from}>${o.to}`;
+            if (arrows.has(id)) continue;
+            const a = zones[o.from], b = zones[o.to];
+            // через линию перемены дат — к ближайшей копии точки
+            const span = 832;   // ширина мира на карте (от −180° до 180°)
+            const bx = b.x - a.x > span / 2 ? b.x - span : a.x - b.x > span / 2 ? b.x + span : b.x;
+            arrows.set(id, { kind: 'sea', a: { lx: a.x, ly: a.y }, b: { lx: bx, ly: b.y } });
+        }
+        for (const { kind, from, to, a: pa, b: pb } of arrows.values()) {
+            const a = pa || this.data.getRegion(from), b = pb || this.data.getRegion(to);
             if (!a || !b) continue;
             // Дуга, чтобы встречные стрелки не сливались; концы отступают от
             // центров, где стоят маркеры войск.
@@ -1297,14 +1318,14 @@ class MapEngine {
     }
 
     // Флоты — как значки армий, в центре своего моря: свой, союзники, враги,
-    // прочие. Чужие нейтральные видны только у наших берегов и эскадр.
+    // прочие. Чужие (кроме союзных) видны только у наших берегов, рядом с
+    // нашими эскадрами и по данным разведки.
     drawFleets() {
         if (!this.fleetLayer || typeof Navy === 'undefined') return;
         const ns = 'http://www.w3.org/2000/svg';
         const player = this.data.playerCountry;
         const zones = Navy.zones();
-        const near = new Set(this.data.getCountryRegions(player).flatMap(r => Navy.seasOf(r.id)));
-        for (const f of Navy.fleets(this.data, player)) { near.add(f.zone); for (const n of zones[f.zone]?.adj || []) near.add(n); }
+        const sight = Navy.sight(this.data, player);
         this.fleetLayer.innerHTML = '';
         for (const [zone, byCc] of Object.entries(this.data.navy || {})) {
             const z = zones[zone];
@@ -1312,7 +1333,7 @@ class MapEngine {
             const sides = { own: 0, ally: 0, enemy: 0, other: 0 };
             for (const [cc, ships] of Object.entries(byCc)) {
                 const kind = cc === player ? 'own' : Diplomacy.isAllied(this.data, cc, player) ? 'ally' : this.data.isAtWar(cc, player) ? 'enemy' : 'other';
-                if (kind === 'other' && !near.has(zone)) continue;
+                if ((kind === 'other' || kind === 'enemy') && !sight.has(zone)) continue;
                 sides[kind] += Navy.power(ships);
             }
             const parts = Object.entries(sides).filter(([, p]) => p > 0);

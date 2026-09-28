@@ -1652,6 +1652,8 @@ class GameData {
     cancelShips(regionId, countryId = this.playerCountry) { return this.gameOver ? { ok: false } : Navy.cancelBuild(this, countryId, regionId); }
     moveFleet(from, to, ships, countryId = this.playerCountry) { return Navy.move(this, countryId, from, to, ships); }
     cancelFleetMove(from, to, countryId = this.playerCountry) { return Navy.cancelMove(this, countryId, from, to); }
+    seaRecon(zone, countryId = this.playerCountry) { return Navy.queueRecon(this, countryId, zone); }
+    cancelSeaRecon(zone, countryId = this.playerCountry) { return this.gameOver ? { ok: false } : Navy.cancelRecon(this, countryId, zone); }
 
     issueBonds(amount, countryId = this.playerCountry) { return Credit.issueBonds(this, countryId, amount); }
     takeImf(countryId = this.playerCountry) { return Credit.takeImf(this, countryId); }
@@ -2376,5 +2378,5 @@ GameData.COMMANDS = {
     setTrade: 0, research: 0, startResearch: 0, cancelResearch: 0, setPolicy: 0, setTaxRate: 0,
     declareWar: 0, proposePeace: -1, diplomacyAction: -1, answerDecision: -1,
     nuclearBuild: 1, nuclearCancel: 0, nuclearStrike: 2,
-    claimMission: -1, skipMission: -1, transfer: -1, cedeRegion: -1, borrow: 1, repay: 1, issueBonds: 1, takeImf: 0, setStraitPolicy: 3, setStraitHostile: 2, setStraitRule: 3, buildShips: 4, cancelShips: 1, moveFleet: 3, cancelFleetMove: 2, suppressRevolt: -1, appeaseRevolt: -1, proposeTrade: -1, giveTroops: 3, planOperation: -1,
+    claimMission: -1, skipMission: -1, transfer: -1, cedeRegion: -1, borrow: 1, repay: 1, issueBonds: 1, takeImf: 0, setStraitPolicy: 3, setStraitHostile: 2, setStraitRule: 3, buildShips: 4, cancelShips: 1, moveFleet: 3, cancelFleetMove: 2, seaRecon: 1, cancelSeaRecon: 1, suppressRevolt: -1, appeaseRevolt: -1, proposeTrade: -1, giveTroops: 3, planOperation: -1,
 };
