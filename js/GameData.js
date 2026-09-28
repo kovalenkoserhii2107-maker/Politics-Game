@@ -1827,6 +1827,7 @@ class GameData {
             scenario: this.scenario,
             difficulty: this.difficulty,
             market: { ...this.market },
+            marketStats: this.marketStats ? structuredClone(this.marketStats) : undefined,
             cycle: this.cycle ? { ...this.cycle } : undefined,
             revolts: Unrest.serialize(this),
             operations: (this.operations || []).map(o => ({ ...o })),
@@ -1967,6 +1968,12 @@ class GameData {
             && Number.isInteger(research.remaining) && research.remaining >= 1 && research.remaining <= TECH_TREE[research.id].turns;
     }
 
+    // Итоги рынка прошлого хода — для прогноза торговли; кривые просто не берём.
+    static validMarketStats(x) {
+        return !!x && typeof x === 'object' && Object.entries(x).every(([k, s]) => RESOURCES[k] && s && typeof s === 'object'
+            && ['offers', 'bids', 'traded', 'price'].every(f => typeof s[f] === 'number' && Number.isFinite(s[f]) && s[f] >= 0));
+    }
+
     static validMarket(market) {
         return !!market && Object.keys(RESOURCES).every(k => typeof market[k] === 'number' && Number.isFinite(market[k]) && market[k] > 0);
     }
@@ -2025,6 +2032,7 @@ class GameData {
         data.projects = structuredClone(save.projects);
         data.campaign = { ...save.campaign };
         if (save.market) data.market = { ...save.market };
+        if (GameData.validMarketStats(save.marketStats)) data.marketStats = structuredClone(save.marketStats);
         if (save.cycle) data.cycle = { ...save.cycle };
         if (save.revolts) data.revolts = structuredClone(save.revolts);
         if (save.operations) data.operations = save.operations.map(o => ({ ...o }));
