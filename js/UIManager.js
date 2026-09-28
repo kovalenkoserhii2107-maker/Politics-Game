@@ -1255,7 +1255,8 @@ class UIManager {
             <div class="budget-row"><span>Социальная программа</span><span class="neg">−${this.money(balance.social)}</span></div>
             <div class="budget-row"><span>Содержание армии</span><span class="neg">−${this.money(balance.upkeep)}</span></div>
             ${balance.interest ? `<div class="budget-row"><span>Проценты по долгу</span><span class="neg">−${this.money(balance.interest)}</span></div>` : ''}
-            <div class="budget-row total"><span>Итого за ход</span><span class="${net >= 0 ? 'pos' : 'neg'}">${net >= 0 ? '+' : ''}${this.money(net)}</span></div>`;
+            <div class="budget-row total"><span>Итого за ход (прогноз)</span><span class="${net >= 0 ? 'pos' : 'neg'}">${net >= 0 ? '+' : ''}${this.money(net)}</span></div>
+            <p class="hint">Прогноз по ценам и спросу прошлого хода${data.enemiesOf(data.playerCountry).length ? `, с учётом блокады (на войне торговля — ${Math.round(ECONOMY.WAR_TRADE * 100)}%)` : ''}. Факт — в отчёте хода: цены, спрос и бои его немного сдвинут. Помощь партнёров и репарации — отдельно.</p>`;
 
     }
 

@@ -141,18 +141,28 @@ class Economy {
 
     // Прогноз торговли по текущим ценам — для бюджета и стартового экрана:
     // склад считается полным, излишек продаётся, нехватка докупается.
+    // Прогноз торговли на ход — так же, как её сведёт рынок: излишек сначала
+    // пополняет склад, на войне и под санкциями продаётся лишь часть, а из
+    // выставленного продаётся та доля, что нашла покупателя в прошлый ход.
+    // Иначе бюджет в «Правительстве» обещал бы больше, чем придёт в отчёте.
     static projectTrade(data, countryId) {
         const country = data.countries[countryId];
         Economy.initCountry(country);
         const f = Economy.flows(data, countryId);
+        const reach = (data.enemiesOf(countryId).length ? ECONOMY.WAR_TRADE : 1) * (Council.sanctioned(data, countryId) ? COUNCIL.SANCTION_TRADE : 1);
         let sales = 0, purchases = 0;
         const lines = {};
         for (const key of Object.keys(RESOURCES)) {
             const net = f[key].prod - f[key].need;
             const price = data.market[key];
+            const stats = data.marketStats && data.marketStats[key];
+            const sellFill = stats && stats.offers > 0 ? Math.min(1, stats.bids / stats.offers) : 1;
+            const buyFill = stats && stats.bids > 0 ? Math.min(1, stats.offers / stats.bids) : 1;
             let value = 0;
-            if (net > 0 && country.trade[key] === 'sell') value = net * price;
-            else if (net < 0) value = net * price;
+            if (net > 0 && country.trade[key] === 'sell') {
+                const toStock = Math.min(net, Math.max(0, f[key].need * ECONOMY.STOCK_TARGET - country.stock[key]));
+                value = (net - toStock) * reach * sellFill * price;
+            } else if (net < 0) value = net * reach * buyFill * price;
             if (value > 0) sales += value; else purchases -= value;
             lines[key] = { prod: f[key].prod, need: f[key].need, net, value };
         }
