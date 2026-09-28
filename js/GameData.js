@@ -33,7 +33,7 @@ const DEVELOPMENT = {
 };
 const POLICIES = {
     balanced: { name: 'Сбалансированный курс', description: 'Без дополнительных расходов и штрафов.', industry: 1, loyalty: 0, socialCost: 0 },
-    social: { name: 'Социальный курс', description: '+10 п.п. к целевой лояльности. Расход: $0,005 на жителя за ход.', industry: 1, loyalty: 0.1, socialCost: 0.005 },
+    social: { name: 'Социальный курс', description: '+10 п.п. к целевой лояльности. Расход: $0,005 на жителя за ход (в богатых странах — больше).', industry: 1, loyalty: 0.1, socialCost: 0.005 },
     production: { name: 'Промышленный курс', description: '+20% дохода промышленности. −5 п.п. к целевой лояльности.', industry: 1.2, loyalty: -0.05, socialCost: 0 },
 };
 
@@ -97,6 +97,7 @@ class GameData {
         for (const cc of this.humans.slice(1)) this.seats[cc] = GameData.emptySeat();
         this.build();
         if (!options.restoring) {
+            World.seed(this);
             Council.elect(this);
             this.setupScenario();
             for (const cc of this.humans) {
@@ -314,7 +315,7 @@ class GameData {
 
             let population = 0, upkeep = 0;
             for (const region of regions) {
-                population += region.population;
+                population += this.taxBase(region);
                 upkeep += this.armyUpkeep(region.army);
             }
             if (population <= 0) continue;
@@ -357,6 +358,9 @@ class GameData {
         const sales = b.sales * ((0.5 + 0.5 * loyalty) / (0.5 + 0.5 * now));
         return { ...b, tax, sales, income: tax + sales, expense: b.expense };
     }
+
+    // Налоговая база области: жители с поправкой на богатство её земли.
+    taxBase(region) { return region.population * Economy.wealth(region.originalOwner); }
 
     // --- доступ ----------------------------------------------------------
     getCountry(id) { return this.countries[id]; }
@@ -1541,8 +1545,8 @@ class GameData {
         for (const region of this.getCountryRegions(countryId)) {
             // восставшая область налогов не платит;
             // заражённая после ядерного удара — тоже
-            if (!this.revolts[region.id] && !Nuclear.fallout(this, region.id)) tax += region.population * country.taxRate * region.loyalty * (1 + INFRA.TAX * (region.development.infra || 0));
-            social += region.population * policy.socialCost;
+            if (!this.revolts[region.id] && !Nuclear.fallout(this, region.id)) tax += this.taxBase(region) * country.taxRate * region.loyalty * (1 + INFRA.TAX * (region.development.infra || 0));
+            social += this.taxBase(region) * policy.socialCost;
             upkeep += this.armyUpkeep(region.army);
         }
         for (const g of this.garrisonsOf(countryId)) upkeep += this.armyUpkeep(g.army);
@@ -1606,6 +1610,7 @@ class GameData {
         this.processResearch(events);
         Nuclear.endTurn(this, events);
         Diplomacy.endTurn(this, events);
+        World.endTurn(this, events);
         this.checkGarrisons(events);
         const balances = {};
         const markets = Economy.runMarkets(this);
@@ -1732,11 +1737,12 @@ class GameData {
             KZ: { infantry: 8, tanks: 3, artillery: 3, aviation: 3, antiair: 3 },
         };
 
-        // Остальным странам — армия по населению: примерно полк на миллион
-        // жителей плюс техника. Иначе Бразилия со 212 млн начинала бы
-        // с одной пехотной частью.
+        // Остальным странам — армия по населению с поправкой на богатство
+        // (корень из него: бедная большая страна держит армию поменьше, но
+        // не крохотную): примерно полк на миллион плюс техника. Иначе
+        // Бразилия со 212 млн начинала бы с одной пехотной частью.
         const byPopulation = countryId => {
-            const millions = this.getCountryRegions(countryId).reduce((s, r) => s + r.population, 0) / 1e6;
+            const millions = this.getCountryRegions(countryId).reduce((s, r) => s + r.population, 0) / 1e6 * Math.sqrt(Economy.wealth(countryId));
             return {
                 infantry: Math.max(1, Math.round(millions * 0.6)),
                 tanks: Math.round(millions * 0.08),
@@ -1827,6 +1833,7 @@ class GameData {
             garrisons: Object.fromEntries(Object.entries(this.garrisons || {}).map(([id, byCountry]) =>
                 [id, Object.fromEntries(Object.entries(byCountry).map(([cc, army]) => [cc, units.map(u => army[u] || 0)]))])),
             council: Council.serialize(this),
+            traits: { ...(this.traits || {}) },
             nuclear: Nuclear.serialize(this),
             chronicle: this.chronicle ? structuredClone(this.chronicle) : undefined,
             diplomacy: Diplomacy.serialize(this),
@@ -1907,6 +1914,7 @@ class GameData {
         if (save.chronicle !== undefined && !Score.validChronicle(save.chronicle)) fail('хроника');
         if (save.council !== undefined && !Council.valid(save.council)) fail('совет');
         if (save.nuclear !== undefined && !Nuclear.valid(save.nuclear)) fail('ядерное оружие');
+        if (save.traits !== undefined && !World.valid(save.traits)) fail('характеры стран');
         if (save.garrisons !== undefined && (!save.garrisons || typeof save.garrisons !== 'object' || !Object.entries(save.garrisons).every(([id, byCountry]) =>
             RegionsDB[id] && byCountry && typeof byCountry === 'object' && Object.entries(byCountry).every(([cc, army]) =>
                 CountriesDB[cc] && Array.isArray(army) && army.length === save.units.length && army.every(count))))) fail('войска союзников');
@@ -2029,6 +2037,8 @@ class GameData {
             }
         }
         Council.restore(data, save.council);
+        // партии до характеров стран: выпадают при загрузке
+        if (save.traits && Object.keys(save.traits).length) data.traits = { ...save.traits }; else World.rollTraits(data);
         // партии до ядерного оружия: стартовые арсеналы, как в новой игре
         if (save.nuclear) Nuclear.restore(data, save.nuclear); else Nuclear.init(data);
         // хроника: у старых партий графики начинаются с момента загрузки

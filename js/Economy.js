@@ -19,6 +19,12 @@ const RESOURCES = {
 };
 
 const ECONOMY = {
+    // богатство страны: (ВВП на душу / среднее)^WEALTH_EXP, в пределах
+    // [WEALTH_MIN, WEALTH_MAX]. Степень меньше единицы сглаживает разрыв:
+    // американец платит налогов больше индийца в несколько раз, а не в 30.
+    WEALTH_EXP: 0.75,
+    WEALTH_MIN: 0.2,
+    WEALTH_MAX: 4,
     // еда: агрокомплекс + натуральное хозяйство населения; едят жители и армия
     FOOD_PER_AGRO: 0.5,
     FOOD_PER_MPOP: 2,
@@ -248,6 +254,23 @@ class Economy {
         };
     }
 
+    // Богатство земли по ВВП на душу населения страны, которой она
+    // принадлежала изначально: захваченная область платит как платила.
+    // Нормировано так, что деньги мира в сумме те же, что и без него.
+    static wealth(cc) {
+        if (!Economy.wealthTable) {
+            const list = Object.entries(CountriesDB).filter(([, c]) => c.playable && c.gdp > 0 && c.population > 0);
+            let pop = 0, sum = 0;
+            for (const [, c] of list) { pop += c.population; sum += c.population * Math.pow(c.gdp, ECONOMY.WEALTH_EXP); }
+            const norm = sum > 0 ? pop / sum : 1;
+            Economy.wealthTable = {};
+            for (const [id, c] of list) {
+                Economy.wealthTable[id] = Math.min(ECONOMY.WEALTH_MAX, Math.max(ECONOMY.WEALTH_MIN, norm * Math.pow(c.gdp, ECONOMY.WEALTH_EXP)));
+            }
+        }
+        return Economy.wealthTable[cc] ?? 1;
+    }
+
     // Сколько денег в ход принесёт проект по текущим ценам (для ИИ и подсказки).
     static projectValue(data, regionId, kind) {
         const region = data.regions[regionId], plan = DEVELOPMENT[kind];
@@ -257,7 +280,7 @@ class Economy {
         const work = 0.5 + 0.5 * region.loyalty;
         const p = data.market;
         if (kind === 'infra') {
-            const tax = region.population * country.taxRate * region.loyalty * Economy.taxFactor(country) * Tech.factor(country, 'tax');
+            const tax = data.taxBase(region) * country.taxRate * region.loyalty * Economy.taxFactor(country) * Tech.factor(country, 'tax');
             return tax * INFRA.TAX * Economy.cycle(data).tax;
         }
         if (kind === 'agro') return plan.gain * work * ECONOMY.FOOD_PER_AGRO * p.food;

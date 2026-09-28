@@ -45,7 +45,7 @@ class Unrest {
     // Налоги области за ход — мера уступок.
     static regionTax(d, region) {
         const c = d.countries[region.owner];
-        return region.population * c.taxRate * Math.max(0.3, region.loyalty) * Economy.cycle(d).tax;
+        return d.taxBase(region) * c.taxRate * Math.max(0.3, region.loyalty) * Economy.cycle(d).tax;
     }
 
     static appeaseCost(d, regionId) {

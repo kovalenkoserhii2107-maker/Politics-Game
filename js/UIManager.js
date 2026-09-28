@@ -410,6 +410,8 @@ class UIManager {
             <div class="help-chips">${around.map(cc => `<button class="chip help-chip" data-action="cede" data-region="${region.id}" data-country="${cc}">${this.escape(data.countries[cc].name)}${data.isHuman(cc) ? ' 🎮' : ''}</button>`).join('')}</div></details>`;
     }
 
+    formatGdp(n) { return n >= 1000 ? `${Math.round(n / 1000)} тыс.` : String(n); }
+
     // Ядерный удар по области противника — если есть готовые боеголовки.
     nuclearBlock(data, region) {
         const player = data.playerCountry;
@@ -442,6 +444,8 @@ class UIManager {
             this.relationTag(data, country.id),
             capital ? this.tag(`🏛️ ${this.escape(capital.name)}`) : '',
             this.tag(`${stats.regions} обл.`),
+            !data.isHuman(country.id) && country.playable ? this.tag(`${World.trait(data, country.id).icon} ${World.trait(data, country.id).name}`, World.traitId(data, country.id) === 'expansionist' ? 'war' : '') : '',
+            CountriesDB[country.id]?.gdp ? this.tag(`💵 ВВП $${this.formatGdp(CountriesDB[country.id].gdp)}/чел.`) : '',
             Nuclear.isPower(data, country.id) ? this.tag(`☢️ Ядерная держава${isPlayer || data.nuclear.founders.includes(country.id) ? ` · ${Nuclear.describe(data, country.id)}` : ''}`, 'war') : '',
             Council.sanctioned(data, country.id) ? this.tag(`🚫 Санкции (ещё ${data.sanctions[country.id] - data.turn} ход.)`, 'truce') : '',
             Council.embargoed(data, country.id) ? this.tag('🔒 Эмбарго ООН', 'truce') : '',
@@ -455,7 +459,9 @@ class UIManager {
         const container = document.getElementById('region-army-container');
         // союзники делятся разведкой: их армии видны как свои
         const seeArmy = isPlayer || data.isAtWar(data.playerCountry, country.id) || Diplomacy.isAllied(data, data.playerCountry, country.id);
-        container.innerHTML = this.powerBlock('Военная мощь', data.calculateMilitaryPower(country.id))
+        const trait = !data.isHuman(country.id) && country.playable ? World.trait(data, country.id) : null;
+        container.innerHTML = (trait ? `<p class="hint trait-hint">${trait.icon} ${trait.name}: ${trait.text}. Богатство: ${Economy.wealth(country.id).toFixed(1)}× от среднего по миру.</p>` : '')
+            + this.powerBlock('Военная мощь', data.calculateMilitaryPower(country.id))
             + (seeArmy ? this.armyList(stats.army, 'Вооружённые силы', false)
                 : '<div class="hint">Точный состав армии известен только своих войск и противников.</div>');
 
@@ -1137,7 +1143,8 @@ class UIManager {
         const strength = cc => {
             const ratio = data.calculateMilitaryPower(cc) / myPower;
             const verdict = ratio > 1.5 ? ['сильнее вас', 'neg'] : ratio < 0.67 ? ['слабее вас', 'pos'] : ['на равных', ''];
-            return `армия <span class="${verdict[1]}">${verdict[0]}</span> (×${ratio.toFixed(1)})`;
+            const trait = data.isHuman(cc) ? '🎮 игрок · ' : `${World.trait(data, cc).icon} ${World.trait(data, cc).name.toLowerCase()} · `;
+            return `${trait}армия <span class="${verdict[1]}">${verdict[0]}</span> (×${ratio.toFixed(1)})`;
         };
         const countryRow = (cc, sub) => `<button class="diplo-row country-row" data-action="open-country" data-country="${cc}">
                 <span class="swatch" style="background:${data.countries[cc].color}"></span>

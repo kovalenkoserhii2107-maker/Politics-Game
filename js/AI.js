@@ -12,16 +12,16 @@ const AI_RULES = {
     FRONT_GARRISON: 0.3,        // доля войск, остающаяся в прифронтовой области
     WAR_ON_PLAYER_RATIO: 1.6,   // во сколько раз сильнее должен быть сосед, чтобы напасть
     WAR_ON_PLAYER_CHANCE: 0.015,
-    AI_WARS_MAX: 1,             // сколько войн между ИИ может идти одновременно
-    AI_WAR_CHANCE: 0.05,
+    AI_WARS_MAX: 3,             // сколько войн между ИИ может идти одновременно
+    AI_WAR_CHANCE: 0.1,         // шанс новой войны ИИ за ход (дальше решают характеры)
     AI_TREATY_TRIES: 3,         // сколько пар соседей за ход пробуют договориться
-    AI_WAR_RATIO: [1.2, 2.5],   // ИИ воюет с ИИ только при сопоставимых силах — без избиения слабых
-    AI_WAR_GOAL: 0.2,           // войны между ИИ ограниченные: взял пятую часть земель — мир
+    AI_WAR_MAX_RATIO: 4,        // совсем слабых не трогают — это уже не война, а избиение
     PEACEFUL_START_TURNS: 10,   // первые ходы никто не объявляет новых войн
     FIRST_ATTACK_TURN: 2,       // в уже идущей войне первые ходы ИИ только мобилизуется
     INVEST_PAYBACK: 10,         // строить, только если проект окупится быстрее, чем за столько ходов
     RESERVE_TURNS: 3,           // запас казны в ходах содержания армии, который ИИ не тратит на науку
     MODERNIZE_RESERVE: 1.5,     // модернизирует, когда денег больше этого числа запасов
+    ARMS_SHARE: 0.3,            // в мирное время на армию — до такой доли дохода (× характер)
 };
 
 class AI {
@@ -53,16 +53,29 @@ class AI {
             if (enemies.length) this.planWar(country, enemies);
             else {
                 if (playerNeighbours.has(country.id)) this.planPeace(country);
-                // страны строят в разные ходы — иначе все разом переполняют рынок
+                else this.arm(country);
+                // страны строят в разные ходы — иначе все разом переполняют рынок;
+                // богатые строят чаще и больше: деньгам должно быть куда идти
                 const slot = (country.id.charCodeAt(0) * 31 + country.id.charCodeAt(1)) % 8;
-                if ((d.turn + slot) % 8 === 0 && country.money > 3000000) this.invest(country);
+                const rich = this.richness(country);
+                const every = rich >= 4 ? 2 : rich >= 2 ? 4 : 8;
+                if ((d.turn + slot) % every === 0 && country.money > 3000000) {
+                    const projects = Math.min(4, Math.max(1, Math.floor(rich * World.trait(d, country.id).invest)));
+                    for (let i = 0; i < projects; i++) if (!this.invest(country, rich)) break;
+                }
             }
         }
     }
 
     // Строим то, что по текущим ценам окупается быстрее: дешёвые товары —
     // значит, выгоднее еда или энергия. Так рынок сам себя выравнивает.
-    invest(country) {
+    // Во сколько раз казна больше запаса на чёрный день.
+    richness(country) {
+        const reserve = this.data.countryBalance(country.id).upkeep * AI_RULES.RESERVE_TURNS + 3e6;
+        return country.money / reserve;
+    }
+
+    invest(country, rich = 1) {
         const d = this.data;
         let best = null;
         for (const region of d.getCountryRegions(country.id)) {
@@ -74,7 +87,30 @@ class AI {
                 if (!best || score > best.score) best = { region, kind, score };
             }
         }
-        if (best && best.score >= 1 / AI_RULES.INVEST_PAYBACK) d.invest(best.region.id, best.kind, country.id);
+        // у богатых окупаемость может быть дольше: лучше строить, чем копить
+        const payback = AI_RULES.INVEST_PAYBACK * Math.min(3, Math.max(1, rich / 2));
+        return !!(best && best.score >= 1 / payback && d.invest(best.region.id, best.kind, country.id).ok);
+    }
+
+    // Мирное вооружение по характеру: подтягиваемся к самому сильному соседу.
+    // Изоляционисты и торговцы довольствуются меньшим, экспансионисты — больше.
+    // Кроме соседей, армия соразмерна экономике: на неё идёт доля дохода
+    // (ARMS_SHARE × характер) — так богатство становится силой, а не копится.
+    arm(country) {
+        const d = this.data;
+        if ((d.turn + country.id.charCodeAt(0)) % 3 !== 0) return;
+        const trait = World.trait(d, country.id);
+        const around = d.neighbourCountries(country.id).filter(cc => d.countries[cc] && d.countries[cc].alive && d.countries[cc].playable);
+        if (this.richness(country) < 1.5) return;
+        const rival = around.length ? around.reduce((a, b) => (d.calculateMilitaryPower(b) > d.calculateMilitaryPower(a) ? b : a)) : null;
+        const balance = d.countryBalance(country.id);
+        const underFunded = balance.upkeep < balance.income * AI_RULES.ARMS_SHARE * trait.arms;
+        const outgunned = rival && d.calculateMilitaryPower(country.id) < d.calculateMilitaryPower(rival) * 0.8 * trait.arms;
+        if (!underFunded && !outgunned) return;
+        const border = rival ? d.getCountryRegions(country.id).filter(r => d.getNeighbors(r.id).some(id => d.regions[id] && d.regions[id].owner === rival)) : [];
+        const capital = d.regions[country.capital];
+        const where = border.length ? border : capital && capital.owner === country.id ? [capital] : [];
+        if (where.length) this.recruit(country, where, new Set(rival ? [rival] : []), AI_RULES.PEACE_SPEND_SHARE);
     }
 
     // Восстание: если есть деньги — уступки, иначе подавляем, когда гарнизон сильнее.
@@ -131,10 +167,12 @@ class AI {
     // Налог подстраивается под расходы: ИИ не должен банкротиться.
     balanceTaxes(country) {
         const balance = this.data.countryBalance(country.id);
-        const population = this.data.getCountryRegions(country.id).reduce((s, r) => s + r.population * r.loyalty, 0);
+        const population = this.data.getCountryRegions(country.id).reduce((s, r) => s + this.data.taxBase(r) * r.loyalty, 0);
         if (population <= 0) return;
         const need = (balance.expense - (balance.income - balance.tax)) / population + 0.01;
-        country.taxRate = Math.min(0.2, Math.max(0.05, Math.round(need * 100) / 100));
+        // богатым незачем копить миллиарды: налог может опуститься до 2%
+        const floor = this.richness(country) > 3 ? 0.02 : 0.05;
+        country.taxRate = Math.min(0.2, Math.max(floor, Math.round(need * 100) / 100));
     }
 
     planWar(country, enemies) {
@@ -384,25 +422,27 @@ class AI {
                 if (d.isAtWar(cc, player) || d.truceLeft(cc, player) || d.enemiesOf(cc).length) continue;
                 if (Diplomacy.pactLeft(d, cc, player) || Diplomacy.isAllied(d, cc, player)) continue;
                 const ratio = d.calculateMilitaryPower(cc) / playerPower;
-                if (ratio < this.rule('WAR_ON_PLAYER_RATIO')) continue;
+                const trait = World.trait(d, cc);
+                if (ratio < this.rule('WAR_ON_PLAYER_RATIO') * Math.max(1, trait.ratio / 1.4)) continue;
                 // на ядерную державу без своей бомбы не нападают, с бомбой — редко
                 const fear = Nuclear.deterrence(d, cc, player);
                 if (!fear) continue;
                 // хорошие отношения удерживают от войны, плохие — подталкивают
                 const mood = Math.max(0, 1 - Diplomacy.relation(d, cc, player) / 100);
-                if (Math.random() > this.rule('WAR_ON_PLAYER_CHANCE') * ratio * mood * fear) continue;
+                if (Math.random() > this.rule('WAR_ON_PLAYER_CHANCE') * ratio * mood * fear * trait.war) continue;
                 if (!d.declareWar(cc, player).ok) continue;
                 events.push({ type: 'war', for: player, by: cc, target: player, message: `⚔️ ${country.name} объявила вам войну!` });
                 break;
             }
         }
 
-        // 2. Войны между ИИ — редко и не больше нескольких одновременно
+        // 2. Войны между ИИ — по характерам стран, несколько одновременно
         const aiWars = [...d.wars.keys()].filter(k => !k.split('|').some(cc => d.isHuman(cc))).length;
         if (mayStartWars && aiWars < AI_RULES.AI_WARS_MAX && Math.random() < AI_RULES.AI_WAR_CHANCE) {
             const war = this.pickAiWar();
             if (war && d.declareWar(war.attacker, war.target).ok) {
-                events.push({ type: 'world-war', message: `🌍 ${d.countries[war.attacker].name} объявила войну: ${d.countries[war.target].name}.` });
+                const why = war.vulture ? ' — пользуется её слабостью' : war.grudge ? ' — давняя вражда' : '';
+                events.push({ type: 'world-war', message: `🌍 ${d.countries[war.attacker].name} объявила войну: ${d.countries[war.target].name}${why}.` });
             }
         }
 
@@ -456,8 +496,10 @@ class AI {
         const d = this.data;
         const signed = [];
         const ids = Object.keys(d.countries).filter(cc => !d.isHuman(cc) && d.countries[cc].alive && d.countries[cc].playable);
-        for (let i = 0; i < AI_RULES.AI_TREATY_TRIES; i++) {
-            const a = ids[Math.floor(Math.random() * ids.length)];
+        // торговцы договариваются чаще
+        const pool = ids.flatMap(cc => (World.trait(d, cc).trade >= 2 ? [cc, cc] : World.trait(d, cc).trade < 1 && Math.random() < 0.5 ? [] : [cc]));
+        for (let i = 0; i < AI_RULES.AI_TREATY_TRIES && pool.length; i++) {
+            const a = pool[Math.floor(Math.random() * pool.length)];
             const around = d.neighbourCountries(a).filter(cc => !d.isHuman(cc) && ids.includes(cc));
             const b = around[Math.floor(Math.random() * around.length)];
             if (!b || d.isAtWar(a, b)) continue;
@@ -493,27 +535,45 @@ class AI {
         return null;
     }
 
+    // Кто на кого нападёт: вес — характер нападающего, вражда и слабость
+    // цели. Экспансионист довольствуется небольшим перевесом, оборонец
+    // решится только при подавляющем. Оппортунист ищет того, кто уже
+    // воюет, охвачен гражданской войной или потерял столицу.
     pickAiWar() {
         const d = this.data;
         const candidates = [];
+        let total = 0;
         for (const country of Object.values(d.countries)) {
             if (!country.alive || !country.playable || d.isHuman(country.id)) continue;
             if (d.enemiesOf(country.id).length || country.influence < RULES.WAR_COST) continue;
             const power = d.calculateMilitaryPower(country.id);
-            if (power < 200) continue;
-            if (d.regionsByCountry[country.id].length < 3) continue;
+            if (power < 200 || d.regionsByCountry[country.id].length < 2) continue;
+            const trait = World.trait(d, country.id);
+            if (Council.sanctioned(d, country.id)) continue;   // под санкциями новых войн не начинают
             for (const cc of d.neighbourCountries(country.id)) {
                 if (d.isHuman(cc)) continue;
                 const other = d.countries[cc];
-                if (!other.alive || !other.playable || d.enemiesOf(cc).length || d.truceLeft(country.id, cc)) continue;
-                if (d.regionsByCountry[cc].length < 3) continue;
+                if (!other.alive || !other.playable || d.truceLeft(country.id, cc)) continue;
+                if (Diplomacy.isAllied(d, country.id, cc) || Diplomacy.pactLeft(d, country.id, cc)) continue;
+                if (d.regionsByCountry[cc].length < 2) continue;
                 if (Nuclear.deterrence(d, country.id, cc) < 1) continue;   // ядерные державы ИИ не трогает
                 const ratio = power / Math.max(1, d.calculateMilitaryPower(cc));
-                const [lo, hi] = AI_RULES.AI_WAR_RATIO;
-                if (ratio >= lo && ratio <= hi) candidates.push({ attacker: country.id, target: cc });
+                if (ratio < trait.ratio || ratio > AI_RULES.AI_WAR_MAX_RATIO) continue;
+                const rel = Diplomacy.relation(d, country.id, cc);
+                if (rel >= 30) continue;                                  // друзей не трогают
+                const grudge = rel <= -30;
+                const weak = d.enemiesOf(cc).length > 0 || Unrest.civilWar(d, cc)
+                    || (other.capital && d.regions[other.capital] && d.regions[other.capital].owner !== cc);
+                const vulture = !!trait.vulture && weak;
+                if (trait.vulture && !weak && !grudge) continue;           // оппортунист ждёт случая
+                const w = trait.war * Math.min(3, Math.max(0.3, 1 - rel / 40)) * (vulture ? 3 : weak ? 1.5 : 1);
+                candidates.push({ attacker: country.id, target: cc, w, vulture, grudge });
+                total += w;
             }
         }
-        return candidates.length ? candidates[Math.floor(Math.random() * candidates.length)] : null;
+        if (!candidates.length) return null;
+        let roll = Math.random() * total;
+        return candidates.find(c => (roll -= c.w) <= 0) || candidates[candidates.length - 1];
     }
 
     // Итог войны с точки зрения ИИ: сколько областей взял минус сколько потерял.
@@ -553,7 +613,8 @@ class AI {
         if (!war) return false;
         const attacker = war.attacker, defender = attacker === a ? b : a;
         const original = Object.values(d.regions).filter(r => r.originalOwner === defender).length;
-        const goal = Math.max(1, Math.ceil(original * AI_RULES.AI_WAR_GOAL));
+        // экспансионист хочет больше, торговец — меньше
+        const goal = Math.max(1, Math.ceil(original * World.trait(d, attacker).goal));
         return d.warInfo(attacker, defender).taken >= goal;
     }
 
@@ -566,8 +627,10 @@ class AI {
             const kept = d.getCountryRegions(cc).filter(r => r.originalOwner === cc).length;
             return 1 - kept / original;
         };
-        if (Math.max(lostShare(a), lostShare(b)) >= 0.25) return 0.35;
-        return info.turns >= 10 ? 0.12 : 0;
+        // миролюбивые стороны договариваются охотнее
+        const mood = (World.trait(d, a).peace + World.trait(d, b).peace) / 2;
+        if (Math.max(lostShare(a), lostShare(b)) >= 0.25) return Math.min(0.9, 0.35 * mood);
+        return info.turns >= 10 ? Math.min(0.5, 0.12 * mood) : 0;
     }
 }
 

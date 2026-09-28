@@ -25,6 +25,13 @@ const allCities = require('all-the-cities');
 
 const OUT_DIR = path.join(__dirname, '..', 'js', 'data');
 
+// ВВП на душу населения, $ (tools/data/gdp_per_capita.json, его готовит
+// prepare_gdp.js) — от него зависит богатство страны в игре.
+const GDP = (() => {
+    const file = path.join(__dirname, 'data', 'gdp_per_capita.json');
+    return fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, 'utf8')).gdp : {};
+})();
+
 // Страны с настоящими границами регионов (tools/data/admin1.json, его
 // готовит prepare_admin1.js): штаты, провинции, субъекты, области.
 const ADMIN1 = (() => {
@@ -1142,7 +1149,7 @@ function writeOutput(countries, regions, perCountry, neighbors, cityIndex) {
         const n = (perCountry[c.cc] || []).length;
         s += `  '${c.cc}': { name: ${q(c.name)}, color: '${palette[c.cc]}', regions: ${n},`
            + ` area: ${Math.round(c.areaKm2)}, population: ${c.population || 0},`
-           + ` playable: ${!c.uninhabited && !!c.sovereign && n > 0},`
+           + ` playable: ${!c.uninhabited && !!c.sovereign && n > 0}, gdp: ${GDP[c.cc] || 0},`
            + ` money: 2000000, influence: 50, taxRate: 0.05 },\n`;
     }
     s += '};\n\nif (typeof module !== \'undefined\' && module.exports) module.exports = { CountriesDB };\n';
