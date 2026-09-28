@@ -149,6 +149,8 @@ class GameCore {
             this.ui.toast(`📍 Показали игрокам: ${d.regions[btn.dataset.region].name}`);
             return;
         }
+        if (action === 'open-finance') { this.ui.hideModal('gov-modal'); this.openFinance(); return; }
+        if (action === 'open-gov') { this.ui.hideModal('finance-modal'); this.openGovernment(); return; }
         if (d.gameOver) return;
         if (action.startsWith('rg-')) { this.regionsAction(action, btn); return; }
         if (['invest', 'cancel-project', 'integrate'].includes(action)) {
@@ -194,7 +196,7 @@ class GameCore {
             const result = d.act(action, Number(btn.dataset.amount));
             if (!result.ok) { this.ui.toast(result.reason); return; }
             this.ui.toast(action === 'borrow' ? `Взято в долг ${this.ui.money(result.amount)}` : `Возвращено ${this.ui.money(result.amount)}`);
-            this.ui.renderGovernment(d);
+            this.ui.refreshFinance(d);
             this.loop.updateTopBarUI();
             SaveGame.save(d);
             return;
@@ -686,7 +688,7 @@ class GameCore {
     onNewWorld(report) {
         this.cancelTargeting();
         this.ui.closePanel();
-        for (const id of ['diplo-modal', 'campaign-modal', 'gov-modal', 'science-modal', 'decision-modal', 'trade-modal', 'regions-modal']) this.ui.hideModal(id);
+        for (const id of ['diplo-modal', 'campaign-modal', 'gov-modal', 'finance-modal', 'science-modal', 'decision-modal', 'trade-modal', 'regions-modal']) this.ui.hideModal(id);
         this.loop.failed = false;
         this.loop.awaitingSummary = false;
         if (report) this.loop.showReport(report);
@@ -1051,6 +1053,13 @@ class GameCore {
         SaveGame.save(this.data);
     }
 
+    openFinance() {
+        this.ui.closePanel();
+        this.data.campaign.budget = true;
+        this.ui.showFinance(this.data);
+        SaveGame.save(this.data);
+    }
+
     openDiplomacy() {
         this.ui.closePanel();
         this.data.campaign.diplomacy = true;
@@ -1061,6 +1070,7 @@ class GameCore {
     initTopButtons() {
         document.getElementById('gov-btn').addEventListener('click', () => this.openGovernment());
         document.getElementById('sci-btn').addEventListener('click', () => this.ui.showScience(this.data));
+        document.getElementById('money-status').addEventListener('click', () => this.openFinance());
         document.getElementById('res-status').addEventListener('click', () => {
             this.openGovernment();
             document.getElementById('gov-economy-section').scrollIntoView({ block: 'start' });

@@ -533,7 +533,7 @@ body { overscroll-behavior: none; }
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Exo+2:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;700&display=swap">
 <link rel="stylesheet" href="css/campaign.css?v=fe17f3ba7c">
-<link rel="stylesheet" href="css/theme.css?v=8a3a08b903">
+<link rel="stylesheet" href="css/theme.css?v=fd46e18f2e">
 <link rel="stylesheet" href="css/map.css?v=cd9372e1e8">
 <link rel="stylesheet" href="css/start.css?v=5288a0c5d1">
 </head>
@@ -689,14 +689,15 @@ body { overscroll-behavior: none; }
 <div id="ui-layer">
     <div id="top-bar" class="ui-element">
         <div class="stat-group stats">
-            <div class="stat-item"><span>Казна:</span> $<span id="glob-money">0</span>
-                <span id="glob-net" style="font-size:0.85em;font-weight:700;margin-left:4px;"></span></div>
-            <div class="stat-item"><span>Влияние:</span> <span id="glob-influence">0</span></div>
+            <button class="stat-item money-status" id="money-status" type="button" aria-label="Казна: открыть финансы">
+                <span>Казна</span> <b class="stat-val">$<span id="glob-money">0</span></b>
+                <span id="glob-net"></span></button>
+            <div class="stat-item"><span>Влияние</span> <b class="stat-val" id="glob-influence">0</b></div>
             <button class="stat-item res-status" id="res-status" type="button" aria-label="Ресурсы: открыть экономику">
-                <span>Ресурсы:</span>
+                <span>Ресурсы</span>
                 <span class="res-dots"><i data-k="food">🌾</i><i data-k="energy">⚡</i><i data-k="goods">📦</i></span>
             </button>
-            <div class="stat-item"><span>Дата:</span> <span id="glob-date" style="color:#fff;">1 Января 2024</span></div>
+            <div class="stat-item"><span>Дата</span> <b class="stat-val" id="glob-date">1 Января 2024</b></div>
         </div>
         <div class="stat-group" id="action-bar">
             <button id="diplo-btn" class="top-btn nav-btn" aria-label="Дипломатия"><span class="ico">🤝</span><span class="lbl"><span class="lbl-xl">Дипломатия</span><span class="lbl-xs">Дипл.</span></span><span id="war-badge" class="war-badge"></span></button>
@@ -779,20 +780,24 @@ body { overscroll-behavior: none; }
                     <input aria-label="Налоговая ставка" type="range" id="gov-tax-slider" min="0.01" max="0.30" step="0.01" value="0.05">
                     <div id="gov-tax-note"></div>
                 </div>
-                <div class="gov-section">
-                    <h3>Бюджет на ход</h3>
-                    <div id="gov-budget"></div>
-                </div>
-                <div class="gov-section" id="gov-finance-section">
-                    <h3>Финансы и мировая экономика</h3>
-                    <div id="gov-finance"></div>
-                </div>
+                <button class="mini-btn fin-open" type="button" data-action="open-finance">💵 Бюджет, отчёты по ходам и госдолг — в «Финансах»</button>
                 <div class="gov-menu">
                     <button id="save-game-btn">💾 Сохранить</button>
                     <button id="export-game-btn">📤 В файл</button>
                     <button id="new-game-btn">🔄 Новая игра</button>
                 </div>
             </div>
+        </div>
+    </div>
+
+    <!-- ФИНАНСЫ -->
+    <div id="finance-modal" class="modal ui-element" role="dialog" aria-modal="true" aria-labelledby="finance-title">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 id="finance-title">Финансы</h2>
+                <button class="close-btn" id="close-finance-btn">✕</button>
+            </div>
+            <div id="finance-content" class="modal-body"></div>
         </div>
     </div>
 
@@ -999,12 +1004,13 @@ body { overscroll-behavior: none; }
 <script src="js/Nuclear.js?v=a5857af620"></script>
 <script src="js/World.js?v=21ad371561"></script>
 <script src="js/Charts.js?v=01f1ed532c"></script>
+<script src="js/Finance.js?v=c7779d7612"></script>
 <script src="js/GameData.js?v=4aeb717ca6"></script>
 <script src="js/AI.js?v=59728b4daf"></script>
 <script src="js/MapEngine.js?v=08fa07fcde"></script>
-<script src="js/UIManager.js?v=e7704fdfc6"></script>
-<script src="js/GameLoop.js?v=340de89fdd"></script>
+<script src="js/UIManager.js?v=a5d7aaf0c8"></script>
+<script src="js/GameLoop.js?v=67dc6062e8"></script>
 <script src="js/Tutorial.js?v=53ff18fd7f"></script>
-<script src="js/main.js?v=f9e558bb61"></script>
+<script src="js/main.js?v=ade3e2c2ac"></script>
 </body>
 </html>

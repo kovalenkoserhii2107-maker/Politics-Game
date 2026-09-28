@@ -714,3 +714,73 @@ body.hotseat-handoff #ui-layer > :not(#hotseat-screen) { visibility: hidden; }
 .un-member.perm { border-color: #6aa8ff; color: #9cc4ff; }
 .un-member.me { background: rgba(106, 168, 255, 0.18); color: var(--text); font-weight: 700; }
 .un-rec { font-size: 0.8rem; padding: 2px 0; }
+
+/* ---------- верхняя панель: казна открывает «Финансы» ---------- */
+.money-status {
+    background: none; border: 0; padding: 0; color: inherit; font: inherit; cursor: pointer;
+    text-align: left; touch-action: manipulation;
+}
+.money-status > span:first-child::after { content: ' ›'; color: var(--text-2); }
+.stat-val { font-weight: 700; font-size: 15px; color: var(--text); font-variant-numeric: tabular-nums; white-space: nowrap; }
+#glob-net { font-size: 0.85em; font-weight: 700; margin-left: 4px; font-variant-numeric: tabular-nums; }
+.res-status { text-align: left; }
+
+@media (max-width: 768px) {
+    /* четыре показателя — ровными колонками: подпись сверху, значение под ней */
+    #top-bar .stats {
+        display: grid; grid-template-columns: 1.15fr 0.8fr 0.95fr 1.25fr; gap: 6px;
+        width: 100%; align-items: start;
+    }
+    .stat-item { min-width: 0; display: flex; flex-direction: column; align-items: flex-start; }
+    .stat-item > span:first-child { font-size: 10px; margin: 0 0 3px; }
+    .stat-val { font-size: 17px; line-height: 1.15; }
+    #glob-date { font-size: 15px; white-space: normal; }
+    #glob-net { margin-left: 0; font-size: 12px; margin-top: 2px; }
+    .res-dots { gap: 8px; margin-top: 1px; }
+    .res-dots i { font-size: 19px; }
+}
+
+/* ---------- окно «Финансы» ---------- */
+#finance-modal .modal-content { min-width: 0; }
+#finance-content { min-width: 0; }
+.fin-tiles { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-bottom: 6px; }
+.fin-tile { background: var(--s2); border: 1px solid var(--line); border-radius: var(--r); padding: 10px 12px; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.fin-tile > span { font-size: 0.78rem; color: var(--text-3); }
+.fin-tile b { font-size: 1.2rem; font-weight: 700; color: var(--text); font-variant-numeric: tabular-nums; }
+.fin-tile.hero b { font-size: 1.6rem; }
+.fin-tile small { font-size: 0.75rem; color: var(--text-3); }
+.fin-tile .pos, .fin-block .pos { color: var(--good); }
+.fin-tile .neg, .fin-block .neg { color: var(--accent-2); }
+.fin-block { background: var(--s2); border: 1px solid var(--line); border-radius: var(--r); padding: 10px 12px; }
+.fin-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 28%) 6.6em; align-items: center; gap: 10px; padding: 6px 0; border-bottom: 1px dashed var(--line); }
+.fin-row:last-of-type { border-bottom: 0; }
+.fin-row.total { font-weight: 700; border-top: 1px solid var(--line-2); border-bottom: 0; margin-top: 2px; }
+.fin-name { color: var(--text-2); font-size: 0.9rem; }
+.fin-row.total .fin-name { color: var(--text); }
+.fin-val { font-variant-numeric: tabular-nums; font-weight: 600; text-align: right; white-space: nowrap; color: var(--text); }
+.fin-bar { height: 8px; background: var(--s3); border-radius: 4px; overflow: hidden; }
+.fin-bar i { display: block; height: 100%; border-radius: 0 4px 4px 0; }
+.fin-bar i.in, .fin-key.in { background: var(--good); }
+.fin-bar i.out, .fin-key.out { background: var(--accent-2); }
+.fin-key { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; }
+.fin-key.net { background: var(--text); border-radius: 50%; }
+.fin-table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; font-size: 0.9rem; table-layout: fixed; }
+.fin-table th:first-child { width: 44%; }
+.fin-table th, .fin-table td { padding: 6px 4px; border-bottom: 1px dashed var(--line); text-align: right; font-weight: 600; }
+.fin-table th:first-child { text-align: left; font-weight: 400; color: var(--text-2); }
+.fin-table thead th { font-size: 0.75rem; color: var(--text-3); font-weight: 600; border-bottom: 1px solid var(--line-2); }
+.fin-table tr.total th, .fin-table tr.total td { font-weight: 700; color: var(--text); border-bottom: 0; border-top: 1px solid var(--line-2); }
+.fin-table td.muted { color: var(--text-3); font-weight: 400; }
+.fin-chart { margin-bottom: 4px; }
+.fin-in { fill: var(--good); }
+.fin-out { fill: var(--accent-2); }
+.fin-col { opacity: 0.85; }
+.fin-col.fin-hl { opacity: 1; }
+.fin-net-line { fill: none; stroke: var(--text-2); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.fin-net { fill: var(--text); stroke: var(--s2); stroke-width: 2; pointer-events: none; }
+.ch-grid.zero { stroke: var(--line-2); }
+.fin-cash-line { fill: none; stroke: #7fb2ff; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.fin-cash-area { fill: #7fb2ff; opacity: 0.1; }
+.fin-cash-end, .fin-cash-dot { fill: #7fb2ff; stroke: var(--s2); stroke-width: 2; pointer-events: none; }
+.fin-tip-parts { margin-top: 4px; padding-top: 4px; border-top: 1px solid var(--line); font-size: 0.9em; color: var(--text-2); }
+.fin-gov, .fin-open { width: 100%; min-height: 44px; margin-top: 12px; }
