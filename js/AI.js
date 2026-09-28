@@ -42,6 +42,7 @@ class AI {
     // --- планирование хода -------------------------------------------
     planTurn() {
         const d = this.data;
+        Shipping.planAI(d);
         // соседи людей готовятся к обороне; страны людей ИИ не трогает
         const playerNeighbours = new Set(d.humans.flatMap(cc => d.neighbourCountries(cc)));
         for (const country of Object.values(d.countries)) {
@@ -85,7 +86,7 @@ class AI {
         let best = null;
         for (const region of d.getCountryRegions(country.id)) {
             if (d.projects.some(p => p.regionId === region.id)) continue;
-            for (const kind of Object.keys(DEVELOPMENT)) {
+            for (const kind of d.developKinds(region)) {
                 if (region.development[kind] >= 5) continue;
                 const cost = d.developmentCost(region.id, kind);
                 const score = Economy.projectValue(d, region.id, kind) / cost;

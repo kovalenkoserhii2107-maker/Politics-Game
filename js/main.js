@@ -13,6 +13,7 @@ class GameCore {
         this.panelRegion = null;
 
         document.addEventListener('mapBackground', () => this.ui.closePanel());
+        document.addEventListener('straitClick', e => this.ui.showStraits(this.data, e.detail));
         document.addEventListener('panelClosed', () => {
             this.map.clearSelection();
             this.cancelTargeting();
@@ -151,6 +152,7 @@ class GameCore {
         }
         if (action === 'open-finance') { this.ui.hideModal('gov-modal'); this.openFinance(); return; }
         if (action === 'open-gov') { this.ui.hideModal('finance-modal'); this.openGovernment(); return; }
+        if (action === 'open-straits') { this.ui.hideModal('finance-modal'); this.ui.showStraits(d); return; }
         if (d.gameOver) return;
         if (action.startsWith('rg-')) { this.regionsAction(action, btn); return; }
         if (['invest', 'cancel-project', 'integrate'].includes(action)) {
@@ -190,6 +192,16 @@ class GameCore {
                 : result.won ? `Восстание подавлено: гарнизон ${result.ours} против ${result.theirs}` : `Подавить не вышло: гарнизон ${result.ours} против ${result.theirs}. Нужно больше войск.`);
             this.map.refreshColors();
             this.afterStateChange();
+            return;
+        }
+        if (action === 'strait-mode') {
+            const result = d.act('setStraitPolicy', btn.dataset.strait, btn.dataset.mode, Number(btn.dataset.fee) || 0);
+            if (!result.ok) { this.ui.toast(result.reason); return; }
+            this.ui.toast(`${STRAITS[btn.dataset.strait].name}: ${btn.dataset.mode === 'fee' ? `плата ${Math.round(Number(btn.dataset.fee) * 100)}%` : STRAIT_MODES[btn.dataset.mode].name.toLowerCase()}`);
+            this.ui.refreshStraits(d);
+            this.map.drawStraits();
+            this.loop.updateTopBarUI();
+            SaveGame.save(d);
             return;
         }
         if (action === 'bonds') {
@@ -724,7 +736,7 @@ class GameCore {
     onNewWorld(report) {
         this.cancelTargeting();
         this.ui.closePanel();
-        for (const id of ['diplo-modal', 'campaign-modal', 'gov-modal', 'finance-modal', 'science-modal', 'decision-modal', 'trade-modal', 'regions-modal']) this.ui.hideModal(id);
+        for (const id of ['diplo-modal', 'campaign-modal', 'gov-modal', 'finance-modal', 'straits-modal', 'science-modal', 'decision-modal', 'trade-modal', 'regions-modal']) this.ui.hideModal(id);
         this.loop.failed = false;
         this.loop.awaitingSummary = false;
         if (report) this.loop.showReport(report);

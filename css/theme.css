@@ -857,3 +857,9 @@ body.hotseat-handoff #ui-layer > :not(#hotseat-screen) { visibility: hidden; }
 .imf-cond.ok { background: var(--good-soft); color: var(--good); }
 .imf-cond.bad { background: var(--accent-soft); color: var(--accent-2); }
 .fin-alert { padding: 10px 12px; border-radius: var(--r); background: var(--accent-soft); color: var(--accent-2); border: 1px solid var(--accent-line); font-size: 0.9rem; line-height: 1.4; }
+
+/* ---------- окно «Судоходство и проливы» ---------- */
+#straits-modal .modal-content { min-width: 0; }
+.strait-card { margin-top: 10px; }
+.strait-card.mine { border-color: var(--line-2); box-shadow: inset 3px 0 0 #7fb2ff; }
+.strait-card .chip.on { background: var(--light); color: var(--ink); }

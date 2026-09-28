@@ -30,6 +30,8 @@ const DEVELOPMENT = {
     agro: { name: 'Агрокомплекс', cost: 360000, turns: 2, resource: 'agro', gain: 15, yields: 'food' },
     oil: { name: 'Энергетический комплекс', cost: 750000, turns: 3, resource: 'oil', gain: 2, yields: 'energy' },
     infra: { name: 'Инфраструктура', cost: 500000, turns: 2, resource: null, gain: 0, yields: null },
+    // только в прибрежных областях (Shipping.coastal): торговля и фрахт
+    port: { name: 'Порт', cost: 700000, turns: 3, resource: null, gain: 0, yields: null, coastal: true },
 };
 const POLICIES = {
     balanced: { name: 'Сбалансированный курс', description: 'Без дополнительных расходов и штрафов.', industry: 1, loyalty: 0, socialCost: 0 },
@@ -83,6 +85,7 @@ class GameData {
         this.garrisons = {};        // войска в помощь союзнику: область → страна → войска
         Council.init(this);
         Credit.init(this);          // облигации и программы МВФ
+        Shipping.init(this);        // режимы проливов
         this.diploEvents = [];      // что случилось в дипломатии между отчётами хода
         // Страны под управлением людей. В одиночной игре — только игрок; в
         // сетевой — все участники. Задания, решения и журнал каждого, кроме
@@ -256,7 +259,7 @@ class GameData {
                 lx: info.lx ?? info.cx,
                 ly: info.ly ?? info.cy,
                 loyalty: 1.0, unrest: 0,
-                development: { industry: 0, agro: 0, oil: 0, infra: 0 },
+                development: { industry: 0, agro: 0, oil: 0, infra: 0, port: 0 },
                 army: this.emptyArmy(),
                 resources: { oil: info.oil, agro: info.agro, industry: info.industry },
             };
@@ -1477,6 +1480,11 @@ class GameData {
             : '';
     }
 
+    // Какие проекты можно строить в области: порт — только на берегу.
+    developKinds(region) {
+        return Object.keys(DEVELOPMENT).filter(k => !DEVELOPMENT[k].coastal || Shipping.coastal(region));
+    }
+
     developmentCost(regionId, kind) {
         const region = this.regions[regionId], plan = DEVELOPMENT[kind];
         return region && plan ? Math.round(plan.cost * (1 + (region.development[kind] || 0) * 0.5)) : null;
@@ -1485,6 +1493,7 @@ class GameData {
     invest(regionId, kind, countryId = this.playerCountry) {
         const region = this.regions[regionId], plan = DEVELOPMENT[kind], country = this.countries[countryId];
         if (this.gameOver || !region || !plan || region.owner !== countryId) return { ok: false, reason: 'Проект недоступен' };
+        if (plan.coastal && !Shipping.coastal(region)) return { ok: false, reason: 'Порт строят только на морском берегу' };
         if (region.development[kind] >= 5) return { ok: false, reason: 'Достигнут 5-й уровень развития' };
         if (this.projects.some(p => p.regionId === regionId)) return { ok: false, reason: 'В области уже идёт строительство' };
         const cost = this.developmentCost(regionId, kind);
@@ -1567,7 +1576,7 @@ class GameData {
         let tax = 0, upkeep = 0, social = 0;
         if (!country || !this.regionsByCountry[countryId]?.length) {
             // interest обязателен: без него расходы страны с долгами — NaN
-            return { income: 0, expense: 0, tax, sales: 0, purchases: 0, upkeep, social, interest: 0, bonds: 0, imf: 0, trade: { lines: {} } };
+            return { income: 0, expense: 0, tax, sales: 0, purchases: 0, upkeep, social, interest: 0, bonds: 0, imf: 0, shipping: 0, tolls: 0, transit: 0, trade: { lines: {} } };
         }
         const policy = POLICIES[country.policy] || POLICIES.balanced;
         for (const region of this.getCountryRegions(countryId)) {
@@ -1584,14 +1593,19 @@ class GameData {
             * (Unrest.civilWar(this, countryId) ? REVOLT.CIVIL_TAX : 1);
         const trade = Economy.projectTrade(this, countryId);
         // торговые договоры: продаём дороже, покупаем дешевле
-        const bonus = Diplomacy.tradeBonus(this, countryId);
+        const bonus = Economy.tradeBonus(this, countryId);
         const sales = trade.sales * (1 + bonus) * cycle.trade, purchases = trade.purchases * (1 - bonus);
         const debt = country.debt || 0;
         const interest = debt ? Math.round(debt * Economy.rateFor(debt, tax)) : 0;
         const { bonds, imf } = Credit.due(this, countryId);
+        // судоходство: фрахт портов, сборы за свои проливы (по прошлому ходу),
+        // плата за проход чужих — от объёма торговли
+        const shipping = Shipping.freight(this, countryId);
+        const tolls = country.lastTolls || 0;
+        const transit = Math.round((trade.sales + trade.purchases) * Shipping.feeRate(this, countryId));
         return {
-            income: tax + sales, expense: upkeep + social + purchases + interest + bonds + imf,
-            tax, sales, purchases, upkeep, social, interest, bonds, imf, trade, tradeBonus: bonus,
+            income: tax + sales + shipping + tolls, expense: upkeep + social + purchases + interest + bonds + imf + transit,
+            tax, sales, purchases, upkeep, social, interest, bonds, imf, shipping, tolls, transit, trade, tradeBonus: bonus,
         };
     }
 
@@ -1609,6 +1623,11 @@ class GameData {
         c.debt = (c.debt || 0) + amount;
         c.money += amount;
         return { ok: true, amount };
+    }
+
+    setStraitPolicy(id, mode, fee = 0, countryId = this.playerCountry) {
+        if (this.gameOver) return { ok: false, reason: 'Нельзя' };
+        return Shipping.setPolicy(this, id, countryId, mode, fee);
     }
 
     issueBonds(amount, countryId = this.playerCountry) { return Credit.issueBonds(this, countryId, amount); }
@@ -1646,6 +1665,15 @@ class GameData {
         this.checkGarrisons(events);
         const balances = {};
         const markets = Economy.runMarkets(this);
+        // объём торговли за ход — с него платят за проход проливов
+        const volume = {};
+        for (const [cc, m] of Object.entries(markets)) {
+            let v = 0;
+            for (const r of Object.values(m.res)) v += (r.sold + r.bought) * r.price;
+            volume[cc] = v;
+        }
+        const straits = Shipping.settle(this, volume);
+        Shipping.endTurn(this, events);
 
         for (const country of Object.values(this.countries)) {
             if (!country.alive) continue;
@@ -1655,11 +1683,13 @@ class GameData {
             // вместо прогноза торговли — то, что реально продано и куплено
             let sales = 0, purchases = 0;
             if (economy) for (const r of Object.values(economy.res)) { sales += r.sold * r.price; purchases += r.bought * r.price; }
-            const bonus = Diplomacy.tradeBonus(this, country.id);
+            const bonus = Economy.tradeBonus(this, country.id);
             balance.sales = Math.round(sales * (1 + bonus) * Economy.cycle(this).trade);
             balance.purchases = Math.round(purchases * (1 - bonus));
-            balance.income = balance.tax + balance.sales;
-            balance.expense = balance.upkeep + balance.social + balance.purchases + balance.interest + balance.bonds + balance.imf;
+            balance.tolls = straits.tolls[country.id] || 0;
+            balance.transit = straits.transit[country.id] || 0;
+            balance.income = balance.tax + balance.sales + balance.shipping + balance.tolls;
+            balance.expense = balance.upkeep + balance.social + balance.purchases + balance.interest + balance.bonds + balance.imf + balance.transit;
             balances[country.id] = balance;
             const net = Math.round(balance.income - balance.expense);
             country.lastNetIncome = Number.isFinite(net) ? net : 0;
@@ -1883,6 +1913,7 @@ class GameData {
             traits: { ...(this.traits || {}) },
             nuclear: Nuclear.serialize(this),
             credit: Credit.serialize(this),
+            shipping: Shipping.serialize(this),
             chronicle: this.chronicle ? structuredClone(this.chronicle) : undefined,
             diplomacy: Diplomacy.serialize(this),
             missions: this.missions.map(m => ({ ...m, reward: { ...m.reward } })),
@@ -1963,6 +1994,7 @@ class GameData {
         if (save.council !== undefined && !Council.valid(save.council)) fail('совет');
         if (save.nuclear !== undefined && !Nuclear.valid(save.nuclear)) fail('ядерное оружие');
         if (save.credit !== undefined && !Credit.valid(save.credit)) fail('займы');
+        if (save.shipping !== undefined && !Shipping.valid(save.shipping)) fail('проливы');
         if (save.traits !== undefined && !World.valid(save.traits)) fail('характеры стран');
         if (save.garrisons !== undefined && (!save.garrisons || typeof save.garrisons !== 'object' || !Object.entries(save.garrisons).every(([id, byCountry]) =>
             RegionsDB[id] && byCountry && typeof byCountry === 'object' && Object.entries(byCountry).every(([cc, army]) =>
@@ -2041,7 +2073,7 @@ class GameData {
                 units.forEach((u, i) => { region.army[u] = saved[1][i] || 0; });
                 region.loyalty = saved[2];
                 region.resources = { ...saved[4] };
-                region.development = { ...saved[5], infra: saved[5].infra || 0 };
+                region.development = { ...saved[5], infra: saved[5].infra || 0, port: saved[5].port || 0 };
                 region.reconActiveUntil = saved[3] ? new Date(saved[3]) : undefined;
                 if (saved[6] !== undefined) region.population = saved[6];
                 region.unrest = saved[7] || 0;
@@ -2098,6 +2130,7 @@ class GameData {
         // партии до ядерного оружия: стартовые арсеналы, как в новой игре
         if (save.nuclear) Nuclear.restore(data, save.nuclear); else Nuclear.init(data);
         if (save.credit) Credit.restore(data, save.credit); else Credit.init(data);
+        if (save.shipping) Shipping.restore(data, save.shipping); else Shipping.init(data);
         // хроника: у старых партий графики начинаются с момента загрузки
         if (save.chronicle) data.chronicle = structuredClone(save.chronicle);
         else Score.initChronicle(data);
@@ -2316,5 +2349,5 @@ GameData.COMMANDS = {
     setTrade: 0, research: 0, startResearch: 0, cancelResearch: 0, setPolicy: 0, setTaxRate: 0,
     declareWar: 0, proposePeace: -1, diplomacyAction: -1, answerDecision: -1,
     nuclearBuild: 1, nuclearCancel: 0, nuclearStrike: 2,
-    claimMission: -1, skipMission: -1, transfer: -1, cedeRegion: -1, borrow: 1, repay: 1, issueBonds: 1, takeImf: 0, suppressRevolt: -1, appeaseRevolt: -1, proposeTrade: -1, giveTroops: 3, planOperation: -1,
+    claimMission: -1, skipMission: -1, transfer: -1, cedeRegion: -1, borrow: 1, repay: 1, issueBonds: 1, takeImf: 0, setStraitPolicy: 3, suppressRevolt: -1, appeaseRevolt: -1, proposeTrade: -1, giveTroops: 3, planOperation: -1,
 };
