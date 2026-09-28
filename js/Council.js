@@ -284,9 +284,16 @@ class Council {
         const add = (pri, item) => { if (!recent(item.kind, item.target || (item.pair && item.pair.join('|')))) items.push({ pri, ...item }); };
         const alive = cc => d.countries[cc] && d.countries[cc].alive && d.regionsByCountry[cc].length;
 
+        // захваченное — один проход по странам, дальше из готовых списков
+        const illegal = {}, lostBy = {};
+        for (const c of Object.values(d.countries)) {
+            if (!alive(c.id)) continue;
+            illegal[c.id] = Council.illegal(d, c.id);
+            for (const r of illegal[c.id]) (lostBy[r.originalOwner] = lostBy[r.originalOwner] || []).push(r);
+        }
         for (const c of Object.values(d.countries)) {
             if (!alive(c.id) || !c.playable) continue;
-            const n = Council.taken(d, c.id);
+            const n = illegal[c.id].length;
             const victim = n ? Council.victimOf(d, c.id) : null;
             if (n >= COUNCIL.ENFORCE_TAKEN && Council.sanctioned(d, c.id) && victim && d.isAtWar(c.id, victim)) add(100, { kind: 'enforce', target: c.id, victim });
             else if (n >= COUNCIL.MIN_TAKEN && !Council.sanctioned(d, c.id)) add(80, { kind: 'sanctions', target: c.id, victim });
@@ -312,10 +319,10 @@ class Council {
 
         for (const c of Object.values(d.countries)) {
             if (!alive(c.id) || !c.playable) continue;
-            const lost = Object.values(d.regions).filter(r => r.originalOwner === c.id && r.owner !== c.id && Council.illegal(d, r.owner).includes(r)).length;
+            const lost = (lostBy[c.id] || []).length;
             const nuked = d.nuclear && d.nuclear.strikes.some(s => s.target === c.id && d.turn - s.turn <= 4);
             if (lost >= 2 || nuked || Unrest.civilWar(d, c.id)) {
-                const against = nuked ? d.nuclear.strikes.filter(s => s.target === c.id).pop().by : lost ? Object.values(d.regions).find(r => r.originalOwner === c.id && r.owner !== c.id)?.owner : null;
+                const against = nuked ? d.nuclear.strikes.filter(s => s.target === c.id).pop().by : lost ? lostBy[c.id][0].owner : null;
                 add(35 + (d.isHuman(c.id) ? 10 : 0), { kind: 'aid', target: c.id, against: against || null });
             }
         }

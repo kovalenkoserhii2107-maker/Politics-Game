@@ -3,8 +3,8 @@ const assert=require('node:assert/strict');
 const fs=require('node:fs'),path=require('node:path'),vm=require('node:vm');
 function engine(){
  const values=new Map();let seed=123456;const math=Object.create(Math);math.random=()=>{seed=(Math.imul(seed,1664525)+1013904223)>>>0;return seed/4294967296;};const context=vm.createContext({console,Date,Math:math,structuredClone,localStorage:{setItem:(k,v)=>values.set(k,v),getItem:k=>values.get(k)||null,removeItem:k=>values.delete(k),key:i=>[...values.keys()][i]??null,get length(){return values.size;}}});
- for(const file of ['data/CountriesDB','data/RegionsDB','data/NeighborsDB','data/CitiesDB','UnitsDB','Tech','Economy','Diplomacy','Missions','Score','Events','Unrest','Trade','Council','Nuclear','GameData','AI','GameLoop'])vm.runInContext(fs.readFileSync(path.join(__dirname,'../js',file+'.js'),'utf8'),context);
- return Object.assign(vm.runInContext('({GameData,AI,SaveGame,GameLoop,RegionsDB,UnitsDB,DEVELOPMENT,POLICIES,Economy,RESOURCES,ECONOMY,Tech,TECH_TREE,MODERNIZATION,Diplomacy,DIPLOMACY,Missions,MISSION_KINDS,MISSION_RULES,Score,GOALS,Events,EVENTS,DEBT,CYCLES,INFRA,Unrest,REVOLT,Trade,Council,COUNCIL,RULES,Nuclear,NUCLEAR})',context),{localStorage:context.localStorage});
+ for(const file of ['data/CountriesDB','data/RegionsDB','data/NeighborsDB','data/CitiesDB','UnitsDB','Tech','Economy','Diplomacy','Missions','Score','Events','Unrest','Trade','Council','Nuclear','World','GameData','AI','GameLoop'])vm.runInContext(fs.readFileSync(path.join(__dirname,'../js',file+'.js'),'utf8'),context);
+ return Object.assign(vm.runInContext('({GameData,AI,SaveGame,GameLoop,RegionsDB,UnitsDB,DEVELOPMENT,POLICIES,Economy,RESOURCES,ECONOMY,Tech,TECH_TREE,MODERNIZATION,Diplomacy,DIPLOMACY,Missions,MISSION_KINDS,MISSION_RULES,Score,GOALS,Events,EVENTS,DEBT,CYCLES,INFRA,Unrest,REVOLT,Trade,Council,COUNCIL,RULES,Nuclear,NUCLEAR,World,WORLD,TRAITS})',context),{localStorage:context.localStorage});
 }
 test('casualties are invariant under splitting an attack into orders',()=>{
  const {GameData}=engine();const fight=split=>{const d=new GameData('UA',{scenario:'war2024'});for(const id of ['UA-2','RU-62']){d.regions[id].army=d.emptyArmy();d.regions[id].army.infantry=10;}
@@ -41,7 +41,7 @@ test('map fingerprint changes with geometry; a save with the same regions loads 
 test('saves from another map are rejected and retained',()=>{const {GameData,SaveGame,localStorage}=engine();const save=new GameData('UA').serialize();const regions={};for(const [id,r] of Object.entries(save.regions))regions['X'+id]=r;save.regions=regions;localStorage.setItem(SaveGame.KEY,JSON.stringify({map:'old',game:save}));assert.equal(SaveGame.load(),null);assert.ok(SaveGame.error);assert.ok(localStorage.getItem(SaveGame.KEY));});
 test('v2 saves from the previous version migrate with defaults for new fields',()=>{const {GameData,SaveGame,localStorage}=engine();const d=new GameData('DE',{scenario:'war2024'});d.startWar('DE','PL');d.setOwner('PL-1','DE');const v3=d.serialize();const v2={v:2,player:'DE',cheat:false,scenario:'war2024',date:v3.date,turn:5,regions:{},countries:{},wars:v3.wars,truces:[],orders:{recruitment:[],attacks:[],movements:[],recon:[]},decisions:[],history:[],gameOver:false};for(const [id,r] of Object.entries(v3.regions))v2.regions[id]=r.slice(0,4);for(const [id,c] of Object.entries(v3.countries))v2.countries[id]=c.slice(0,7);localStorage.setItem(SaveGame.KEY,JSON.stringify({map:'1996:AD-1:ZW-9',savedAt:1,game:v2}));const loaded=SaveGame.load();assert.ok(loaded,SaveGame.error);const r=GameData.restore(loaded.game);assert.equal(r.regions['PL-1'].owner,'DE');assert.equal(r.turn,5);assert.ok(r.isAtWar('DE','PL'));assert.equal(r.countries.DE.policy,'balanced');assert.equal(r.difficulty,'normal');});
 test('export produces a file that imports back identically',()=>{const {GameData,SaveGame}=engine();const d=new GameData('BR',{difficulty:'hard'});d.turn=3;const file=SaveGame.exportFile(d);assert.match(file.name,/br-turn3\.json$/);const back=GameData.restore(SaveGame.parse(file.text).game);assert.equal(SaveGame.migrated,false);assert.equal(JSON.stringify(back.serialize()),JSON.stringify(d.serialize()));assert.throws(()=>SaveGame.parse('{"nope":1}'));});
-test('difficulty scales the player budget and AI caution',()=>{const {GameData,AI}=engine();const money=l=>new GameData('FR',{difficulty:l}).countries.FR.money;assert.ok(money('easy')>money('normal'));assert.ok(money('hard')<money('normal'));const easy=new AI(new GameData('FR',{difficulty:'easy'})),hard=new AI(new GameData('FR',{difficulty:'hard'}));assert.ok(easy.rule('ATTACK_MARGIN')>hard.rule('ATTACK_MARGIN'));assert.equal(new AI(new GameData('FR')).rule('AI_WAR_CHANCE'),0.05);});
+test('difficulty scales the player budget and AI caution',()=>{const {GameData,AI}=engine();const money=l=>new GameData('FR',{difficulty:l}).countries.FR.money;assert.ok(money('easy')>money('normal'));assert.ok(money('hard')<money('normal'));const easy=new AI(new GameData('FR',{difficulty:'easy'})),hard=new AI(new GameData('FR',{difficulty:'hard'}));assert.ok(easy.rule('ATTACK_MARGIN')>hard.rule('ATTACK_MARGIN'));assert.equal(new AI(new GameData('FR')).rule('AI_WAR_CHANCE'),0.1);});
 test('corrupt state rejected before restoration',()=>{const {GameData}=engine(),save=JSON.parse(JSON.stringify(new GameData('UA').serialize()));save.regions['UA-1'][1][0]=-1;assert.throws(()=>GameData.restore(save));});
 test('every playable country starts with a valid save and finite budget',()=>{
  const {GameData}=engine();const world=new GameData('UA');
@@ -114,11 +114,11 @@ test('diplomacy: tribute only from much weaker countries, decline hurts relation
     d.countries.US.influence = 100;
     const weak = d.neighbourCountries('US').find(cc => d.calculateMilitaryPower('US') > DIPLOMACY.TRIBUTE_RATIO * d.calculateMilitaryPower(cc));
     assert.ok(weak);
-    const money = d.countries.US.money;
+    const money = d.countries.US.money, rel = Diplomacy.relation(d, 'US', weak);
     const r = d.diplomacyAction(weak, 'tribute');
     assert.ok(r.paid > 0);
     assert.equal(d.countries.US.money, money + r.paid);
-    assert.equal(Diplomacy.relation(d, 'US', weak), DIPLOMACY.TRIBUTE_RELATION);
+    assert.equal(Diplomacy.relation(d, 'US', weak), rel + DIPLOMACY.TRIBUTE_RELATION);
     const d2 = new GameData('LT');
     d2.countries.LT.influence = 100;
     assert.equal(d2.diplomacyAction('PL', 'tribute').paid, 0);
@@ -588,7 +588,7 @@ test('unrest: a human neighbour decides; civil war cuts taxes; revolts are saved
     const [x, y] = e.getCountryRegions('DE').filter(r => r.id !== e.countries.DE.capital);
     Unrest.start(e, x.id, []); Unrest.start(e, y.id, []);
     assert.equal(Unrest.civilWar(e, 'DE'), true);
-    const expected = (tax - (x.population + y.population) * e.countries.DE.taxRate) * REVOLT.CIVIL_TAX;
+    const expected = (tax - (e.taxBase(x) + e.taxBase(y)) * e.countries.DE.taxRate) * REVOLT.CIVIL_TAX;
     assert.ok(e.countryBalance('DE').tax < tax * REVOLT.CIVIL_TAX);
     assert.ok(Math.abs(e.countryBalance('DE').tax - expected) / expected < 0.1);
 });
@@ -1209,4 +1209,79 @@ test('UN events: peacekeepers request, IAEA, border incident, tribunal and UN fu
     const rel = Diplomacy.relation(d, 'PL', 'CZ');
     run(d, 'un_fund', true);
     assert.ok(Diplomacy.relation(d, 'PL', 'CZ') > rel, 'жертва войны благодарна');
+});
+
+test('economy by GDP per capita: rich countries pay more per person; conquered land pays as it used to; world money stays the same', () => {
+    const { GameData, Economy } = engine();
+    const d = new GameData('PL');
+    assert.ok(Economy.wealth('US') > 3 * Economy.wealth('IN'), 'американец богаче индийца');
+    assert.ok(Economy.wealth('LU') <= 4 && Economy.wealth('ET') >= 0.2, 'разрыв сглажен');
+    // деньги мира в сумме не изменились: Σ население × богатство ≈ Σ население
+    const { CountriesDB } = require('../js/data/CountriesDB.js');
+    let pop = 0, weighted = 0;
+    for (const [cc, c] of Object.entries(CountriesDB)) if (c.playable && c.gdp > 0) { pop += c.population; weighted += c.population * Economy.wealth(cc); }
+    assert.ok(Math.abs(weighted / pop - 1) < 0.05);
+    // налог США больше индийского, хотя людей вчетверо меньше
+    assert.ok(d.countryBalance('US').tax / d.countries.US.taxRate > d.countryBalance('IN').tax / d.countries.IN.taxRate);
+    // захваченная область платит по богатству своей земли
+    const r = d.getCountryRegions('DE').find(x => x.id !== d.countries.DE.capital);
+    const base = d.taxBase(r);
+    d.setOwner(r.id, 'PL');
+    assert.equal(d.taxBase(r), base);
+    // у всех стран на старте конечный бюджет, почти все — не в минусе
+    let broke = 0, total = 0;
+    for (const c of Object.values(d.countries)) {
+        if (!c.playable || !d.regionsByCountry[c.id].length) continue;
+        const b = d.steadyBalance(c.id);
+        assert.ok(Number.isFinite(b.income - b.expense), c.id);
+        total++; if (b.income < b.expense) broke++;
+    }
+    assert.ok(broke / total < 0.05, `в минусе ${broke} из ${total}`);
+});
+
+test('world 2024: blocs and rivalries at start, traits per game are saved; partners help a weaker victim of aggression', () => {
+    const { GameData, Diplomacy, World, TRAITS, AI } = engine();
+    const d = new GameData('UA', { scenario: 'war2024' });
+    assert.ok(Diplomacy.relation(d, 'DE', 'FR') >= 35);
+    assert.ok(Diplomacy.relation(d, 'US', 'KP') <= -50);
+    assert.ok(Diplomacy.relation(d, 'IN', 'PK') <= -50);
+    assert.ok(Diplomacy.relation(d, 'DE', 'UA') >= 25);
+    for (const c of Object.values(d.countries)) if (c.playable) assert.ok(TRAITS[d.traits[c.id]], c.id);
+    assert.notEqual(d.traits.RU, 'isolationist');
+    const back = GameData.restore(JSON.parse(JSON.stringify(d.serialize())));
+    assert.equal(JSON.stringify(back.traits), JSON.stringify(d.traits));
+    // старая партия без характеров получает их при загрузке
+    const old = d.serialize(); delete old.traits;
+    assert.ok(Object.keys(GameData.restore(old).traits).length > 100);
+    // помощь Украине от друзей, пока Россия сильнее
+    const money = d.countries.UA.money, us = d.countries.US.money;
+    const events = [];
+    World.endTurn(d, events);
+    const aid = d.countries.UA.money - money;
+    assert.ok(aid > 0, 'помощь пришла');
+    assert.ok(d.countries.US.money < us, 'США заплатили');
+    assert.ok(aid <= d.countryBalance('UA').upkeep * 0.6 + 1, 'не больше доли содержания армии');
+    assert.ok(events.some(e => e.for === 'UA' && e.message.includes('Помощь партнёров')));
+});
+
+test('AI traits: an expansionist starts most wars, rivals are preferred, the sanctioned wait', () => {
+    const { GameData, AI, Diplomacy } = engine();
+    const d = new GameData('IS');
+    const ai = new AI(d);
+    d.turn = 20;
+    for (const c of Object.values(d.countries)) c.influence = 100;
+    for (const cc of Object.keys(d.traits)) d.traits[cc] = 'isolationist';
+    d.traits.SA = 'expansionist';
+    // Саудовская Аравия сильнее Йемена и враждует с ним
+    let sa = 0, n = 0, yemen = 0;
+    for (let i = 0; i < 60; i++) { const p = ai.pickAiWar(); if (!p) continue; n++; if (p.attacker === 'SA') { sa++; if (p.target === 'YE') { yemen++; assert.ok(p.grudge); } } }
+    assert.ok(n > 0 && sa / n > 0.5, `экспансионист выбран ${sa} из ${n}`);
+    assert.ok(yemen > 0, 'давний враг — среди целей');
+    // под санкциями новых войн не начинают
+    d.sanctions.SA = d.turn + 5;
+    for (let i = 0; i < 30; i++) { const p = ai.pickAiWar(); assert.ok(!p || p.attacker !== 'SA'); }
+    // друзей не трогают
+    delete d.sanctions.SA;
+    Diplomacy.changeRelation(d, 'SA', 'YE', 200);
+    for (let i = 0; i < 30; i++) { const p = ai.pickAiWar(); assert.ok(!p || !(p.attacker === 'SA' && p.target === 'YE')); }
 });

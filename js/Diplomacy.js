@@ -53,11 +53,24 @@ class Diplomacy {
         return until && until > d.turn ? until - d.turn : 0;
     }
 
+    // Самое частое место хода (торговые бонусы всех стран): без split и
+    // промежуточных массивов — ключ пары всегда «AA|BB».
     static partners(d, cc, table) {
-        return Object.keys(table).map(k => k.split('|')).filter(p => p.includes(cc)).map(p => (p[0] === cc ? p[1] : p[0]));
+        const out = [];
+        const head = cc + '|', tail = '|' + cc;
+        for (const k in table) {
+            if (k.startsWith(head)) out.push(k.slice(head.length));
+            else if (k.endsWith(tail)) out.push(k.slice(0, k.length - tail.length));
+        }
+        return out;
     }
     static allies(d, cc) { return Diplomacy.partners(d, cc, d.alliances).filter(x => d.countries[x] && d.countries[x].alive); }
-    static dealCount(d, cc) { return Diplomacy.partners(d, cc, d.deals).length; }
+    static dealCount(d, cc) {
+        let n = 0;
+        const head = cc + '|', tail = '|' + cc;
+        for (const k in d.deals) if (k.startsWith(head) || k.endsWith(tail)) n++;
+        return n;
+    }
     static tradeBonus(d, cc) { return Math.min(DIPLOMACY.DEAL_MAX, Diplomacy.dealCount(d, cc)) * DIPLOMACY.DEAL_BONUS; }
 
     // Подарок — неделя дохода получателя, но не меньше $1M и не больше $20M.
