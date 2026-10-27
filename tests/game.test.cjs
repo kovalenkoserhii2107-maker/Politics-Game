@@ -1739,3 +1739,30 @@ test('navy AI: a coastal country at war builds ships at its port and sails to th
     const greek = new Set(d.getCountryRegions('GR').flatMap(r => Navy.seasOf(r.id)));
     assert.ok(Navy.fleets(d, 'TR').some(f => greek.has(f.zone)), 'флот у греческих берегов');
 });
+
+test('god mode provides unlimited funds, realistic combat casualties and blocks attacks on player territory', () => {
+    const { GameData, AI, RULES } = engine();
+    const d = new GameData('UA', { cheat: true, scenario: 'war2024' });
+    assert.equal(d.countries.UA.money, RULES.CHEAT_MONEY);
+
+    // 1. attacks on player territory are rejected
+    assert.equal(d.queueAttack('RU-62', 'UA-2', { infantry: 1 }, 'RU').ok, false);
+
+    // 2. AI attack planning does not target player regions
+    const ai = new AI(d);
+    const ruFront = d.getCountryRegions('RU').filter(r => d.getNeighbors(r.id).some(n => d.regions[n]?.owner === 'UA'));
+    ai.attack(d.countries.RU, ruFront, new Set(['UA']));
+    assert.equal(d.orders.attacks.some(o => d.regions[o.to]?.owner === 'UA'), false);
+
+    // 3. realistic combat: insufficient player attack does not automatically succeed
+    d.regions['UA-2'].army = d.emptyArmy();
+    d.regions['UA-2'].army.infantry = 1;
+    d.regions['RU-62'].army = d.emptyArmy();
+    d.regions['RU-62'].army.infantry = 100;
+    assert.equal(d.queueAttack('UA-2', 'RU-62', { infantry: 1 }, 'UA').ok, true);
+    const result = d.processOrders();
+    const battle = result.logs.find(l => l.losses);
+    assert.ok(battle, 'battle occurred');
+    assert.equal(battle.success, false, 'insufficient attack fails');
+    assert.ok(battle.losses.attacker.infantry > 0, 'player incurs casualties');
+});

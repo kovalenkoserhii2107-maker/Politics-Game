@@ -117,6 +117,7 @@ class Nuclear {
         const region = d.regions[regionId];
         const c = d.countries[cc];
         if (!k || !region || !c || !c.alive || d.gameOver) return { ok: false, reason: 'Нельзя' };
+        if (d.cheatMode && cc !== d.playerCountry && region.owner === d.playerCountry) return { ok: false, reason: 'Режим бога защищает территории игрока' };
         if (!d.isAtWar(cc, region.owner)) return { ok: false, reason: 'Удар возможен только по стране, с которой идёт война' };
         if (!Nuclear.stock(d, cc)[kind]) return { ok: false, reason: `Нет готовых боеголовок: ${k.short}` };
         if (!retaliation && c.influence < k.influence) return { ok: false, reason: `Нужно ${k.influence} влияния` };
@@ -272,7 +273,7 @@ class Nuclear {
             s.answered = true;
             if (!d.isAtWar(cc, s.by)) continue;
             const kind = Nuclear.stock(d, cc).hydrogen ? 'hydrogen' : 'atom';
-            const targets = d.getCountryRegions(s.by);
+            const targets = d.getCountryRegions(s.by).filter(r => !d.cheatMode || r.owner !== d.playerCountry);
             if (!targets.length || !Nuclear.stock(d, cc)[kind]) continue;
             const target = targets.reduce((a, b) => (b.population > a.population ? b : a));
             Nuclear.strike(d, cc, target.id, kind, { retaliation: true });
@@ -306,6 +307,7 @@ class Nuclear {
             for (const id of d.getNeighbors(r.id)) {
                 const other = d.regions[id];
                 if (!other || !enemySet.has(other.owner)) continue;
+                if (d.cheatMode && other.owner === d.playerCountry) continue;
                 const power = d.calculateRegionMilitaryPower(id);
                 if (power > bestPower) { bestPower = power; best = id; }
             }

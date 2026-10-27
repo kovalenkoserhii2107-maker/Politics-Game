@@ -452,12 +452,20 @@ class GameLoop {
         const player = this.data.getCountry(this.data.playerCountry);
         if (!player) return;
 
-        document.getElementById('glob-money').textContent = this.ui.formatNumber(player.money);
-        const net = document.getElementById('glob-net');
-        const value = this.getProjectedNetIncome(player.id);
-        net.textContent = (value > 0 ? '+' : value < 0 ? '−' : '') + this.ui.formatNumber(Math.abs(value)) + '/ход';
-        net.title = 'Прогноз изменения казны за ход';
-        net.style.color = value > 0 ? 'var(--good)' : value < 0 ? 'var(--accent-2)' : 'var(--text-3)';
+        if (this.data.cheatMode) {
+            document.getElementById('glob-money').textContent = '∞';
+            const net = document.getElementById('glob-net');
+            net.textContent = 'безлимит';
+            net.title = 'Режим бога: казна не ограничена';
+            net.style.color = 'var(--good)';
+        } else {
+            document.getElementById('glob-money').textContent = this.ui.formatNumber(player.money);
+            const net = document.getElementById('glob-net');
+            const value = this.getProjectedNetIncome(player.id);
+            net.textContent = (value > 0 ? '+' : value < 0 ? '−' : '') + this.ui.formatNumber(Math.abs(value)) + '/ход';
+            net.title = 'Прогноз изменения казны за ход';
+            net.style.color = value > 0 ? 'var(--good)' : value < 0 ? 'var(--accent-2)' : 'var(--text-3)';
+        }
 
         document.getElementById('glob-influence').textContent = player.influence;
         document.getElementById('glob-influence-sub').textContent = player.influence >= RULES.INFLUENCE_MAX ? 'максимум' : `+${RULES.INFLUENCE_PER_TURN}/ход`;

@@ -21,6 +21,7 @@ const RULES = {
     OPERATION_BONUS: 0.1,       // удар по цели заранее объявленной совместной операции
     FLANK_BONUS: 0.1,           // за каждое направление удара сверх первого
     FLANK_MAX: 0.2,             // потолок: с трёх направлений и больше
+    CHEAT_MONEY: 999999999999,  // безлимитная казна в режиме бога ($1T)
 };
 
 // Проекты увеличивают ресурс области; что это даёт в еде, энергии и
@@ -109,6 +110,9 @@ class GameData {
                 const human = this.countries[cc];
                 if (human) human.money = Math.round(human.money * DIFFICULTY[this.difficulty].playerMoney);
                 if (human && human.playable) this.withPlayer(cc, () => Missions.refill(this));
+            }
+            if (this.cheatMode && this.playerCountry && this.countries[this.playerCountry]) {
+                this.countries[this.playerCountry].money = RULES.CHEAT_MONEY;
             }
             Score.init(this);
             Score.initChronicle(this);
@@ -1006,9 +1010,12 @@ class GameData {
             return { ok: false, reason: 'Не хватает мощности индустрии области' };
         }
         const cost = unit.buildCost * amount;
-        if (country.money < cost) return { ok: false, reason: 'Недостаточно средств' };
-
-        country.money -= cost;
+        if (this.cheatMode && countryId === this.playerCountry) {
+            country.money = RULES.CHEAT_MONEY;
+        } else {
+            if (country.money < cost) return { ok: false, reason: 'Недостаточно средств' };
+            country.money -= cost;
+        }
         if (this.isHuman(countryId)) {
             this.seatOf(countryId).campaign.recruited = true;
             this.bumpStat(countryId, 'recruited', amount);
@@ -1052,8 +1059,12 @@ class GameData {
         const cost = this.techCost(countryId, unitId);
         if (cost === null) return { ok: false, reason: Tech.unitUnlocked(country, unitId) ? 'Максимальная ступень' : 'Род войск ещё не открыт' };
         if (Council.embargoed(this, countryId)) return { ok: false, reason: 'Оружейное эмбарго ООН: модернизация запрещена' };
-        if (country.money < cost) return { ok: false, reason: 'Недостаточно средств' };
-        country.money -= cost;
+        if (this.cheatMode && countryId === this.playerCountry) {
+            country.money = RULES.CHEAT_MONEY;
+        } else {
+            if (country.money < cost) return { ok: false, reason: 'Недостаточно средств' };
+            country.money -= cost;
+        }
         country.tech[unitId] = (country.tech[unitId] || 1) + 1;
         if (this.isHuman(countryId)) this.bumpStat(countryId, 'modernized');
         return { ok: true };
@@ -1067,7 +1078,11 @@ class GameData {
         const check = Tech.canStart(country, techId);
         if (!check.ok) return check;
         const tech = TECH_TREE[techId];
-        country.money -= tech.cost;
+        if (this.cheatMode && countryId === this.playerCountry) {
+            country.money = RULES.CHEAT_MONEY;
+        } else {
+            country.money -= tech.cost;
+        }
         country.research = { id: techId, remaining: tech.turns, started: this.turn };
         return { ok: true };
     }
@@ -1137,10 +1152,17 @@ class GameData {
         const targets = type === 'attacks' ? this.getValidAttackTargets(fromId) : this.getValidMoveTargets(fromId);
         if (!targets.includes(toId)) return { ok: false, reason: 'Недоступная цель' };
         const from = this.regions[fromId], to = this.regions[toId], country = this.countries[countryId];
+        if (this.cheatMode && type === 'attacks' && to.owner === this.playerCountry && countryId !== this.playerCountry) {
+            return { ok: false, reason: 'Режим бога защищает территории игрока' };
+        }
         const transport = this.expeditionQuote(type, fromId, toId, forces);
-        if (country.money < transport.cost || country.influence < transport.influence) return { ok: false, reason: 'Не хватает денег или влияния на экспедицию' };
-        country.money -= transport.cost;
-        country.influence -= transport.influence;
+        if (this.cheatMode && countryId === this.playerCountry) {
+            country.money = RULES.CHEAT_MONEY;
+        } else {
+            if (country.money < transport.cost || country.influence < transport.influence) return { ok: false, reason: 'Не хватает денег или влияния на экспедицию' };
+            country.money -= transport.cost;
+            country.influence -= transport.influence;
+        }
         this.orders[type].push({
             transportCost: transport.cost, transportInfluence: transport.influence,
             country: countryId, from: fromId, to: toId, forces: { ...forces },
@@ -1313,6 +1335,9 @@ class GameData {
         const target = this.getRegion(allOrders[0].to);
         if (!target) return null;
         const defender = target.owner;
+        if (this.cheatMode && defender === this.playerCountry && allOrders.some(o => o.country !== this.playerCountry)) {
+            return null;
+        }
         // бьются только те, кто воюет с хозяином области
         const orders = allOrders.filter(o => o.country !== defender && this.isAtWar(o.country, defender));
         if (!orders.length) return null;
@@ -1366,9 +1391,6 @@ class GameData {
         let success = ratio >= RULES.ATTACK_ADVANTAGE;
         let defLossPct = Math.min(0.6, Math.max(0.05, 0.15 * ratio)) * Tech.factor(this.countries[defender], 'losses');
         let attLossBase = Math.min(0.6, Math.max(0.05, 0.2 / ratio));
-        if (this.cheatMode && coalition.includes(this.playerCountry)) {
-            success = true; attLossBase = 0; defLossPct = 1;
-        }
 
         const attLosses = this.emptyArmy(), defLosses = this.emptyArmy();
         for (const unitId of Object.keys(UnitsDB)) {
@@ -1505,8 +1527,12 @@ class GameData {
         if (region.development[kind] >= 5) return { ok: false, reason: 'Достигнут 5-й уровень развития' };
         if (this.projects.some(p => p.regionId === regionId)) return { ok: false, reason: 'В области уже идёт строительство' };
         const cost = this.developmentCost(regionId, kind);
-        if (country.money < cost) return { ok: false, reason: 'Недостаточно средств' };
-        country.money -= cost;
+        if (this.cheatMode && countryId === this.playerCountry) {
+            country.money = RULES.CHEAT_MONEY;
+        } else {
+            if (country.money < cost) return { ok: false, reason: 'Недостаточно средств' };
+            country.money -= cost;
+        }
         this.projects.push({ regionId, kind, country: countryId, cost, remaining: plan.turns });
         if (this.isHuman(countryId)) this.seatOf(countryId).campaign.investment = true;
         return { ok: true };
@@ -1720,6 +1746,7 @@ class GameData {
             const net = Math.round(balance.income - balance.expense);
             country.lastNetIncome = Number.isFinite(net) ? net : 0;
             country.money += country.lastNetIncome;
+            if (this.cheatMode && country.id === this.playerCountry) country.money = RULES.CHEAT_MONEY;
             if (!Number.isFinite(country.money)) country.money = 0;   // мир, испорченный прежней ошибкой
             if (economy) this.applyShortages(country, economy, events);
             country.influence = Math.min(RULES.INFLUENCE_MAX, country.influence + RULES.INFLUENCE_PER_TURN);
@@ -2128,6 +2155,9 @@ class GameData {
                 c.trade = { ...saved[10] };
                 c.economy = { money: 0, sat: { ...saved[11] }, res: {} };
             }
+        }
+        if (data.cheatMode && data.playerCountry && data.countries[data.playerCountry]) {
+            data.countries[data.playerCountry].money = RULES.CHEAT_MONEY;
         }
         data.currentDate = new Date(save.date);
         data.turn = save.turn;
