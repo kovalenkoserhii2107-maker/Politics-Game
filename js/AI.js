@@ -426,6 +426,7 @@ class AI {
             for (const id of d.getNeighbors(region.id)) {
                 const other = d.regions[id];
                 if (!other || !enemySet.has(other.owner)) continue;
+                if (d.cheatMode && other.owner === d.playerCountry) continue;
                 if (!targets.has(id)) targets.set(id, []);
                 targets.get(id).push(region);
             }
@@ -489,6 +490,7 @@ class AI {
         //    не воюет: второй фронт открывают не ИИ, а сам игрок. В сетевой
         //    игре так смотрят на каждого из людей.
         for (const player of mayStartWars ? d.humans : []) {
+            if (d.cheatMode && player === d.playerCountry) continue;
             if (!d.countries[player].alive || d.enemiesOf(player).length) continue;
             // на игрока смотрят вместе с его союзниками
             const playerPower = Math.max(1, d.calculateMilitaryPower(player)

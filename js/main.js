@@ -1184,7 +1184,7 @@ class GameCore {
         const list = document.getElementById('recruit-list');
         const amounts = this.ui.readSteppers(list);
         const capacity = d.recruitCapacityLeft(this.panelRegion);
-        const money = d.countries[d.playerCountry].money;
+        const money = d.cheatMode ? RULES.CHEAT_MONEY : d.countries[d.playerCountry].money;
 
         let usedCap = 0, cost = 0, upkeep = 0;
         for (const unitId of Object.keys(amounts)) {
@@ -1202,8 +1202,9 @@ class GameCore {
             if (own > max) this.ui.setStepper(row, max);
             row.classList.toggle('unavailable', max === 0 && own === 0);
         }
-        document.getElementById('recruit-capacity').textContent =
-            `Мощность индустрии: ${capacity - usedCap} из ${d.recruitCapacity(this.panelRegion)} · казна ${this.ui.money(money - cost)}`;
+        document.getElementById('recruit-capacity').textContent = d.cheatMode
+            ? `Мощность индустрии: ${capacity - usedCap} из ${d.recruitCapacity(this.panelRegion)} · казна $∞`
+            : `Мощность индустрии: ${capacity - usedCap} из ${d.recruitCapacity(this.panelRegion)} · казна ${this.ui.money(money - cost)}`;
         document.getElementById('recruit-total').innerHTML = cost
             ? `Итого: <b>${this.ui.money(cost)}</b> · содержание <span class="neg">−${this.ui.money(upkeep)}</span> за ход`
             : '';
