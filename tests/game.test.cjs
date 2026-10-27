@@ -1740,7 +1740,7 @@ test('navy AI: a coastal country at war builds ships at its port and sails to th
     assert.ok(Navy.fleets(d, 'TR').some(f => greek.has(f.zone)), 'флот у греческих берегов');
 });
 
-test('god mode provides unlimited funds, realistic combat casualties and blocks attacks on player territory', () => {
+test('god mode provides unlimited funds, blocks attacks on player territory, and guarantees 100% capture with 0 player losses and wipes enemy forces', () => {
     const { GameData, AI, RULES } = engine();
     const d = new GameData('UA', { cheat: true, scenario: 'war2024' });
     assert.equal(d.countries.UA.money, RULES.CHEAT_MONEY);
@@ -1754,15 +1754,20 @@ test('god mode provides unlimited funds, realistic combat casualties and blocks 
     ai.attack(d.countries.RU, ruFront, new Set(['UA']));
     assert.equal(d.orders.attacks.some(o => d.regions[o.to]?.owner === 'UA'), false);
 
-    // 3. realistic combat: insufficient player attack does not automatically succeed
+    // 3. player attack guarantees 100% capture, 0 player casualties, all enemy troops destroyed
     d.regions['UA-2'].army = d.emptyArmy();
     d.regions['UA-2'].army.infantry = 1;
     d.regions['RU-62'].army = d.emptyArmy();
-    d.regions['RU-62'].army.infantry = 100;
+    d.regions['RU-62'].army.infantry = 1000;
+    d.regions['RU-62'].army.tanks = 500;
     assert.equal(d.queueAttack('UA-2', 'RU-62', { infantry: 1 }, 'UA').ok, true);
     const result = d.processOrders();
     const battle = result.logs.find(l => l.losses);
     assert.ok(battle, 'battle occurred');
-    assert.equal(battle.success, false, 'insufficient attack fails');
-    assert.ok(battle.losses.attacker.infantry > 0, 'player incurs casualties');
+    assert.equal(battle.won, true, 'attack is 100% victorious');
+    assert.equal(battle.losses.attacker.infantry, 0, 'player suffers 0 losses');
+    assert.equal(battle.losses.defender.infantry, 1000, 'all enemy infantry destroyed');
+    assert.equal(battle.losses.defender.tanks, 500, 'all enemy tanks destroyed');
+    assert.equal(d.regions['RU-62'].owner, 'UA', 'region captured by player');
+    assert.equal(d.regions['RU-62'].army.infantry, 1, 'surviving player troops entered region');
 });

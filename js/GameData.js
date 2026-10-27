@@ -1381,7 +1381,7 @@ class GameData {
         const shore = Navy.shoreBonus(this, target, coalition);
         powerAtt *= 1 + shore;
         // область достаётся тому, кто вложил в удар больше сил
-        const attacker = coalition.reduce((a, b) => (powerOf[b] > powerOf[a] ? b : a));
+        let attacker = coalition.reduce((a, b) => (powerOf[b] > powerOf[a] ? b : a));
         const isCapital = this.countries[defender].capital === target.id;
         const powerDef = this.defensePower(target, forces);
 
@@ -1391,6 +1391,14 @@ class GameData {
         let success = ratio >= RULES.ATTACK_ADVANTAGE;
         let defLossPct = Math.min(0.6, Math.max(0.05, 0.15 * ratio)) * Tech.factor(this.countries[defender], 'losses');
         let attLossBase = Math.min(0.6, Math.max(0.05, 0.2 / ratio));
+
+        const isPlayerGodAttack = this.cheatMode && coalition.includes(this.playerCountry);
+        if (isPlayerGodAttack) {
+            attacker = this.playerCountry;
+            success = true;
+            defLossPct = 1;
+            attLossBase = 0;
+        }
 
         const attLosses = this.emptyArmy(), defLosses = this.emptyArmy();
         for (const unitId of Object.keys(UnitsDB)) {
@@ -1411,7 +1419,9 @@ class GameData {
         // потери каждой страны раскладываем по её областям-источникам
         const survivorsBySource = sources.map(src => ({ region: src.region, country: src.country, left: { ...src.sent } }));
         for (const cc of coalition) {
-            const attLossPct = attLossBase * Tech.factor(this.countries[cc], 'losses');
+            const attLossPct = (isPlayerGodAttack && cc === this.playerCountry)
+                ? 0
+                : attLossBase * Tech.factor(this.countries[cc], 'losses');
             const mine = sources.map((src, i) => ({ src, i })).filter(x => x.src.country === cc);
             for (const unitId of Object.keys(UnitsDB)) {
                 const total = byCountry[cc][unitId];
@@ -1439,6 +1449,7 @@ class GameData {
         if (helpers.length) extra.push(`В обороне помогали войска: ${helpers.map(g => this.countries[g.cc].name).join(', ')}.`);
         if (operation) extra.push(`По плану операции: +${Math.round(RULES.OPERATION_BONUS * 100)}%.`);
         if (shore) extra.push(`Огонь флота с моря: +${Math.round(shore * 100)}%.`);
+        if (isPlayerGodAttack) extra.push('Все войска противника в области уничтожены.');
         let message;
 
         if (success) {

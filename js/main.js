@@ -1300,6 +1300,9 @@ class GameCore {
     // Вместе с уже назначенными ударами по этой цели из других областей.
     attackOdds(targetId, forces, fromId = this.armyAction && this.armyAction.fromId) {
         const est = this.data.strikeEstimate(targetId, forces, fromId);
+        if (this.data.cheatMode) {
+            return { ratio: Infinity, label: '100% победа', attack: Math.round(est.attack), needed: Math.round(est.needed), directions: est.directions, flank: est.flank };
+        }
         const ratio = est.ratio;
         const label = ratio >= 1.5 ? 'высокие' : ratio >= 1 ? 'хорошие' : ratio >= 0.9 ? 'равные' : 'низкие';
         return { ratio, label, attack: Math.round(est.attack), needed: Math.round(est.needed), directions: est.directions, flank: est.flank };
